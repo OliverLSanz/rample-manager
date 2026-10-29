@@ -1392,3 +1392,13 @@ footer > span {
   font-size: 11px;
   padding: 8px 0;
 }
+.sample-editor .modal-buttons {
+  position: sticky;
+  bottom: -25px;
+  z-index: 2;
+  margin: 12px -25px -25px;
+  padding: 14px 25px;
+  background: #1b1f25;
+  border-top: 1px solid #293035;
+  box-shadow: 0 -10px 20px #1b1f25;
+}

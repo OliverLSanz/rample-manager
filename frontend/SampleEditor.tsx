@@ -119,11 +119,10 @@ export function SampleEditor({
     if (!Number.isFinite(value)) return;
     const next = { ...current.current.settings, [key]: value };
     const minimum = Math.min(0.001, info.duration);
-    next.start = Math.max(0, Math.min(next.start, next.end - minimum));
-    next.end = Math.min(
-      info.duration,
-      Math.max(next.end, next.start + minimum),
-    );
+    if (key === "start")
+      next.start = Math.max(0, Math.min(value, next.end - minimum));
+    if (key === "end")
+      next.end = Math.min(info.duration, Math.max(value, next.start + minimum));
     current.current.settings = next;
     setSettings(next);
     setSaved(null);
@@ -262,26 +261,24 @@ export function SampleEditor({
         <fieldset disabled={busy || invalidated} className="editor-trim-values">
           <label>
             Start (s)
-            <input
-              aria-label="Start time"
-              type="number"
+            <NumberInput
+              label="Start time"
               min={0}
               max={settings.end - 0.001}
               step="0.001"
-              value={Number(settings.start.toFixed(6))}
-              onChange={(e) => change("start", e.target.valueAsNumber)}
+              value={settings.start}
+              onChange={(value) => change("start", value)}
             />
           </label>
           <label>
             End (s)
-            <input
-              aria-label="End time"
-              type="number"
+            <NumberInput
+              label="End time"
               min={settings.start + 0.001}
               max={info.duration}
               step="0.001"
-              value={Number(settings.end.toFixed(6))}
-              onChange={(e) => change("end", e.target.valueAsNumber)}
+              value={settings.end}
+              onChange={(value) => change("end", value)}
             />
           </label>
           <span>
@@ -487,17 +484,13 @@ function Slider({
       <span>
         {label}
         <span>
-          <input
-            type="number"
-            aria-label={`${label} value`}
+          <NumberInput
+            label={`${label} value`}
             min={min}
             max={max}
             step={step}
-            value={Number(value.toFixed(2))}
-            onChange={(e) => {
-              const v = e.target.valueAsNumber;
-              if (Number.isFinite(v)) onChange(Math.max(min, Math.min(max, v)));
-            }}
+            value={value}
+            onChange={onChange}
           />
           {unit}
         </span>
@@ -512,6 +505,53 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>
+  );
+}
+function NumberInput({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number | string;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+  return (
+    <input
+      type="number"
+      aria-label={label}
+      min={min}
+      max={max}
+      step={step}
+      value={focused ? draft : Number(value.toFixed(6))}
+      onFocus={() => {
+        setDraft(String(value));
+        setFocused(true);
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        setFocused(false);
+        const parsed = draft.trim() === "" ? NaN : Number(draft);
+        if (Number.isFinite(parsed)) {
+          const next = Math.max(min, Math.min(max, parsed));
+          if (next !== value) onChange(next);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+    />
   );
 }
 function TrimWaveform({

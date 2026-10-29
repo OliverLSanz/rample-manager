@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SampleEditor } from "./SampleEditor";
 import * as native from "./native";
 import { idleTransport, type EditorInfo, type Snapshot } from "./types";
@@ -172,5 +173,33 @@ describe("sample editor", () => {
       (screen.getByRole("slider", { name: "Gain" }) as HTMLInputElement).value,
     ).toBe("-3");
     expect(onClose).not.toHaveBeenCalled();
+  });
+  it("accepts negative gain and decimal trim times without committing partial keystrokes", async () => {
+    const user = userEvent.setup();
+    boot();
+    const start = screen.getByRole("spinbutton", { name: "Start time" });
+    await user.clear(start);
+    await user.type(start, "0.05");
+    expect(native.previewEditor).not.toHaveBeenCalled();
+    await user.tab();
+    const end = screen.getByRole("spinbutton", { name: "End time" });
+    await user.clear(end);
+    await user.type(end, "0.3");
+    await user.tab();
+    const gain = screen.getByRole("spinbutton", { name: "Gain value" });
+    await user.clear(gain);
+    await user.type(gain, "-6");
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(native.previewEditor).toHaveBeenLastCalledWith(
+        "edit-1",
+        expect.any(Number),
+        expect.objectContaining({ start: 0.05, end: 0.3, gainDb: -6 }),
+        true,
+      ),
+    );
+    expect((start as HTMLInputElement).value).toBe("0.05");
+    expect((end as HTMLInputElement).value).toBe("0.3");
+    expect((gain as HTMLInputElement).value).toBe("-6");
   });
 });
