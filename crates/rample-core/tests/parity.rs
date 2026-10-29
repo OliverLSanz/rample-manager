@@ -365,3 +365,60 @@ fn resampling_preserves_dc_and_stays_finite() {
     assert!(out.iter().all(|v| v.is_finite()));
     assert!(out[128..].iter().all(|v| (*v - 0.08).abs() < 0.001));
 }
+
+#[test]
+fn decoded_original_audition_keeps_stereo_channels_and_source_rate() {
+    let temp = TempDir::new().unwrap();
+    let mut bytes = b"FORM".to_vec();
+    bytes.extend((46 + 192000u32 * 4).to_be_bytes());
+    bytes.extend(b"AIFFCOMM");
+    bytes.extend(18u32.to_be_bytes());
+    bytes.extend(2u16.to_be_bytes());
+    bytes.extend(192000u32.to_be_bytes());
+    bytes.extend(16u16.to_be_bytes());
+    bytes.extend([0x40, 0x0e, 0xbb, 0x80, 0, 0, 0, 0, 0, 0]);
+    bytes.extend(b"SSND");
+    bytes.extend((192000u32 * 4 + 8).to_be_bytes());
+    bytes.extend([0; 8]);
+    for _ in 0..192000 {
+        bytes.extend(16384i16.to_be_bytes());
+        bytes.extend((-8192i16).to_be_bytes());
+    }
+    let source = temp.path().join("Original.aiff");
+    fs::write(&source, &bytes).unwrap();
+    let playback = temp.path().join("Playback.wav");
+    let info = rample_core::conversion::decode_original(
+        &source,
+        &mut fs::File::create(&playback).unwrap(),
+    )
+    .unwrap();
+    assert_eq!((info.rate, info.channels, info.bits), (48000, 2, 16));
+    let sample = PreparedSample::load(&playback, "original").unwrap();
+    assert_eq!(
+        (
+            sample.spec.rate,
+            sample.spec.channels,
+            sample.spec.bits,
+            sample.spec.frames
+        ),
+        (48000, 2, 64, 192000)
+    );
+    assert_eq!(sample.head.len(), 96000);
+    let (mut renderer, control) = Renderer::new(48000, Meters::new());
+    control
+        .send(Command::OriginalAudition(Some(sample)))
+        .unwrap();
+    let mut out = vec![0.; 1000];
+    renderer.render(&mut out, 2);
+    assert!(out
+        .chunks_exact(2)
+        .all(|f| (f[0] - 0.2).abs() < 1e-6 && (f[1] + 0.1).abs() < 1e-6));
+    for _ in 0..240 {
+        renderer.render(&mut out, 2);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(out
+        .chunks_exact(2)
+        .all(|f| (f[0] - 0.2).abs() < 1e-6 && (f[1] + 0.1).abs() < 1e-6));
+    assert_eq!(fs::read(source).unwrap(), bytes);
+}

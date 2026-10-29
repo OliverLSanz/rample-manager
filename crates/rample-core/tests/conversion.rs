@@ -444,3 +444,36 @@ fn export_can_resolve_source_kit_structure_without_converting_valid_audio() {
     assert!(exported.kits[0].warnings.is_empty());
     assert_eq!(exported.kits[0].samples.len(), 1);
 }
+
+#[test]
+fn preparing_rample_audio_preserves_the_original_and_averages_channels() {
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("Stereo.aiff");
+    let mut bytes = Vec::from(&b"FORM"[..]);
+    bytes.extend(58u32.to_be_bytes());
+    bytes.extend(b"AIFFCOMM");
+    bytes.extend(18u32.to_be_bytes());
+    bytes.extend(2u16.to_be_bytes());
+    bytes.extend(2u32.to_be_bytes());
+    bytes.extend(16u16.to_be_bytes());
+    bytes.extend([0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]);
+    bytes.extend(b"SSND");
+    bytes.extend(16u32.to_be_bytes());
+    bytes.extend([0; 8]);
+    for sample in [16384i16, 0, -16384, 0] {
+        bytes.extend(sample.to_be_bytes());
+    }
+    fs::write(&source, &bytes).unwrap();
+    let target = temp.path().join("prepared.wav");
+    conversion::prepare_rample(&source, &mut fs::File::create(&target).unwrap()).unwrap();
+    let spec = wav::inspect(&target).unwrap();
+    assert_eq!(
+        (spec.rate, spec.channels, spec.bits, spec.frames),
+        (44100, 1, 16, 2205)
+    );
+    let audio = wav::read_frames(&mut fs::File::open(target).unwrap(), &spec, 0, 2205).unwrap();
+    assert!((audio[0][0] - 0.25).abs() < 0.0001);
+    assert!((audio[1][0] + 0.25).abs() < 0.0001);
+    assert!(audio[2..].iter().all(|f| f[0] == 0.));
+    assert_eq!(fs::read(source).unwrap(), bytes);
+}

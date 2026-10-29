@@ -24,6 +24,7 @@ export function LibrarySamples({
   const [auditioning, setAuditioning] = useState<string | null>(null);
   const mounted = useRef(true);
   const auditionQueue = useRef(Promise.resolve());
+  const auditionRequest = useRef(0);
   const owner = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -116,20 +117,34 @@ export function LibrarySamples({
       if (mounted.current) setBusy(false);
     }
   }
-  async function audition(id: string | null) {
-    const task = auditionQueue.current
-      .catch(() => {})
-      .then(async () => {
-        if (!mounted.current || !owner.current) return;
-        if (id) await native.auditionSample(id, owner.current);
-        else await native.stopSampleAudition(owner.current);
-      });
-    auditionQueue.current = task;
+  async function audition(id: string | null, rample = false) {
+    const request = ++auditionRequest.current;
+    setAuditioning(id);
+    setError(null);
+    const task = id
+      ? auditionQueue.current
+          .catch(() => {})
+          .then(async () => {
+            if (
+              !mounted.current ||
+              !owner.current ||
+              request !== auditionRequest.current
+            )
+              return;
+            if (rample) await native.auditionSample(id, owner.current, true);
+            else await native.auditionSample(id, owner.current);
+          })
+      : owner.current
+        ? native.stopSampleAudition(owner.current).then(() => {})
+        : Promise.resolve();
+    if (id) auditionQueue.current = task;
     try {
       await task;
-      if (mounted.current) setAuditioning(id);
     } catch (e) {
-      if (mounted.current) setError(String(e));
+      if (mounted.current && request === auditionRequest.current) {
+        setAuditioning(null);
+        setError(String(e));
+      }
     }
   }
   return (
@@ -141,12 +156,15 @@ export function LibrarySamples({
     >
       <h2>Library samples</h2>
       <p>
-        Import mono PCM WAV files into your private Library. Originals are
-        preserved exactly; completed imports no longer need the source folder.
+        Import WAV, AIFF, FLAC or MP3 audio into your private Library. Originals
+        are preserved exactly; completed imports no longer need the source
+        folder. Rample audio averages channels to mono and prepares 16-bit WAV
+        at 44.1 kHz, padding only samples shorter than 50 ms. Original audition
+        keeps stereo.
       </p>
       <div className="modal-buttons">
         <button disabled={busy} onClick={() => void importSources(false)}>
-          Import WAV files…
+          Import audio files…
         </button>
         <button disabled={busy} onClick={() => void importSources(true)}>
           Import folder…
@@ -207,17 +225,26 @@ export function LibrarySamples({
                   <small>{sample.tags.join(" · ")}</small>
                 )}
                 <small>
-                  {sample.duration.toFixed(2)} s · {sample.rate} Hz ·{" "}
-                  {sample.bits}-bit mono
+                  {sample.format} · {sample.duration.toFixed(2)} s ·{" "}
+                  {sample.rate} Hz ·{" "}
+                  {sample.bits > 0 ? `${sample.bits}-bit · ` : ""}
+                  {sample.channels === 2 ? "stereo" : "mono"}
                 </small>
                 {sample.error && <span role="alert">{sample.error}</span>}
               </div>
               <button
                 disabled={busy || !sample.readable}
-                aria-label={`Audition ${sample.name}`}
+                aria-label={`Audition Original ${sample.name}`}
                 onClick={() => void audition(sample.id)}
               >
-                Audition
+                Original
+              </button>
+              <button
+                disabled={busy || !sample.readable}
+                aria-label={`Audition Rample ${sample.name}`}
+                onClick={() => void audition(sample.id, true)}
+              >
+                Rample mono
               </button>
             </li>
           ))}

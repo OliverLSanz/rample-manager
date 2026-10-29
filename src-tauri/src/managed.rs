@@ -20,6 +20,7 @@ pub struct LibrarySample {
     pub rate: u32,
     pub channels: u16,
     pub bits: u16,
+    pub format: String,
     pub readable: bool,
     pub error: Option<String>,
 }
@@ -61,7 +62,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 2 {
+        if version > 3 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -83,14 +84,14 @@ impl ManagedLibrary {
             .map_err(|e| e.to_string())?;
         }
         if version < 2 {
-            db.execute_batch(
-                "BEGIN IMMEDIATE;
-                 ALTER TABLE samples ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
-                 PRAGMA user_version=2;
-                 COMMIT;",
-            )
-            .map_err(|e| e.to_string())?;
+            db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE samples ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'; PRAGMA user_version=2; COMMIT;")
+                .map_err(|e| e.to_string())?;
         }
+        if version < 3 {
+            db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE originals ADD COLUMN format TEXT NOT NULL DEFAULT 'WAV'; PRAGMA user_version=3; COMMIT;")
+                .map_err(|e| e.to_string())?;
+        }
+        fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
         for entry in fs::read_dir(root.join("Incoming")).map_err(|e| e.to_string())? {
@@ -111,7 +112,7 @@ impl ManagedLibrary {
             .db
             .prepare(
                 "SELECT s.id, s.original_id, s.name, o.sha256,
-            o.rate, o.channels, o.bits, o.frames, s.tags FROM samples s JOIN originals o
+            o.rate, o.channels, o.bits, o.frames, s.tags, o.format FROM samples s JOIN originals o
             ON s.original_id=o.id ORDER BY s.rowid",
             )
             .map_err(|e| e.to_string())?;
@@ -119,7 +120,7 @@ impl ManagedLibrary {
         let mut samples = vec![];
         for row in rows {
             let mut sample = row.map_err(|e| e.to_string())?;
-            if let Err(error) = wav::inspect(&self.original_path(&sample.original_id)) {
+            if let Err(error) = conversion::inspect(&self.original_path(&sample.original_id)) {
                 sample.readable = false;
                 sample.error = Some(format!("Original is unavailable: {error}"));
             }
@@ -149,7 +150,7 @@ impl ManagedLibrary {
             .query_row(
                 &format!(
                     "SELECT s.id, s.original_id, s.name, o.sha256,
-            o.rate, o.channels, o.bits, o.frames, s.tags FROM originals o JOIN samples s
+            o.rate, o.channels, o.bits, o.frames, s.tags, o.format FROM originals o JOIN samples s
             ON s.original_id=o.id WHERE {predicate} ORDER BY s.rowid LIMIT 1"
                 ),
                 [value],
@@ -185,24 +186,61 @@ impl ManagedLibrary {
             .ok_or_else(|| "Sample no longer exists".into())
     }
     pub fn prepare(&self, id: &str) -> Result<Arc<PreparedSample>, String> {
+        self.prepare_target(id, false)
+    }
+    pub fn prepare_rample(&self, id: &str) -> Result<Arc<PreparedSample>, String> {
+        self.prepare_target(id, true)
+    }
+    fn prepare_target(&self, id: &str, rample: bool) -> Result<Arc<PreparedSample>, String> {
         let sample = self
             .find_sample("s.id=?1", id)?
             .ok_or("Sample no longer exists")?;
-        let path = self.original_path(&sample.original_id);
-        if fingerprint(&path)? != sample.sha256 {
+        let original = self.original_path(&sample.original_id);
+        if fingerprint(&original)? != sample.sha256 {
             return Err(
                 "Original changed in managed storage. Restore the Library from a backup.".into(),
             );
         }
-        PreparedSample::load(&path, &sample.sha256)
+        if !rample && sample.format == "WAV" {
+            validate_wav(&original)?;
+            return PreparedSample::load(&original, &sample.sha256);
+        }
+        // Derivatives never participate in identity/recognition. Rebuild missing or
+        // incomplete files from the immutable Original, with publication off callback.
+        let kind = if rample {
+            "rample-v1"
+        } else {
+            "original-playback-v1"
+        };
+        let path = self
+            .root
+            .join("Derived")
+            .join(format!("{}-{kind}.wav", sample.sha256));
+        if validate_wav(&path).is_err() {
+            let mut staged = tempfile::NamedTempFile::new_in(self.root.join("Incoming"))
+                .map_err(|e| e.to_string())?;
+            if rample {
+                conversion::prepare_rample(&original, staged.as_file_mut())?;
+            } else {
+                conversion::decode_original(&original, staged.as_file_mut())?;
+            }
+            validate_wav(staged.path())?;
+            staged.as_file().sync_all().map_err(|e| e.to_string())?;
+            if fingerprint(&original)? != sample.sha256 {
+                return Err("Original changed during preparation.".into());
+            }
+            // Only this disposable, application-owned cache entry may be replaced.
+            staged.persist(&path).map_err(|e| e.to_string())?;
+        }
+        PreparedSample::load(&path, &format!("{}-{kind}", sample.sha256))
     }
     fn import_file(&mut self, source: &Path) -> Result<(LibrarySample, bool), String> {
         if !fs::metadata(source).map_err(|e| e.to_string())?.is_file() {
-            return Err("Choose a regular mono PCM WAV file".into());
+            return Err("Choose a regular supported audio file".into());
         }
         let mut input = File::open(source).map_err(|e| e.to_string())?;
         if !input.metadata().map_err(|e| e.to_string())?.is_file() {
-            return Err("Choose a regular mono PCM WAV file".into());
+            return Err("Choose a regular supported audio file".into());
         }
         // Stage and hash in bounded chunks. Never decode a whole file or publish a partial copy.
         let mut staged = tempfile::NamedTempFile::new_in(self.root.join("Incoming"))
@@ -221,9 +259,22 @@ impl ManagedLibrary {
         }
         staged.as_file().sync_all().map_err(|e| e.to_string())?;
         let sha256 = format!("{:x}", hash.finalize());
-        let spec = validate_wav(staged.path())?;
-        if spec.channels != 1 || spec.code != 1 || spec.frames == 0 {
-            return Err("Import samples currently supports nonempty mono PCM WAV files.".into());
+        let mut info = conversion::inspect(staged.path())?;
+        if info.format == "WAVE" {
+            let spec = validate_wav(staged.path())?;
+            if spec.frames == 0 {
+                return Err("The sample contains no audio.".into());
+            }
+            info.format = "WAV".into();
+            info.frames = spec.frames;
+            info.rate = spec.rate;
+            info.channels = spec.channels;
+            info.bits = spec.bits;
+        } else {
+            let mut decoded = tempfile::NamedTempFile::new_in(self.root.join("Incoming"))
+                .map_err(|e| e.to_string())?;
+            info = conversion::decode_original(staged.path(), decoded.as_file_mut())?;
+            validate_wav(decoded.path())?;
         }
         if fingerprint(staged.path())? != sha256 {
             return Err("Could not verify the copied Original".into());
@@ -262,14 +313,15 @@ impl ManagedLibrary {
         let transaction = self.db.transaction().map_err(|e| e.to_string())?;
         transaction
             .execute(
-                "INSERT INTO originals VALUES (?1,?2,?3,?4,?5,?6)",
+                "INSERT INTO originals (id,sha256,rate,channels,bits,frames,format) VALUES (?1,?2,?3,?4,?5,?6,?7)",
                 params![
                     original_id,
                     sha256,
-                    spec.rate,
-                    spec.channels,
-                    spec.bits,
-                    i64::try_from(spec.frames).map_err(|e| e.to_string())?
+                    info.rate,
+                    info.channels,
+                    info.bits,
+                    i64::try_from(info.frames).map_err(|e| e.to_string())?,
+                    info.format
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -287,10 +339,11 @@ impl ManagedLibrary {
                 name,
                 tags: vec![],
                 sha256,
-                duration: spec.frames as f64 / f64::from(spec.rate),
-                rate: spec.rate,
-                channels: spec.channels,
-                bits: spec.bits,
+                duration: info.frames as f64 / f64::from(info.rate),
+                rate: info.rate,
+                channels: info.channels,
+                bits: info.bits,
+                format: info.format,
                 readable: true,
                 error: None,
             },
@@ -308,11 +361,7 @@ impl ManagedLibrary {
             for entry in walkdir::WalkDir::new(&path).sort_by_file_name() {
                 match entry {
                     Ok(entry)
-                        if entry
-                            .path()
-                            .extension()
-                            .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-                            && !entry.file_type().is_dir() =>
+                        if conversion::is_audio(entry.path()) && !entry.file_type().is_dir() =>
                     {
                         inputs.push((entry.into_path(), None))
                     }
@@ -324,7 +373,10 @@ impl ManagedLibrary {
                 }
             }
             if inputs.len() == before {
-                inputs.push((path, Some("No WAV files found in this folder.".into())));
+                inputs.push((
+                    path,
+                    Some("No supported audio files found in this folder.".into()),
+                ));
             }
         }
         let mut results = vec![];
@@ -406,6 +458,7 @@ fn sample_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibrarySample> {
         rate,
         channels: row.get(5)?,
         bits: row.get(6)?,
+        format: row.get(9)?,
         duration: row.get::<_, i64>(7)? as f64 / f64::from(rate),
         readable: true,
         error: None,
@@ -437,6 +490,18 @@ pub(super) fn guard_legacy_path(support: &Path, path: &Path, folder: bool) -> Re
     Ok(())
 }
 impl AppState {
+    pub fn prepare_library_sample(
+        &self,
+        id: &str,
+        rample: bool,
+    ) -> Result<Arc<PreparedSample>, String> {
+        let library = self.managed.lock().map_err(|_| "Library is unavailable")?;
+        if rample {
+            library.prepare_rample(id)
+        } else {
+            library.prepare(id)
+        }
+    }
     pub fn list_samples(&self) -> Result<Vec<LibrarySample>, String> {
         self.managed
             .lock()
@@ -492,6 +557,14 @@ impl AppState {
         Ok(true)
     }
     pub fn audition_sample(&self, owner: String, id: String) -> Result<(), String> {
+        self.audition_sample_target(owner, id, false)
+    }
+    pub fn audition_sample_target(
+        &self,
+        owner: String,
+        id: String,
+        rample: bool,
+    ) -> Result<(), String> {
         let generation = {
             let mut current = self
                 .original_audition
@@ -503,11 +576,7 @@ impl AppState {
             current.generation += 1;
             current.generation
         };
-        let prepared = self
-            .managed
-            .lock()
-            .map_err(|_| "Library is unavailable")?
-            .prepare(&id)?;
+        let prepared = self.prepare_library_sample(&id, rample)?;
         let current = self
             .original_audition
             .lock()
@@ -564,12 +633,19 @@ pub(super) async fn update_sample_metadata(
 pub(super) async fn audition_sample(
     id: String,
     session: String,
+    rample: bool,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.audition_sample(session, id))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        if rample {
+            state.audition_sample_target(session, id, true)
+        } else {
+            state.audition_sample(session, id)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub(super) fn stop_sample_audition(
@@ -593,50 +669,214 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn opening_a_v1_library_preserves_samples_and_adds_editable_metadata() {
-        let temp = tempfile::tempdir().unwrap();
+    fn stereo_original_and_rample_preparation_remain_independent_after_restart() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Stereo.wav");
+        let pcm: Vec<i16> = (0..4800).flat_map(|_| [16384, -8192]).collect();
+        wav::write_pcm16(&source, &pcm, 48000).unwrap();
+        let mut bytes = std::fs::read(&source).unwrap();
+        bytes[22..24].copy_from_slice(&2u16.to_le_bytes());
+        bytes[28..32].copy_from_slice(&192000u32.to_le_bytes());
+        bytes[32..34].copy_from_slice(&4u16.to_le_bytes());
+        std::fs::write(&source, &bytes).unwrap();
+        let reply = state.import_samples(vec![source.clone()]).unwrap();
+        assert_eq!((reply.imported, reply.failed), (1, 0));
+        let sample = reply.samples[0].clone();
+        assert_eq!(
+            (
+                sample.channels,
+                sample.rate,
+                sample.bits,
+                sample.format.as_str()
+            ),
+            (2, 48000, 16, "WAV")
+        );
+        let original = state.prepare_library_sample(&sample.id, false).unwrap();
+        assert_eq!(std::fs::read(&original.path).unwrap(), bytes);
+        assert_eq!(original.head[100], [0.5, -0.25]);
+        let rample = state.prepare_library_sample(&sample.id, true).unwrap();
+        assert_eq!(
+            (
+                rample.spec.rate,
+                rample.spec.channels,
+                rample.spec.bits,
+                rample.spec.frames
+            ),
+            (44100, 1, 16, 4410)
+        );
+        assert!((rample.head[100][0] - 0.125).abs() < 0.0001);
+        assert_ne!(original.path, rample.path);
+        std::fs::remove_file(&rample.path).unwrap();
+        std::fs::remove_file(source).unwrap();
         let support = temp.path().join("support");
-        let root = support.join("Library");
-        std::fs::create_dir_all(root.join("Originals")).unwrap();
-        let original = root.join("Originals/existing-original.wav");
-        wav::write_pcm16(&original, &[8192; 4410], 44100).unwrap();
-        let bytes = std::fs::read(&original).unwrap();
-        // A pre-feature store is an input fixture, never the behavioral oracle.
-        let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
-        db.execute_batch("CREATE TABLE originals (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE,
+        drop(state);
+        let restarted = super::ManagedLibrary::open(&support).unwrap();
+        assert_eq!(restarted.list().unwrap()[0].id, sample.id);
+        let rebuilt = restarted.prepare_rample(&sample.id).unwrap();
+        assert!((rebuilt.head[100][0] - 0.125).abs() < 0.0001);
+        assert_eq!(
+            std::fs::read(restarted.prepare(&sample.id).unwrap().path.clone()).unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn supported_compressed_originals_survive_source_removal_and_incomplete_imports() {
+        let (temp, state, _) = fixture();
+        let mut originals = vec![];
+        let mut paths = vec![];
+        for (name, hex) in [
+            (
+                "Stereo.flac",
+                include_str!("../../crates/rample-core/tests/fixtures/stereo-flac.hex"),
+            ),
+            (
+                "Mono.mp3",
+                include_str!("../../crates/rample-core/tests/fixtures/mono-mp3.hex"),
+            ),
+        ] {
+            let hex: String = hex.split_whitespace().collect();
+            let bytes: Vec<_> = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect();
+            let path = temp.path().join(name);
+            std::fs::write(&path, &bytes).unwrap();
+            paths.push(path);
+            originals.push(bytes);
+        }
+        let mut damaged_mp3 = originals[1].clone();
+        damaged_mp3.pop();
+        let broken_mp3 = temp.path().join("Truncated.mp3");
+        std::fs::write(&broken_mp3, &damaged_mp3).unwrap();
+        // Valid stereo AIFF with trailing metadata; its truncated sibling must fail.
+        let mut aiff = b"FORM".to_vec();
+        aiff.extend(66u32.to_be_bytes());
+        aiff.extend(b"AIFFCOMM");
+        aiff.extend(18u32.to_be_bytes());
+        aiff.extend(2u16.to_be_bytes());
+        aiff.extend(2u32.to_be_bytes());
+        aiff.extend(16u16.to_be_bytes());
+        aiff.extend([0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]);
+        aiff.extend(b"SSND");
+        aiff.extend(16u32.to_be_bytes());
+        aiff.extend([0; 8]);
+        for value in [16384i16, -8192, 16384, -8192] {
+            aiff.extend(value.to_be_bytes());
+        }
+        aiff.extend(b"NAME");
+        aiff.extend(0u32.to_be_bytes());
+        let source = temp.path().join("Stereo.aiff");
+        std::fs::write(&source, &aiff).unwrap();
+        paths.push(source);
+        originals.push(aiff.clone());
+        let broken = temp.path().join("Truncated.aiff");
+        aiff.pop();
+        std::fs::write(&broken, &aiff).unwrap();
+        paths.push(broken);
+        paths.push(broken_mp3);
+        let reply = state.import_samples(paths.clone()).unwrap();
+        assert_eq!((reply.imported, reply.failed), (3, 2));
+        assert!(reply.results[3].error.is_some());
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
+        }
+        let support = temp.path().join("support");
+        drop(state);
+        let library = super::ManagedLibrary::open(&support).unwrap();
+        let samples = library.list().unwrap();
+        assert_eq!(
+            samples
+                .iter()
+                .map(|s| (s.format.as_str(), s.channels, s.rate))
+                .collect::<Vec<_>>(),
+            [("FLAC", 2, 48000), ("MP3", 1, 44100), ("AIFF", 2, 44100)]
+        );
+        for (sample, bytes) in samples.iter().zip(originals) {
+            assert_eq!(
+                std::fs::read(
+                    support
+                        .join("Library/Originals")
+                        .join(format!("{}.wav", sample.original_id))
+                )
+                .unwrap(),
+                bytes
+            );
+            let playback = library.prepare(&sample.id).unwrap();
+            assert_eq!(playback.spec.channels, sample.channels);
+            assert_eq!(playback.spec.rate, sample.rate);
+            assert!(playback.head.len() <= 262144);
+            let prepared = library.prepare_rample(&sample.id).unwrap();
+            assert_eq!(
+                (
+                    prepared.spec.rate,
+                    prepared.spec.channels,
+                    prepared.spec.bits
+                ),
+                (44100, 1, 16)
+            );
+        }
+    }
+
+    #[test]
+    fn opening_v1_and_v2_libraries_preserves_metadata_and_adds_source_format() {
+        for version in [1, 2] {
+            let temp = tempfile::tempdir().unwrap();
+            let support = temp.path().join("support");
+            let root = support.join("Library");
+            std::fs::create_dir_all(root.join("Originals")).unwrap();
+            let original = root.join("Originals/existing-original.wav");
+            wav::write_pcm16(&original, &[8192; 4410], 44100).unwrap();
+            let bytes = std::fs::read(&original).unwrap();
+            // A pre-feature store is an input fixture, never the behavioral oracle.
+            let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+            db.execute_batch("CREATE TABLE originals (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE,
             rate INTEGER NOT NULL, channels INTEGER NOT NULL, bits INTEGER NOT NULL, frames INTEGER NOT NULL);
             CREATE TABLE samples (id TEXT PRIMARY KEY, original_id TEXT NOT NULL REFERENCES originals(id), name TEXT NOT NULL);
             CREATE INDEX samples_original ON samples(original_id);
             PRAGMA user_version=1;").unwrap();
-        use sha2::Digest;
-        db.execute(
-            "INSERT INTO originals VALUES ('existing-original',?1,44100,1,16,4410)",
-            [format!("{:x}", sha2::Sha256::digest(&bytes))],
-        )
-        .unwrap();
-        db.execute(
+            use sha2::Digest;
+            db.execute(
+                "INSERT INTO originals VALUES ('existing-original',?1,44100,1,16,4410)",
+                [format!("{:x}", sha2::Sha256::digest(&bytes))],
+            )
+            .unwrap();
+            db.execute(
             "INSERT INTO samples VALUES ('existing-sample','existing-original','Existing name')",
             [],
         )
         .unwrap();
-        drop(db);
-        let library = super::ManagedLibrary::open(&support).unwrap();
-        let sample = library.list().unwrap().remove(0);
-        assert_eq!(sample.id, "existing-sample");
-        assert_eq!(sample.original_id, "existing-original");
-        assert_eq!(sample.name, "Existing name");
-        assert!(sample.tags.is_empty());
-        library
-            .update_metadata(&sample.id, "Renamed".into(), vec!["warm".into()])
-            .unwrap();
-        drop(library);
-        let restarted = super::ManagedLibrary::open(&support).unwrap();
-        let sample = restarted.query("WARM").unwrap().remove(0);
-        assert_eq!(sample.id, "existing-sample");
-        assert_eq!(
-            std::fs::read(&restarted.prepare(&sample.id).unwrap().path).unwrap(),
-            bytes
-        );
+            if version == 2 {
+                db.execute_batch(
+                    "ALTER TABLE samples ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+                UPDATE samples SET tags='[\"library v2\",\"低音\"]'; PRAGMA user_version=2;",
+                )
+                .unwrap();
+            }
+            drop(db);
+            let library = super::ManagedLibrary::open(&support).unwrap();
+            let sample = library.list().unwrap().remove(0);
+            assert_eq!(sample.id, "existing-sample");
+            assert_eq!(sample.original_id, "existing-original");
+            assert_eq!(sample.name, "Existing name");
+            assert_eq!(sample.format, "WAV");
+            if version == 1 {
+                assert!(sample.tags.is_empty());
+            } else {
+                assert_eq!(sample.tags, ["library v2", "低音"]);
+            }
+            library
+                .update_metadata(&sample.id, "Renamed".into(), vec!["warm".into()])
+                .unwrap();
+            drop(library);
+            let restarted = super::ManagedLibrary::open(&support).unwrap();
+            let sample = restarted.query("WARM").unwrap().remove(0);
+            assert_eq!(sample.id, "existing-sample");
+            assert_eq!(
+                std::fs::read(&restarted.prepare(&sample.id).unwrap().path).unwrap(),
+                bytes
+            );
+        }
     }
 
     #[test]
