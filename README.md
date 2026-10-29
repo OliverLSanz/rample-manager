@@ -14,7 +14,7 @@ engine. Everything works locally and offline; no account or server is required.
   the installer can install WebView2 if needed. A publisher signing certificate
   is not configured, so Windows may display an unknown-publisher warning.
 
-Installers are attached to private GitHub releases. The **Desktop builds** workflow
+Installers are attached to [private GitHub releases](https://github.com/OliverLSanz/rample-preview/releases). The **Desktop builds** workflow
 also keeps macOS DMG and Windows EXE artifacts for each successful code build.
 Updates on Oliver's Mac remain fully automated through the local install script.
 Hosted automatic updates are not enabled; the installers can upgrade an existing
@@ -163,8 +163,9 @@ operating systems. Actual-device smoke testing is separate:
 cargo run -p rample-core --example audio_smoke --features native-audio
 ```
 
-A Windows CI build verifies compilation/tests/packaging; it cannot replace a
-listening test on physical Windows audio hardware. The original Swift sources
+The Windows CI build verifies compilation, tests, packaging, native app startup
+and a reinstall that preserves preferences (`scripts/smoke-windows.ps1`). This
+cannot replace a listening test on physical Windows audio hardware. The original Swift sources
 are archived under `legacy/swift` for reference and rollback.
 
 Keep UI text in English and commit/push each atomic functional change with its
