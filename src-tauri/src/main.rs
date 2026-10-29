@@ -672,7 +672,7 @@ mod tests {
         let support = temp.path().join("support");
         let mut library = Library::new(support).unwrap();
         library.scan(&HashSet::new(), false);
-        let audio = AudioHost::new();
+        let audio = AudioHost::headless();
         library.synchronize(&audio).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let state = Arc::new(AppState {

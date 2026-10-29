@@ -572,6 +572,15 @@ pub mod native {
     }
     impl AudioHost {
         pub fn new() -> Self {
+            Self::spawn(true)
+        }
+        /// Headless command integration tests must not enumerate or open OS
+        /// audio devices. Actual PCM and devices have separate test coverage.
+        #[cfg(feature = "test-support")]
+        pub fn headless() -> Self {
+            Self::spawn(false)
+        }
+        fn spawn(enable_device: bool) -> Self {
             let (sender, rx) = bounded::<Command>(128);
             let meters = Meters::new();
             let error = Arc::new(std::sync::Mutex::new(None));
@@ -587,7 +596,7 @@ pub mod native {
                     let mut connection: Option<(cpal::Stream, Control, String)> = None;
                     let mut checked = Instant::now() - Duration::from_secs(3);
                     loop {
-                        if checked.elapsed() > Duration::from_secs(2) {
+                        if enable_device && checked.elapsed() > Duration::from_secs(2) {
                             checked = Instant::now();
                             let default_name = cpal::default_host()
                                 .default_output_device()

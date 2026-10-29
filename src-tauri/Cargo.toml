@@ -19,3 +19,4 @@ dirs = "6"
 
 [dev-dependencies]
 tempfile = "3"
+rample-core = { path = "../crates/rample-core", features = ["test-support"] }
