@@ -2,3 +2,9 @@
 .swiftpm/
 .DS_Store
 *.xcuserstate
+node_modules/
+target/
+dist/
+playwright-report/
+test-results/
+*.log
