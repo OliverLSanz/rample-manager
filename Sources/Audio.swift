@@ -1,24 +1,22 @@
 import Foundation
 import AVFoundation
 
-struct VoiceSettings: Codable, Equatable {
-    var kitID: String = ""
-    var samplePath: String = ""
-    var steps = Array(repeating: false, count: 16)
-    var volume: Float = 0.8
-    var muted = false
-    var solo = false
-}
-
 /// One serial control queue owns the engine. A short lookahead schedules against
 /// the audio host clock, independently of SwiftUI drawing and filesystem scans.
 final class AudioEngine {
     private let queue = DispatchQueue(label: "net.oliver.rample.audio", qos: .userInteractive)
     private let engine = AVAudioEngine()
-    private var players = (0..<4).map { _ in AVAudioPlayerNode() }
-    private var previews = (0..<4).map { _ in AVAudioPlayerNode() }
+    private final class Stream {
+        let sample: Sample
+        let file: AVAudioFile
+        let player = AVAudioPlayerNode()
+        let preview = AVAudioPlayerNode()
+        init(sample: Sample) throws { self.sample = sample; file = try AVAudioFile(forReading: sample.url) }
+    }
+    private var streams = [[Stream]](repeating: [], count: 4)
     private var mixers = (0..<4).map { _ in AVAudioMixerNode() }
-    private var files = [AVAudioFile?](repeating: nil, count: 4)
+    private var selectedPaths = [String](repeating: "", count: 4)
+    private var selectors = (0..<4).map { _ in LayerSelector() }
     private var settings = (0..<4).map { _ in VoiceSettings() }
     private var timer: DispatchSourceTimer?
     private var running = false
@@ -30,14 +28,13 @@ final class AudioEngine {
     var onLevel: ((Float) -> Void)?
     var onError: ((String) -> Void)?
     var onLoaded: ((Int, String, [Float]) -> Void)?
+    var onTrigger: ((Int, String) -> Void)?
     private var configurationObserver: NSObjectProtocol?
     private var lastMeterTime = 0.0
 
     init() {
         for i in 0..<4 {
-            engine.attach(players[i]); engine.attach(previews[i]); engine.attach(mixers[i])
-            engine.connect(players[i], to: mixers[i], format: nil)
-            engine.connect(previews[i], to: mixers[i], format: nil)
+            engine.attach(mixers[i])
             engine.connect(mixers[i], to: engine.mainMixerNode, format: nil)
         }
         // Leave ample headroom for four simultaneous full-scale samples.
@@ -64,29 +61,47 @@ final class AudioEngine {
     }
 
     func load(_ sample: Sample?, channel: Int) {
+        loadLayers(sample.map { [$0] } ?? [], selectedPath: sample?.id ?? "", channel: channel)
+    }
+
+    func loadLayers(_ samples: [Sample], selectedPath: String, channel: Int) {
         queue.async { [self] in
-            players[channel].stop(); previews[channel].stop(); files[channel] = nil
-            guard let sample, sample.readable else {
-                DispatchQueue.main.async { self.onLoaded?(channel, "", []) }
-                return
+            let playable = samples.filter(\.readable)
+            let old = streams[channel]
+            let identifiers = playable.map(\.id)
+            if old.map({ $0.sample.id }) != identifiers || selectedPaths[channel] != selectedPath { selectors[channel].reset() }
+            selectedPaths[channel] = selectedPath
+            // Reuse unchanged streams: editing an unrelated layer must not cut
+            // off a currently sounding sample. Removed/edited layers stop now.
+            for stream in old where !playable.contains(where: { $0.id == stream.sample.id && $0.revision == stream.sample.revision }) {
+                stream.player.stop(); stream.preview.stop()
+                engine.detach(stream.player); engine.detach(stream.preview)
             }
+            streams[channel] = []
             do {
-                let file = try AVAudioFile(forReading: sample.url)
-                // AVAudioFile streams from disk; long files never get loaded wholesale.
-                engine.disconnectNodeOutput(players[channel]); engine.disconnectNodeOutput(previews[channel])
-                engine.connect(players[channel], to: mixers[channel], format: file.processingFormat)
-                engine.connect(previews[channel], to: mixers[channel], format: file.processingFormat)
-                files[channel] = file
-                try startEngine()
-                players[channel].play()
-                let peaks = Self.waveform(sample.url)
-                DispatchQueue.main.async { self.onLoaded?(channel, sample.id, peaks) }
-            } catch { report("Could not play \(sample.url.lastPathComponent): \(error.localizedDescription)") }
+                for sample in playable {
+                    if let reused = old.first(where: { $0.sample.id == sample.id && $0.sample.revision == sample.revision }) {
+                        streams[channel].append(reused); continue
+                    }
+                    // Each layer has its own disk stream and format. No PCM
+                    // conversion or loading entire samples into memory.
+                    let stream = try Stream(sample: sample)
+                    engine.attach(stream.player); engine.attach(stream.preview)
+                    engine.connect(stream.player, to: mixers[channel], format: stream.file.processingFormat)
+                    engine.connect(stream.preview, to: mixers[channel], format: stream.file.processingFormat)
+                    streams[channel].append(stream)
+                    if running { stream.player.play() }
+                }
+                let selected = playable.first { $0.id == selectedPath }
+                let peaks = selected.map { Self.waveform($0.url) } ?? []
+                DispatchQueue.main.async { self.onLoaded?(channel, selected?.id ?? "", peaks) }
+            } catch { report("Could not load voice \(channel + 1): \(error.localizedDescription)") }
         }
     }
 
     func update(_ voices: [VoiceSettings], bpm: Double) {
         queue.async { [self] in
+            for i in 0..<4 where voices[i].layerMode != settings[i].layerMode { selectors[i].reset() }
             settings = voices; self.bpm = min(300, max(30, bpm))
             let anySolo = voices.contains { $0.solo }
             for i in 0..<4 {
@@ -101,7 +116,10 @@ final class AudioEngine {
             do { try startEngine() } catch { report(error.localizedDescription); return }
             running = true; generation += 1; nextStep = 0
             nextTime = Self.now + 0.09
-            for player in players { player.stop(); player.play() }
+            for i in 0..<4 {
+                selectors[i].reset()
+                for stream in streams[i] { stream.player.stop(); stream.player.play() }
+            }
             let source = DispatchSource.makeTimerSource(queue: queue)
             source.schedule(deadline: .now(), repeating: .milliseconds(10), leeway: .milliseconds(1))
             source.setEventHandler { [weak self] in self?.tick() }
@@ -112,18 +130,19 @@ final class AudioEngine {
     func stop() {
         queue.async { [self] in
             running = false; generation += 1; timer?.cancel(); timer = nil
-            players.forEach { $0.stop() }; previews.forEach { $0.stop() }
+            for stream in streams.flatMap({ $0 }) { stream.player.stop(); stream.preview.stop() }
             DispatchQueue.main.async { self.onStep?(-1) }
         }
     }
 
     func preview(_ channel: Int) {
         queue.async { [self] in
-            guard let file = files[channel] else { return }
+            guard let stream = chooseStream(channel, velocity: settings[channel].velocities[0]) else { return }
             do {
                 try startEngine()
-                let node = previews[channel]
-                node.stop(); node.scheduleFile(file, at: nil); node.play()
+                streams[channel].forEach { $0.preview.stop() }
+                stream.preview.scheduleFile(stream.file, at: nil); stream.preview.play()
+                DispatchQueue.main.async { self.onTrigger?(channel, stream.sample.id) }
             } catch { report(error.localizedDescription) }
         }
     }
@@ -137,29 +156,40 @@ final class AudioEngine {
             let step = nextStep, at = nextTime, token = generation
             let interval = 60.0 / bpm / 4.0
             let time = AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: at))
+            var triggered: [(Int, String)] = []
             for i in 0..<4 where settings[i].steps[step] {
-                guard let file = files[i] else { continue }
+                guard let stream = chooseStream(i, velocity: settings[i].velocities[step]) else { continue }
+                let file = stream.file
                 // End each one-shot at its next trigger: monophonic per voice.
                 let distance = (1...16).first { settings[i].steps[(step + $0) % 16] } ?? 16
                 let frames = min(file.length, AVAudioFramePosition(Double(distance) * interval * file.processingFormat.sampleRate))
                 guard frames > 0 else { continue }
-                players[i].scheduleSegment(file, startingFrame: 0, frameCount: AVAudioFrameCount(min(frames, AVAudioFramePosition(UInt32.max))), at: time)
+                stream.player.scheduleSegment(file, startingFrame: 0, frameCount: AVAudioFrameCount(min(frames, AVAudioFramePosition(UInt32.max))), at: time)
+                triggered.append((i, stream.sample.id))
             }
             queue.asyncAfter(deadline: .now() + max(0, at - now)) { [weak self] in
                 guard let self, self.running, self.generation == token else { return }
-                DispatchQueue.main.async { self.onStep?(step) }
+                DispatchQueue.main.async {
+                    self.onStep?(step)
+                    for (channel, path) in triggered { self.onTrigger?(channel, path) }
+                }
             }
             nextStep = (nextStep + 1) % 16; nextTime += interval
         }
     }
 
+    private func chooseStream(_ channel: Int, velocity: Int) -> Stream? {
+        guard let path = selectors[channel].choose(paths: streams[channel].map { $0.sample.id }, selected: selectedPaths[channel], mode: settings[channel].layerMode, velocity: velocity) else { return nil }
+        return streams[channel].first { $0.sample.id == path }
+    }
+
     private func recoverDevice() {
         let wasRunning = running
         running = false; generation += 1; timer?.cancel(); timer = nil
-        players.forEach { $0.stop() }; previews.forEach { $0.stop() }
+        for stream in streams.flatMap({ $0 }) { stream.player.stop(); stream.preview.stop() }
         do {
             try startEngine()
-            players.forEach { $0.play() }
+            for stream in streams.flatMap({ $0 }) { stream.player.play() }
             if wasRunning { play() }
         } catch { report("The audio output changed: \(error.localizedDescription)") }
     }

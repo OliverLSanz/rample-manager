@@ -49,6 +49,46 @@ disconnected SD cards. **⌘R** bypasses the cache. Scanning, audio scheduling a
 UI drawing run independently. WAV files stream from disk; waveform previews
 sample 100 small windows distributed across the file.
 
+## Layer playback modes
+
+Each voice has a mode menu below its sample name:
+
+| App mode | Rample mode | Behavior |
+| --- | --- | --- |
+| Single sample (default) | MANUAL | Trigger only the selected sample |
+| Random | RANDOM | Choose a layer per trigger, with repeats allowed |
+| Sequential | CYCLIC | Advance through layers, then wrap |
+| Reverse sequential | REVERSE CYCLIC | Advance backwards, then wrap |
+| Velocity | VELOCITY | Select a layer using the step's velocity |
+
+Automatic modes use up to 12 readable layers in natural filename order. Cyclic
+modes start with the selected layer, restart from it when transport starts,
+and advance on triggers rather than on empty steps. Audition also uses the
+voice's mode and advances the same cursor; in Velocity mode it uses step 1's
+velocity. The layer counter and waveform show the most recently triggered layer.
+
+**Option-click a step**, or right-click it and choose **Edit velocity…**, to set
+its velocity from 1–127. Velocity mode displays these numbers on enabled steps.
+It selects layers in even velocity zones, without changing amplitude. Exact
+zone boundaries and cyclic initialization on hardware still need comparison.
+
+The chosen layer and mode are remembered independently for each voice, kit and
+library on this Mac. Patterns, step velocities, BPM and mixer remain session
+controls, so browsing kits keeps the same beat. Old sessions migrate to Single
+sample without losing the selected files or patterns.
+
+### Native SD settings: pending hardware verification
+
+App persistence is currently local JSON. The app does **not** read, create or
+modify native Rample `_save/*.rpl` files. Public investigation identifies CBOR
+kit maps with `layer_modes` and `selected_layer`, but their meanings and firmware
+compatibility need controlled saves from Oliver's module before import/write
+support can be enabled. Export still copies one selected sample per voice; it
+does not encode layer modes or the sequencer for the module.
+
+Evidence: [Squarp manual](https://squarp.net/rample/manual/) and
+[Romper's hardware-save investigation](https://github.com/peteb4ker/romper/blob/main/docs/developer/rample-save-integration.md).
+
 The library, selected samples, pattern, tempo and mixer are saved to:
 
 ```text

@@ -7,6 +7,7 @@ struct SavedSession: Codable {
     var selectedKit: String
     var bpm: Double
     var voices: [VoiceSettings]
+    var kitConfigurations: KitConfigurations? = nil
 }
 
 enum KitExporter {
@@ -57,6 +58,7 @@ final class AppModel: ObservableObject {
     @Published var voices = (0..<4).map { _ in VoiceSettings() }
     @Published var waveforms = [[Float]](repeating: [], count: 4)
     @Published var loadedPaths = [String](repeating: "", count: 4)
+    @Published var soundingPaths = [String](repeating: "", count: 4)
     @Published var isPlaying = false
     @Published var playhead = -1
     let meter = OutputMeter()
@@ -83,6 +85,10 @@ final class AppModel: ObservableObject {
     private var forceNextScan = false
     private var loadedSession: SavedSession?
     private var notificationObserver: NSObjectProtocol?
+    private var kitConfigurations = KitConfigurations()
+    private let waveformQueue = DispatchQueue(label: "net.oliver.rample.waveforms", qos: .utility)
+    private var waveformCache: [String: [Float]] = [:]
+    private var pendingWaveforms = Set<String>()
 
     static var support: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rample Preview", isDirectory: true)
@@ -93,6 +99,7 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: Self.support, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: sessionURL), let session = try? JSONDecoder().decode(SavedSession.self, from: data), session.voices.count == 4 {
             loadedSession = session
+            kitConfigurations = session.kitConfigurations ?? KitConfigurations()
             bpm = min(300, max(30, session.bpm.isFinite ? session.bpm : 120))
             voices = session.voices.map { voice in
                 var safe = voice
@@ -111,7 +118,10 @@ final class AppModel: ObservableObject {
         audio.onLoaded = { [weak self] channel, path, peaks in
             guard let self, self.voices[channel].samplePath == path || path.isEmpty else { return }
             self.loadedPaths[channel] = path; self.waveforms[channel] = peaks
+            self.soundingPaths[channel] = path
+            if let sample = self.sample(channel), sample.id == path { self.waveformCache[path + sample.revision] = peaks }
         }
+        audio.onTrigger = { [weak self] channel, path in self?.layerTriggered(channel, path: path) }
         watcher.onChange = { [weak self] in self?.scheduleRefresh() }
         // A light metadata fallback catches disconnected volumes and filesystems
         // that do not deliver FSEvents. Header reads are cached between scans.
@@ -135,6 +145,20 @@ final class AppModel: ObservableObject {
     func sourceKit(_ channel: Int) -> Kit? { kits.first { $0.id == voices[channel].kitID } }
     func choices(_ channel: Int) -> [Sample] { sourceKit(channel)?.samples(for: channel + 1) ?? [] }
     func sample(_ channel: Int) -> Sample? { choices(channel).first { $0.id == voices[channel].samplePath } }
+    func displaySample(_ channel: Int) -> Sample? {
+        if voices[channel].layerMode != .single, let active = choices(channel).first(where: { $0.id == soundingPaths[channel] }) { return active }
+        return sample(channel)
+    }
+    func playableLayers(_ channel: Int) -> [Sample] {
+        guard !voices[channel].samplePath.isEmpty else { return [] }
+        if voices[channel].layerMode == .single { return sample(channel).map { $0.readable ? [$0] : [] } ?? [] }
+        return Array(choices(channel).filter(\.readable).prefix(12))
+    }
+    func layerPosition(_ channel: Int) -> String {
+        let layers = playableLayers(channel)
+        let index = layers.firstIndex { $0.id == soundingPaths[channel] }
+        return "Layer \(index.map { String($0 + 1) } ?? "–") / \(layers.count)"
+    }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
@@ -147,11 +171,13 @@ final class AppModel: ObservableObject {
     }
 
     func setRoot(_ url: URL, restoring: Bool = false) {
+        for i in 0..<4 { rememberVoice(i) }
         audio.stop(); isPlaying = false; playhead = -1
         rootGeneration += 1; root = url.standardizedFileURL
         isDemo = url.standardizedFileURL.path == Self.support.appendingPathComponent("Demo SD").path
         folderError = nil; kits = []; revisionByChannel = Array(repeating: "", count: 4)
         loadedPaths = Array(repeating: "", count: 4); waveforms = Array(repeating: [], count: 4)
+        soundingPaths = Array(repeating: "", count: 4); waveformCache = [:]
         for channel in 0..<4 { audio.load(nil, channel: channel) }
         if !restoring {
             selectedKit = ""; bankFilter = "All"; search = ""
@@ -192,39 +218,89 @@ final class AppModel: ObservableObject {
     }
 
     func selectKit(_ id: String) {
+        for i in 0..<4 { rememberVoice(i) }
         selectedKit = id
         for i in 0..<4 {
             voices[i].kitID = id
-            voices[i].samplePath = choices(i).first(where: \.readable)?.id ?? ""
+            restoreVoice(i)
         }
         reloadChangedSamples(); syncAudio(); saveSoon()
     }
 
     func selectSource(_ id: String, channel: Int) {
+        rememberVoice(channel)
         voices[channel].kitID = id
-        voices[channel].samplePath = choices(channel).first(where: \.readable)?.id ?? ""
-        reloadChangedSamples(); saveSoon()
+        restoreVoice(channel)
+        reloadChangedSamples(); syncAudio(); saveSoon()
     }
 
     func selectSample(_ path: String, channel: Int) {
         voices[channel].samplePath = path
+        rememberVoice(channel)
         reloadChangedSamples(); saveSoon()
+    }
+
+    func setLayerMode(_ mode: LayerMode, channel: Int) {
+        voices[channel].layerMode = mode
+        if mode != .single && voices[channel].samplePath.isEmpty { voices[channel].samplePath = choices(channel).first(where: \.readable)?.id ?? "" }
+        rememberVoice(channel)
+        reloadChangedSamples(); syncAudio(); saveSoon()
+    }
+
+    func setVelocity(_ velocity: Int, channel: Int, step: Int) {
+        changeVoice(channel) { $0.velocities[step] = min(127, max(1, velocity)) }
+    }
+
+    private func rememberVoice(_ channel: Int) {
+        guard let root else { return }
+        kitConfigurations.remember(root: root, kit: voices[channel].kitID, channel: channel, settings: voices[channel])
+    }
+
+    private func restoreVoice(_ channel: Int) {
+        if let root, let config = kitConfigurations.configuration(root: root, kit: voices[channel].kitID, channel: channel) {
+            voices[channel].layerMode = config.layerMode
+            voices[channel].samplePath = config.sampleName.isEmpty ? "" : root.appendingPathComponent(voices[channel].kitID).appendingPathComponent(config.sampleName).path
+        } else {
+            voices[channel].layerMode = .single
+            voices[channel].samplePath = choices(channel).first(where: \.readable)?.id ?? ""
+        }
     }
 
     private func reloadChangedSamples(force: Bool = false) {
         for i in 0..<4 {
-            let selected = sample(i)
-            let key = selected.map { $0.id + $0.revision } ?? ""
+            let layers = playableLayers(i)
+            let key = voices[i].layerMode.rawValue + voices[i].samplePath + layers.map { $0.id + $0.revision }.joined(separator: "|")
             if force || key != revisionByChannel[i] {
-                revisionByChannel[i] = key; waveforms[i] = []; loadedPaths[i] = ""
-                audio.load(selected, channel: i)
+                revisionByChannel[i] = key; waveforms[i] = []; loadedPaths[i] = ""; soundingPaths[i] = ""
+                audio.loadLayers(layers, selectedPath: voices[i].samplePath, channel: i)
+            }
+        }
+    }
+
+    private func layerTriggered(_ channel: Int, path: String) {
+        guard let sample = playableLayers(channel).first(where: { $0.id == path }) else { return }
+        soundingPaths[channel] = path
+        let key = sample.id + sample.revision
+        if let peaks = waveformCache[key] { waveforms[channel] = peaks; return }
+        waveforms[channel] = []
+        guard !pendingWaveforms.contains(key) else { return }
+        pendingWaveforms.insert(key)
+        let token = rootGeneration
+        waveformQueue.async { [weak self] in
+            let peaks = AudioEngine.waveform(sample.url)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.pendingWaveforms.remove(key)
+                guard token == self.rootGeneration, self.choices(channel).contains(where: { $0.id == path && $0.revision == sample.revision }) else { return }
+                self.waveformCache[key] = peaks
+                if self.soundingPaths[channel] == path { self.waveforms[channel] = peaks }
             }
         }
     }
 
     func togglePlay() {
         if isPlaying { audio.stop(); isPlaying = false; playhead = -1 }
-        else if (0..<4).contains(where: { sample($0)?.readable == true }) { syncAudio(); audio.play(); isPlaying = true }
+        else if (0..<4).contains(where: { !playableLayers($0).isEmpty }) { syncAudio(); audio.play(); isPlaying = true }
         else { alert = "Select at least one readable WAV to play." }
     }
 
@@ -243,7 +319,7 @@ final class AppModel: ObservableObject {
     }
     func preview(_ channel: Int) { audio.preview(channel) }
     func revealRoot() { if let root { NSWorkspace.shared.open(root) } }
-    func revealSample(_ channel: Int) { if let sample = sample(channel) { NSWorkspace.shared.activateFileViewerSelecting([sample.url]) } }
+    func revealSample(_ channel: Int) { if let sample = displaySample(channel) { NSWorkspace.shared.activateFileViewerSelecting([sample.url]) } }
 
     func exportKit() {
         guard CatalogScanner.isKitName(exportName) else { alert = "Invalid kit name. Use A0–Z99."; return }
@@ -276,7 +352,8 @@ final class AppModel: ObservableObject {
         saveWork = work; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
     func save() {
-        let session = SavedSession(rootPath: root?.path ?? "", selectedKit: selectedKit, bpm: bpm, voices: voices)
+        for i in 0..<4 { rememberVoice(i) }
+        let session = SavedSession(rootPath: root?.path ?? "", selectedKit: selectedKit, bpm: bpm, voices: voices, kitConfigurations: kitConfigurations)
         do { let data = try JSONEncoder().encode(session); try data.write(to: sessionURL, options: .atomic) }
         catch { statusMessage = "Could not save the session: \(error.localizedDescription)" }
     }

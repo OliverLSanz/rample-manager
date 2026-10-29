@@ -254,7 +254,7 @@ struct ContentView: View {
             Text("·").padding(.horizontal, 3)
             Text("⌘R: refresh").font(.system(size: 10))
             Spacer()
-            Text(model.statusMessage.isEmpty ? "Original files stay untouched" : model.statusMessage).font(.system(size: 10)).lineLimit(1)
+            Text(model.statusMessage.isEmpty ? "Modes saved on this Mac · native SD sync pending" : model.statusMessage).font(.system(size: 10)).lineLimit(1)
         }.foregroundStyle(Palette.muted.opacity(0.75))
     }
 
@@ -275,6 +275,7 @@ struct ContentView: View {
                 Text("A0–Z99").font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.muted)
             }
             Text("Compatible mono WAV · voice 1 required · existing folders stay untouched").font(.system(size: 10)).foregroundStyle(Palette.muted)
+            Text("This exports one selected sample per voice. Layer modes stay on this Mac until native SD settings have been verified.").font(.system(size: 11)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Cancel") { model.exportPresented = false }.keyboardShortcut(.cancelAction)
@@ -288,7 +289,7 @@ struct SampleCard: View {
     @ObservedObject var model: AppModel
     let channel: Int
     private var color: Color { Palette.voices[channel] }
-    private var sample: Sample? { model.sample(channel) }
+    private var sample: Sample? { model.displaySample(channel) }
     private var missing: Bool { sample == nil && !model.voices[channel].samplePath.isEmpty }
 
     var body: some View {
@@ -329,6 +330,28 @@ struct SampleCard: View {
                 .help(sample?.url.lastPathComponent ?? "Select a sample")
                 .accessibilityLabel("Sample for voice \(channel + 1)")
 
+            HStack(spacing: 3) {
+                Menu {
+                    ForEach(LayerMode.allCases) { mode in
+                        Button { model.setLayerMode(mode, channel: channel) } label: {
+                            if model.voices[channel].layerMode == mode { Label(mode.title, systemImage: "checkmark") }
+                            else { Text(mode.title) }
+                        }.help(mode.detail)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.stack").font(.system(size: 9))
+                        Text(model.voices[channel].layerMode.title).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 7))
+                    }.foregroundStyle(color.opacity(0.9))
+                }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .help(model.voices[channel].layerMode.detail).accessibilityLabel("Layer mode for voice \(channel + 1)")
+                Spacer(minLength: 0)
+                if model.voices[channel].layerMode != .single {
+                    Text(model.layerPosition(channel)).font(.system(size: 8, design: .monospaced)).foregroundStyle(Palette.muted).fixedSize()
+                }
+            }.padding(.top, 10)
+
             WaveformView(peaks: model.waveforms[channel], color: color, active: model.isPlaying && model.playhead >= 0 && model.voices[channel].steps[model.playhead] && !model.voices[channel].muted)
                 .frame(height: 46).padding(.vertical, 12)
             HStack {
@@ -349,7 +372,7 @@ struct SampleCard: View {
                         Text("Audition").font(.system(size: 10, weight: .medium))
                         Text("\(channel + 1)").font(.system(size: 8, design: .monospaced)).foregroundStyle(Palette.muted).padding(.horizontal, 4).padding(.vertical, 2).background(Palette.raised, in: RoundedRectangle(cornerRadius: 3))
                     }.frame(maxWidth: .infinity).frame(height: 29)
-                }.buttonStyle(.plain).background(Palette.raised.opacity(0.5), in: RoundedRectangle(cornerRadius: 5)).disabled(sample?.readable != true || model.loadedPaths[channel] != sample?.id)
+                }.buttonStyle(.plain).background(Palette.raised.opacity(0.5), in: RoundedRectangle(cornerRadius: 5)).disabled(model.playableLayers(channel).isEmpty)
                     .accessibilityLabel("Audition voice \(channel + 1)")
                 Button { model.revealSample(channel) } label: { Image(systemName: "folder").font(.system(size: 11)).foregroundStyle(Palette.muted).padding(7) }.buttonStyle(.plain).disabled(sample == nil).help("Show WAV in Finder")
             }
@@ -362,6 +385,8 @@ struct SampleCard: View {
 struct SequencerRow: View {
     @ObservedObject var model: AppModel
     let channel: Int
+    @State private var editingStep = 0
+    @State private var velocityPresented = false
     private var color: Color { Palette.voices[channel] }
     var body: some View {
         HStack(spacing: 0) {
@@ -387,17 +412,42 @@ struct SequencerRow: View {
                 ForEach(0..<16) { step in
                     let on = model.voices[channel].steps[step]
                     let current = model.playhead == step
-                    Button { model.toggleStep(channel, step) } label: {
+                    Button {
+                        if NSEvent.modifierFlags.contains(.option) { editingStep = step; velocityPresented = true }
+                        else { model.toggleStep(channel, step) }
+                    } label: {
                         RoundedRectangle(cornerRadius: 5)
                             .fill(on ? color.opacity(model.voices[channel].muted ? 0.25 : (current ? 1 : 0.76)) : (current ? Color.white.opacity(0.12) : Palette.raised.opacity(step % 4 == 0 ? 0.95 : 0.58)))
                             .overlay(RoundedRectangle(cornerRadius: 5).stroke(current ? Color.white.opacity(0.8) : (on ? color.opacity(0.3) : Color.white.opacity(0.025)), lineWidth: current ? 1.5 : 1))
-                            .overlay { if on { Circle().fill(Palette.background.opacity(0.48)).frame(width: 4, height: 4) } }
+                            .overlay {
+                                if on && model.voices[channel].layerMode == .velocity {
+                                    Text("\(model.voices[channel].velocities[step])").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(Palette.background.opacity(0.7))
+                                } else if on { Circle().fill(Palette.background.opacity(0.48)).frame(width: 4, height: 4) }
+                            }
                             .frame(maxWidth: .infinity).frame(height: 35)
                     }.buttonStyle(.plain).padding(.leading, step % 4 == 0 && step != 0 ? 5 : 0)
-                        .help("Voice \(channel + 1), step \(step + 1)")
+                        .help("Voice \(channel + 1), step \(step + 1) · velocity \(model.voices[channel].velocities[step]). Option-click to edit velocity.")
                         .accessibilityLabel("Voice \(channel + 1), step \(step + 1), \(on ? "on" : "off")")
+                        .contextMenu {
+                            Button("Edit velocity…") { editingStep = step; velocityPresented = true }
+                            ForEach([32, 64, 96, 127], id: \.self) { velocity in
+                                Button("Velocity \(velocity)") { model.setVelocity(velocity, channel: channel, step: step) }
+                            }
+                        }
                 }
             }
+        }.popover(isPresented: $velocityPresented) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Voice \(channel + 1) · Step \(editingStep + 1)").font(.system(size: 13, weight: .semibold))
+                HStack {
+                    Text("Velocity").font(.system(size: 12))
+                    Spacer()
+                    Text("\(model.voices[channel].velocities[editingStep])").font(.system(size: 16, design: .monospaced))
+                }
+                Slider(value: Binding(get: { Double(model.voices[channel].velocities[editingStep]) }, set: { model.setVelocity(Int($0), channel: channel, step: editingStep) }), in: 1...127, step: 1).tint(color)
+                Text("In Velocity mode, lower values select earlier layers. Velocity selects a layer; it does not change sample volume.").font(.system(size: 10)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                Button("Done") { velocityPresented = false }.frame(maxWidth: .infinity, alignment: .trailing)
+            }.padding(18).frame(width: 245)
         }
     }
 }
