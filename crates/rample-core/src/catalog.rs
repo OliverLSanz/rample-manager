@@ -104,8 +104,10 @@ impl Scanner {
                             continue;
                         };
                         let stamp = revision(&p);
-                        let invalid =
-                            force || invalidated.contains(&p) || invalidated.contains(&path);
+                        let invalid = force
+                            || invalidated.contains(&p)
+                            || invalidated.contains(&path)
+                            || invalidated.contains(root);
                         let sample = if let Some((old, s)) = self
                             .cache
                             .get(&p)

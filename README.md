@@ -1,13 +1,28 @@
 # Rample Preview
 
-A native macOS sample auditioning app for Squarp Rample / Rample Turbo libraries.
-Built with SwiftUI and AVFoundation, without third-party dependencies, accounts
-or a server. Requires Apple Silicon and macOS 14 or later.
+A desktop sample auditioning and kit-building app for Squarp Rample / Rample Turbo.
+Runs on **macOS and Windows** with a shared React interface and native Rust audio
+engine. Everything works locally and offline; no account or server is required.
+
+## Install
+
+- **macOS:** open the DMG and copy **Rample Preview** to Applications. The build
+  currently targets Apple Silicon and macOS 14+. Codex installs local changes with
+  `./scripts/install.sh`; the previous Swift app is kept as a local backup.
+- **Windows:** run the `Rample Preview_2.0.0_x64-setup.exe` installer. It installs
+  for the current user. Windows 10/11 x64 and the WebView2 runtime are required;
+  the installer can install WebView2 if needed. A publisher signing certificate
+  is not configured, so Windows may display an unknown-publisher warning.
+
+Installers are attached to private GitHub releases. The **Desktop builds** workflow
+also keeps macOS DMG and Windows EXE artifacts for each successful code build.
+Updates on Oliver's Mac remain fully automated through the local install script.
+Hosted automatic updates are not enabled; the installers can upgrade an existing
+installation while keeping preferences and sample libraries.
 
 ## Use
 
-Open `/Applications/Rample Preview.app`, click **Open folder…**, and choose the
-root containing the kit folders, rather than an individual kit:
+Choose **Open folder…** and select the root containing your kits:
 
 ```text
 My SD/
@@ -21,130 +36,136 @@ My SD/
 └── B12/
 ```
 
-Select a kit in the sidebar. Each voice's sample menu selects a layer; its kit
-menu lets you mix voices from different kits. Click sequencer steps to toggle
-hits. Each step is a sixteenth note; 16 steps make one bar in 4/4.
+Choose a kit in the sidebar and a layer in each voice's sample menu. The source
+kit menu lets you combine voices from different kits. The four tracks each have
+16 sixteenth-note steps, volume, mute and solo. Set the tempo from 30–300 BPM.
 
-| Control | Action |
+| Shortcut | Action |
 | --- | --- |
 | Space | Play / stop |
 | 1–4 | Audition a voice |
-| ⌘O | Open sample folder |
-| ⌘R | Force refresh |
-| ⇧⌘E | Export kit |
-| M / S | Mute / solo a voice |
+| Cmd/Ctrl+O | Open library |
+| Cmd/Ctrl+R | Force refresh |
+| Shift+Cmd/Ctrl+E | Export kit |
+| Option/Alt-click or right-click a step | Edit its velocity |
 
-The **Pattern** menu loads an example beat or clears all steps. Each voice has
-its own volume control. Playback shortcuts are disabled while editing text.
+Playback shortcuts leave text fields alone. The **Pattern** menu loads an example
+beat or clears the sequence. A generated demo library is included on first launch.
 
-## Live refresh and persistence
-
-FSEvents watches the library recursively, with a 300 ms debounce. Both in-place
-edits and atomic replacements invalidate audio and waveforms. New files appear
-in the sample menu. Removing a selected sample silences the voice and displays
-**Sample deleted**; restoring its filename reloads it. Patterns stay intact.
-
-A metadata scan every four seconds covers filesystems that miss events and
-disconnected SD cards. **⌘R** bypasses the cache. Scanning, audio scheduling and
-UI drawing run independently. WAV files stream from disk; waveform previews
-sample 100 small windows distributed across the file.
-
-## Layer playback modes
-
-Each voice has a mode menu below its sample name:
+## Layer playback
 
 | App mode | Rample mode | Behavior |
 | --- | --- | --- |
 | Single sample (default) | MANUAL | Trigger only the selected sample |
-| Random | RANDOM | Choose a layer per trigger, with repeats allowed |
-| Sequential | CYCLIC | Advance through layers, then wrap |
+| Random | RANDOM | Choose a layer per trigger, allowing repeats |
+| Sequential | CYCLIC | Advance in natural filename order, then wrap |
 | Reverse sequential | REVERSE CYCLIC | Advance backwards, then wrap |
 | Velocity | VELOCITY | Select a layer using the step's velocity |
 
-Automatic modes use up to 12 readable layers in natural filename order. Cyclic
-modes start with the selected layer, restart from it when transport starts,
-and advance on triggers rather than on empty steps. Audition also uses the
-voice's mode and advances the same cursor; in Velocity mode it uses step 1's
-velocity. The layer counter and waveform show the most recently triggered layer.
+Automatic modes use up to 12 readable layers. Cyclic modes start at the selected
+layer when transport starts, advancing on triggers rather than empty steps.
+Audition uses the same cursor and mode, with step 1's velocity. The waveform and
+layer counter show the triggered layer. Velocity selects a layer in even zones
+without changing amplitude. Exact hardware velocity boundaries and cyclic
+initialization still require a device comparison.
 
-**Option-click a step**, or right-click it and choose **Edit velocity…**, to set
-its velocity from 1–127. Velocity mode displays these numbers on enabled steps.
-It selects layers in even velocity zones, without changing amplitude. Exact
-zone boundaries and cyclic initialization on hardware still need comparison.
+Modes and selected layers are remembered independently per voice, kit and library.
+Patterns, velocities, BPM and mixer are session controls; browsing kits keeps the
+same beat. Mono and stereo audition work; stereo pairing on the module, its DAC
+and its effects are not emulated.
 
-The chosen layer and mode are remembered independently for each voice, kit and
-library on this Mac. Patterns, step velocities, BPM and mixer remain session
-controls, so browsing kits keeps the same beat. Old sessions migrate to Single
-sample without losing the selected files or patterns.
+## Live files and export
 
-### Native SD settings: pending hardware verification
+Native filesystem notifications watch the library recursively, with a 300 ms
+quiet-period debounce and a four-second metadata fallback. Both in-place and
+atomic WAV replacements reload audio/waveforms. New layers appear immediately.
+A removed selection stays selected by filename but becomes silent; restoring the
+file restores playback. Automatic modes continue using their remaining layers.
 
-App persistence is currently local JSON. The app does **not** read, create or
-modify native Rample `_save/*.rpl` files. Public investigation identifies CBOR
-kit maps with `layer_modes` and `selected_layer`, but their meanings and firmware
-compatibility need controlled saves from Oliver's module before import/write
-support can be enabled. Export still copies one selected sample per voice; it
-does not encode layer modes or the sequencer for the module.
+The [Squarp SD format](https://squarp.net/rample/manual/) is checked: A0–Z99 folders
+in the root; filenames starting with 1–4; 44.1 kHz integer PCM WAV, 8/16 bits,
+at least 50 ms, up to 12 layers per voice. Other readable PCM/float WAVs can be
+auditioned with compatibility warnings. Symlinks inside the library are skipped.
 
-See the [step-by-step capture guide (Spanish)](docs/rample-sd-capture.es.md) to
-generate the controlled STORE/SAVE SETTINGS examples needed for this next step.
+**Export kit** copies one selected compatible mono WAV per voice into a new
+A0–Z99 directory. Voice 1 is required. Original WAVs and existing kits are never
+overwritten. Export does not encode the sequencer, mixer or layer modes.
 
-Evidence: [Squarp manual](https://squarp.net/rample/manual/) and
-[Romper's hardware-save investigation](https://github.com/peteb4ker/romper/blob/main/docs/developer/rample-save-integration.md).
+### Native Rample SD settings remain pending
 
-The library, selected samples, pattern, tempo and mixer are saved to:
+The app never modifies `_save/*.rpl`. Its JSON preferences are not native Rample
+saves. Controlled hardware examples are still needed before implementing native
+configuration import/write. See the [capture guide in Spanish](docs/rample-sd-capture.es.md).
 
-```text
-~/Library/Application Support/Rample Preview/session.json
-```
+## Session preservation
 
-The generated demo library lives in `Demo SD` in that same support directory.
-App updates preserve this folder. Original WAVs are never modified.
+- macOS: `~/Library/Application Support/Rample Preview/session.json`
+- Windows: `%APPDATA%/Rample Preview/session.json`
 
-## Hardware compatibility
+The same folder contains `Demo SD`. Swift 1.x sessions migrate automatically,
+keeping all selections, per-kit modes, patterns, velocity, tempo and mixer. The
+original JSON is backed up as `session-swift-1.1.0.backup.json` before migration.
+Installing/updating the app never deletes this folder. `RAMPLE_DATA_DIR` provides
+an isolated support directory for development and tests.
 
-The app checks the [official Squarp format](https://squarp.net/rample/manual/):
-kit folders A0–Z99 in the SD root; sample prefixes 1–4; uncompressed integer PCM
-WAV at 44.1 kHz, 8 or 16 bits, at least 50 ms long, and up to 12 layers per voice.
-Warnings identify files the Mac can play but the module may reject. Symlinks
-are skipped to keep scanning within the chosen library.
+## Develop and build
 
-Mono and stereo WAVs can be auditioned. The app does not emulate Rample effects,
-DAC or stereo voice pairing. Each sequencer track is monophonic; a trigger
-restarts its sample. Manual audition can play over the sequencer.
-
-**Export kit** copies selected mono WAVs into a new A0–Z99 folder and validates
-the copies before publishing the folder. Voice 1 is required. Existing kits are
-never overwritten. Stereo samples can be auditioned, but export does not
-rearrange the two hardware voices they consume. Mixer and sequencer settings
-are listening controls and are not baked into exported WAVs.
-
-## Build, install and update
-
-Requires Swift/Xcode tools installed on this Mac. No package downloads needed.
+Requires Node 22+, stable Rust and platform build tools: Xcode command-line tools
+on Mac, Microsoft C++ Build Tools and WebView2 on Windows.
 
 ```sh
-cd /Users/oliver/oli/rample-preview
-swift test
-./scripts/install.sh
+npm ci
+npm run tauri dev
 ```
 
-The installer builds release, generates the icon and `.app` bundle, signs it
-locally, quits an existing instance, replaces `/Applications/Rample Preview.app`
-and reopens it. Session data and sample libraries are preserved. Codex uses
-this same command to apply future changes without manual installation steps.
+Validation:
 
-`--no-launch` installs without opening. `RAMPLE_INSTALL_DIR="$HOME/Applications"`
-changes the destination. `swift run` launches a development build. The app is
-signed locally for this Mac, not notarized for distribution to other Macs.
+```sh
+npm run build
+npm test
+cargo test --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+```
 
-## Development
+Package on the target operating system:
 
-Keep the app UI in English. Commit and push every atomic functional change,
-including its relevant validation and documentation; see [AGENTS.md](AGENTS.md).
+```sh
+# macOS
+npm run tauri -- build --bundles app,dmg
+./scripts/install.sh
+# Windows
+npm run tauri -- build --bundles nsis
+```
 
-`swift test` covers SD layout, natural layer ordering, WAV metadata, compatibility
-warnings, same-size and atomic edits, additions/deletions, symlinks, recursive
-watching, layer limits and non-destructive export. Audio tests check real PCM
-at the mixer, host-clock sequencer progression, and reloading/muting four voices
-during playback.
+The installer builds before closing the current app, signs locally, replaces the
+bundle and reopens it. `--no-launch` skips reopening; `RAMPLE_INSTALL_DIR` changes
+the installation directory. Mac builds are signed ad hoc, not notarized for other
+computers. Windows installers are currently unsigned.
+
+## Architecture and validation
+
+`frontend/` holds React UI and IPC. `crates/rample-core/` holds SD scanning, WAV
+validation, export, backwards-compatible session data, layer selection and the
+sample-clock renderer. `src-tauri/` integrates native dialogs, filesystem watching
+and devices. CPAL outputs through CoreAudio on Mac and WASAPI on Windows.
+
+Triggers are rendered against the device sample clock, independently of browser
+or UI timers. Each track retriggers monophonically at the correct frame. WAVs
+stream with bounded heads and background readers; decoding and disk I/O stay off
+the callback. Matched sample rates preserve PCM exactly; other rates use a
+32-tap windowed-sinc resampler. Device reconnection is retried automatically.
+
+Headless tests check actual PCM, trigger boundaries, modes, mute/solo, resampling,
+long-file streaming, migration, export, watcher events and UI behavior on both
+operating systems. Actual-device smoke testing is separate:
+
+```sh
+cargo run -p rample-core --example audio_smoke --features native-audio
+```
+
+A Windows CI build verifies compilation/tests/packaging; it cannot replace a
+listening test on physical Windows audio hardware. The original Swift sources
+are archived under `legacy/swift` for reference and rollback.
+
+Keep UI text in English and commit/push each atomic functional change with its
+relevant tests and docs; see [AGENTS.md](AGENTS.md).

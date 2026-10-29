@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rample-core"]
+members = ["crates/rample-core", "src-tauri"]
 default-members = ["crates/rample-core"]
 resolver = "2"
 

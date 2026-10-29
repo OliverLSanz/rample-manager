@@ -1,0 +1,59 @@
+name: Desktop builds
+on:
+  push:
+    branches: [main]
+    paths:
+      [
+        "crates/**",
+        "src-tauri/**",
+        "frontend/**",
+        "Cargo.*",
+        "package*.json",
+        "*config*",
+        "index.html",
+        "scripts/**",
+        ".github/workflows/**",
+      ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macOS-arm64
+            bundles: app,dmg
+            artifact: target/release/bundle/dmg/*.dmg
+          - os: windows-latest
+            platform: Windows-x64
+            bundles: nsis
+            artifact: target/release/bundle/nsis/*.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --all-targets --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Package desktop app
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rample-Preview-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,10 @@
+{
+  "identifier": "main-window",
+  "description": "Local sample browser and native folder selection",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open"
+  ]
+}
