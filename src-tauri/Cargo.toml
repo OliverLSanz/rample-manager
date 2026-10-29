@@ -17,6 +17,11 @@ rample-core = { path = "../crates/rample-core", features = ["native-audio"] }
 notify = "8"
 dirs = "6"
 dunce = "1"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+sha2 = "0.10"
+uuid = { version = "1.29.0", features = ["v4"] }
+tempfile = "3"
+walkdir = "2.5.0"
 
 [dev-dependencies]
 tempfile = "3"

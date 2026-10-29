@@ -38,6 +38,7 @@ import {
 import * as native from "./native";
 import { Modal } from "./Modal";
 import { SampleEditor } from "./SampleEditor";
+import { LibrarySamples } from "./LibrarySamples";
 import {
   basename,
   compatibilityWarnings,
@@ -78,6 +79,7 @@ export default function App() {
   const [bank, setBank] = useState("All");
   const [exporting, setExporting] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [librarySamples, setLibrarySamples] = useState(false);
   const [editor, setEditor] = useState<EditorInfo | null>(null);
   const [velocity, setVelocity] = useState<{
     channel: number;
@@ -189,10 +191,18 @@ export default function App() {
       !exporting &&
       !velocity &&
       !reviewing &&
+      !librarySamples &&
       !editor
     )
       setReviewing(true);
-  }, [snapshot?.imports.length, exporting, velocity, reviewing, editor]);
+  }, [
+    snapshot?.imports.length,
+    exporting,
+    velocity,
+    reviewing,
+    editor,
+    librarySamples,
+  ]);
   const convertImports = useCallback(async (files: ReviewedFile[]) => {
     await serial.current;
     const result = await native.convertImports(files);
@@ -225,7 +235,8 @@ export default function App() {
   }, [action]);
   useEffect(() => {
     function keydown(e: KeyboardEvent) {
-      if (exporting || velocity || reviewing || editor) return;
+      if (exporting || velocity || reviewing || editor || librarySamples)
+        return;
       const target = e.target;
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
         if (e.key.toLowerCase() === "o") {
@@ -256,7 +267,15 @@ export default function App() {
     }
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [action, openFolder, exporting, velocity, reviewing, editor]);
+  }, [
+    action,
+    openFolder,
+    exporting,
+    velocity,
+    reviewing,
+    editor,
+    librarySamples,
+  ]);
   const reveal = useCallback((channel?: number) => {
     native.reveal(channel).catch((e) => setError(errorText(e)));
   }, []);
@@ -378,6 +397,12 @@ export default function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
+          <button
+            className="folder-button"
+            onClick={() => setLibrarySamples(true)}
+          >
+            <AudioLines size={15} /> Library samples…
+          </button>
           {snapshot.isDemo && (
             <div className="demo-note">
               <span>
@@ -618,6 +643,9 @@ export default function App() {
             <X size={15} />
           </button>
         </div>
+      )}
+      {librarySamples && (
+        <LibrarySamples onClose={() => setLibrarySamples(false)} />
       )}
       {editor && (
         <SampleEditor

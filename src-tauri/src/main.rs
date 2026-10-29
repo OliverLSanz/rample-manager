@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
+mod managed;
 use notify::{RecursiveMode, Watcher};
 use rample_core::{
     audio::{native::AudioHost, Command, Status},
@@ -267,6 +268,8 @@ impl Library {
     }
 }
 struct AppState {
+    managed: Mutex<managed::ManagedLibrary>,
+    original_audition: Mutex<managed::AuditionSession>,
     library: Mutex<Library>,
     audio: AudioHost,
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
@@ -383,6 +386,7 @@ impl AppState {
                 if !root.is_dir() {
                     return Err("Choose a folder containing your kits.".into());
                 }
+                managed::guard_legacy_path(&l.support, &root, true)?;
                 l.session.remember();
                 self.audio.send(Command::Stop)?;
                 l.playing = false;
@@ -602,7 +606,11 @@ impl AppState {
             let checked = candidates
                 .iter()
                 .find(|c| c.id == file.id && c.fingerprint == file.fingerprint && c.convertible);
-            let result = if checked.is_some() {
+            let result = if let Err(error) =
+                managed::guard_legacy_path(&l.support, Path::new(&file.id), false)
+            {
+                Err(error)
+            } else if checked.is_some() {
                 conversion::convert(Path::new(&file.id), &file.fingerprint, &backups)
             } else {
                 Err("Sample changed or is no longer eligible. Review the current file before converting.".into())
@@ -775,6 +783,7 @@ fn main() {
                     .ok_or("Could not locate the app data folder")?
                     .join("Rample Preview")
             };
+            let managed = managed::ManagedLibrary::open(&support)?;
             let mut library = Library::new(support)?;
             let audio = AudioHost::new();
             library.scan(&HashSet::new(), false);
@@ -782,6 +791,8 @@ fn main() {
             library.save()?;
             let (tx, rx) = std::sync::mpsc::channel();
             let state = Arc::new(AppState {
+                managed: Mutex::new(managed),
+                original_audition: Mutex::default(),
                 library: Mutex::new(library),
                 audio,
                 watcher: Mutex::new(None),
@@ -842,6 +853,11 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            managed::list_samples,
+            managed::import_samples,
+            managed::audition_sample,
+            managed::stop_sample_audition,
+            managed::open_sample_audition,
             get_snapshot,
             get_transport,
             act,
@@ -870,12 +886,15 @@ mod tests {
     ) {
         let temp = tempfile::tempdir().unwrap();
         let support = temp.path().join("support");
+        let managed = managed::ManagedLibrary::open(&support).unwrap();
         let mut library = Library::new(support).unwrap();
         library.scan(&HashSet::new(), false);
         let audio = AudioHost::headless();
         library.synchronize(&audio).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let state = Arc::new(AppState {
+            managed: Mutex::new(managed),
+            original_audition: Mutex::default(),
             library: Mutex::new(library),
             audio,
             watcher: Mutex::new(None),

@@ -21,6 +21,22 @@ installation while keeping preferences and sample libraries.
 
 ## Use
 
+Open **Library samples…** to import loose mono PCM WAV files or a folder of WAVs
+into the app's private Library. Folder import includes nested folders and does
+not require Rample kit names or voice prefixes. Each Sample gets a stable identity
+and an initial name from its source filename. Identical file bytes are recognized
+across filenames, locations and restarts, retaining the existing Sample name.
+The results show each imported, recognized or failed file; an incomplete import
+is reported explicitly. **Audition** plays the unchanged Original independently
+of the kit mixer and sample editor, and **Stop audition** stops it.
+
+Completed imports preserve all Original bytes privately and work after removing
+the source. This first managed path supports nonempty mono integer PCM WAVs;
+other formats are reported as unsupported. It coexists with the folder workflow
+below; adding managed Samples to Kits and reversible managed editing follow in
+later work. Legacy conversion and **Save to sample** cannot modify managed
+Originals, and managed storage cannot be opened as a legacy folder.
+
 Choose **Open folder…** and select the root containing your kits:
 
 ```text
@@ -157,6 +173,18 @@ saves. Controlled hardware examples are still needed before implementing native
 configuration import/write. See the [capture guide in Spanish](docs/rample-sd-capture.es.md).
 
 ## Session preservation
+
+The private Library lives in `Library/` under the same app support folder as the
+legacy session. `library.sqlite3` stores stable Sample/Original identities, names,
+audio metadata and SHA-256 recognition; Original locators are relative to this
+store, with no dependency on external source paths. SQLite is bundled on both
+platforms. Complete verified Originals are published before their database
+references are committed. Interrupted temporary copies are discarded on restart;
+a complete file interrupted before its database commit stays unreferenced and
+is never presented as a completed import. Missing/damaged assets are reported,
+and audition checks their fingerprint rather than substituting another file.
+
+The legacy session remains separate:
 
 - macOS: `~/Library/Application Support/Rample Preview/session.json`
 - Windows: `%APPDATA%/Rample Preview/session.json`

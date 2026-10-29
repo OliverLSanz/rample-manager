@@ -25,6 +25,8 @@ pub enum Command {
     Audition(usize),
     Edit(Option<EditPreview>),
     AuditionSample(usize, Arc<PreparedSample>),
+    /// Independent, unmodified Library listening, unaffected by the Kit mixer/editor.
+    OriginalAudition(Option<Arc<PreparedSample>>),
 }
 #[derive(Clone)]
 pub struct EditPreview {
@@ -386,6 +388,7 @@ pub struct Renderer {
     rate: u32,
     voices: Vec<Voice>,
     tracks: [Track; 4],
+    original: Playback,
     bpm: f64,
     playing: bool,
     next_step: usize,
@@ -410,6 +413,7 @@ enum RenderCommand {
     Audition(usize),
     Edit(Option<RenderEdit>),
     AuditionSample(usize, Sound),
+    OriginalAudition(Option<Sound>),
 }
 /// Own this on a non-audio control thread. Preparation can read disk and build
 /// conversion tables. The renderer consumes only ready-to-play commands.
@@ -457,6 +461,12 @@ impl Control {
                     sample,
                 },
             ),
+            Command::OriginalAudition(sample) => {
+                RenderCommand::OriginalAudition(sample.map(|sample| Sound {
+                    kernel: Kernel::new(sample.spec.rate, self.rate),
+                    sample,
+                }))
+            }
             Command::Play => RenderCommand::Play,
             Command::Stop => RenderCommand::Stop,
             Command::Audition(i) => RenderCommand::Audition(i),
@@ -475,6 +485,7 @@ impl Renderer {
                 rate,
                 voices: vec![Voice::default(); 4],
                 tracks: std::array::from_fn(|_| Track::new()),
+                original: Playback::new(),
                 bpm: 120.,
                 playing: false,
                 next_step: 0,
@@ -550,6 +561,7 @@ impl Renderer {
                         t.preview.start(Some(sound));
                     }
                 }
+                RenderCommand::OriginalAudition(sound) => self.original.start(sound),
                 RenderCommand::Play => {
                     self.playing = true;
                     self.next_step = 0;
@@ -561,6 +573,7 @@ impl Renderer {
                     self.meters.running.store(true, Ordering::Relaxed);
                 }
                 RenderCommand::Stop => {
+                    self.original.start(None);
                     self.playing = false;
                     for t in &mut self.tracks {
                         t.sequence.start(None);
@@ -618,6 +631,9 @@ impl Renderer {
                 self.remaining -= 1.;
             }
             let mut mixed = [0.; 2];
+            let original = self.original.next(self.rate, &mut misses, &mut editor_peak);
+            mixed[0] += original[0] * 0.4;
+            mixed[1] += original[1] * 0.4;
             for (i, t) in self.tracks.iter_mut().enumerate() {
                 let a = t.sequence.next(self.rate, &mut misses, &mut editor_peak);
                 let b = t.preview.next(self.rate, &mut misses, &mut editor_peak);

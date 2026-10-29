@@ -1402,3 +1402,31 @@ footer > span {
   border-top: 1px solid #293035;
   box-shadow: 0 -10px 20px #1b1f25;
 }
+.library-samples,
+.library-import-results {
+  list-style: none;
+  padding: 0;
+  max-height: 32vh;
+  overflow: auto;
+}
+.library-samples li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid #34363c;
+}
+.library-samples li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.library-samples small {
+  display: block;
+  color: #999da8;
+  margin-top: 4px;
+}
+.library-import-results {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

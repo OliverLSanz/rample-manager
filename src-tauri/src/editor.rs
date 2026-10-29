@@ -70,12 +70,13 @@ pub(super) struct SaveReply {
     rendered: editing::Rendered,
 }
 impl AppState {
-    fn open_editor(&self, channel: usize) -> Result<EditorInfo, String> {
+    pub(super) fn open_editor(&self, channel: usize) -> Result<EditorInfo, String> {
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         if channel >= 4 {
             return Err("Invalid voice".into());
         }
         let path = l.session.voices[channel].sample_path.clone();
+        managed::guard_legacy_path(&l.support, Path::new(&path), false)?;
         let sample = l
             .samples(channel)
             .into_iter()
@@ -163,6 +164,7 @@ impl AppState {
         e.check(&id)?;
         settings.validate(&e.source.spec)?;
         let (path, channel, stamp) = (e.source.path.clone(), e.channel, e.fingerprint.clone());
+        managed::guard_legacy_path(&l.support, Path::new(&path), false)?;
         let backups = l.support.join("Sample edit backups");
         let (saved, rendered) = editing::save(Path::new(&path), &stamp, &settings, &backups)?;
         // Once the file is published, report that success even if a later preference write fails.

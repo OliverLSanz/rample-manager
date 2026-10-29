@@ -267,6 +267,41 @@ fn rendered_layers_follow_velocity_and_cycles() {
     }
 }
 #[test]
+fn original_audition_ignores_voice_mixer_and_editor_and_streams_long_audio() {
+    let temp = TempDir::new().unwrap();
+    let sample = prepared(temp.path(), "Original.wav", 8192, 44100 * 4);
+    assert_eq!(sample.head.len(), 88200);
+    let (mut renderer, control) = Renderer::new(44100, Meters::new());
+    let mut voices = vec![Voice::default(); 4];
+    voices[0].muted = true;
+    voices[0].volume = 0.;
+    voices[1].solo = true;
+    control.send(Command::Settings(voices, 120.)).unwrap();
+    let mut edits = rample_core::editing::Settings::original(4.);
+    edits.gain_db = -20.;
+    control
+        .send(Command::Edit(Some(rample_core::audio::EditPreview {
+            channel: 0,
+            sample: sample.clone(),
+            settings: edits,
+        })))
+        .unwrap();
+    control
+        .send(Command::OriginalAudition(Some(sample)))
+        .unwrap();
+    let mut out = vec![0.; 882];
+    renderer.render(&mut out, 2);
+    assert!(out.iter().all(|v| (*v - 0.1).abs() < 1e-5));
+    for _ in 0..310 {
+        renderer.render(&mut out, 2);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(out.iter().all(|v| (*v - 0.1).abs() < 1e-5));
+    control.send(Command::OriginalAudition(None)).unwrap();
+    renderer.render(&mut out, 2);
+    assert!(out.iter().all(|v| *v == 0.));
+}
+#[test]
 fn mute_solo_volume_and_tempo_changes_reach_pcm() {
     let t = TempDir::new().unwrap();
     let sample = prepared(t.path(), "1.wav", 8192, 44100);

@@ -1,5 +1,30 @@
 export type LayerMode =
   "manual" | "random" | "cyclic" | "reverseCyclic" | "velocity";
+export interface LibrarySample {
+  id: string;
+  originalId: string;
+  name: string;
+  sha256: string;
+  duration: number;
+  rate: number;
+  channels: number;
+  bits: number;
+  readable: boolean;
+  error: string | null;
+}
+export interface LibraryImportReply {
+  imported: number;
+  recognized: number;
+  failed: number;
+  complete: boolean;
+  samples: LibrarySample[];
+  results: {
+    source: string;
+    status: "imported" | "recognized" | "failed";
+    sample: LibrarySample | null;
+    error: string | null;
+  }[];
+}
 export interface Voice {
   kitID: string;
   samplePath: string;

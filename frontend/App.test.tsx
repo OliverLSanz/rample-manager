@@ -26,6 +26,9 @@ vi.mock("./native", () => ({
   reveal: vi.fn(),
   convertImports: vi.fn(),
   showBackups: vi.fn(),
+  listSamples: vi.fn(),
+  openSampleAudition: vi.fn(),
+  stopSampleAudition: vi.fn(),
 }));
 let snapshot: Snapshot;
 let update: (s: Snapshot) => void;
@@ -115,6 +118,26 @@ beforeEach(() => {
   });
   vi.mocked(native.reveal).mockResolvedValue(undefined);
   vi.mocked(native.showBackups).mockResolvedValue(undefined);
+});
+it("opens the managed Library alongside the current folder session", async () => {
+  vi.mocked(native.openSampleAudition).mockResolvedValue("owner-test");
+  vi.mocked(native.listSamples).mockResolvedValue([]);
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Library samples…" }),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "Library samples" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Import folder…" })).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Library samples" }),
+    ).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "Open folder…" })).toBeTruthy();
 });
 afterEach(() => {
   cleanup();
