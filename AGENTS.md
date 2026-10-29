@@ -50,7 +50,8 @@ Keep headless PCM/timing tests separate from hardware-dependent smoke tests:
 Changes to selected or automatic layers must reload in real time. Preserve the
 selected filename when a file is removed, so restoring it restores playback.
 Source audio is read-only during browsing/playback. The explicit exception is
-conversion approved in the sample-review modal: validate the reviewed fingerprint,
+conversion approved in the sample-review modal or explicit **Save to sample** in
+the editor: validate the reviewed fingerprint,
 back up the original under the app support folder, validate the complete output,
 recheck the source bytes and only then replace it. Never overwrite a different
 existing destination WAV. Export copies to a new kit and never overwrites one.
@@ -77,6 +78,23 @@ Decode/convert in bounded chunks off the audio thread. Corrupt/truncated files,
 read-only files, stale reviews and conflicting .wav names must preserve originals.
 Backups contain the original bytes and a restore.json manifest with paths/SHA-256.
 Never guess a voice/kit, silently rename collisions or write native .rpl settings.
+
+## Sample editor
+
+`editing.rs` owns the shared pitch/trim interpolation and gain/EQ/echo/reverb DSP.
+Live preview uses this same engine inside each playback; baking streams through
+it at 44.1 kHz into mono PCM16. FX tails are part of the sample and reset on each
+trigger, matching Rample retrigger behavior. Pitch is varispeed, not time stretch.
+Prepare sinc tables, coefficients, delay buffers and trim-start preloads on the
+control thread. Preserve bounded streaming and never read files in the callback.
+The editor is transient and applies only to its source path, not all voice layers.
+Bypass/close restore original playback. Save backs up original bytes under
+`Sample edit backups`, validates the full WAV, rechecks the source before atomic
+publication, clears preview to prevent double effects, and reloads the voice.
+Keep musical session/modes unchanged. Stale IDs and older preview requests must
+not affect a newer editor. External file changes disable preview/save until the
+sample is reopened. Failed post-save preference writes must still report a saved
+sample and backup accurately. Use owned fixtures for destructive editor QA.
 
 ## Session migration
 

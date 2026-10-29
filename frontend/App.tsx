@@ -29,12 +29,15 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  SlidersHorizontal,
   Square,
   TriangleAlert,
   Upload,
   X,
 } from "lucide-react";
 import * as native from "./native";
+import { Modal } from "./Modal";
+import { SampleEditor } from "./SampleEditor";
 import {
   basename,
   compatibilityWarnings,
@@ -51,6 +54,7 @@ import {
   type ReviewedFile,
   type ImportCandidate,
   type ConversionReply,
+  type EditorInfo,
 } from "./types";
 import "./style.css";
 const colors = ["#f68061", "#83c9ad", "#afa0df", "#dfc275"];
@@ -74,6 +78,7 @@ export default function App() {
   const [bank, setBank] = useState("All");
   const [exporting, setExporting] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [editor, setEditor] = useState<EditorInfo | null>(null);
   const [velocity, setVelocity] = useState<{
     channel: number;
     step: number;
@@ -179,9 +184,15 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    if (snapshot?.imports.length && !exporting && !velocity && !reviewing)
+    if (
+      snapshot?.imports.length &&
+      !exporting &&
+      !velocity &&
+      !reviewing &&
+      !editor
+    )
       setReviewing(true);
-  }, [snapshot?.imports.length, exporting, velocity, reviewing]);
+  }, [snapshot?.imports.length, exporting, velocity, reviewing, editor]);
   const convertImports = useCallback(async (files: ReviewedFile[]) => {
     await serial.current;
     const result = await native.convertImports(files);
@@ -214,7 +225,7 @@ export default function App() {
   }, [action]);
   useEffect(() => {
     function keydown(e: KeyboardEvent) {
-      if (exporting || velocity || reviewing) return;
+      if (exporting || velocity || reviewing || editor) return;
       const target = e.target;
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
         if (e.key.toLowerCase() === "o") {
@@ -245,9 +256,23 @@ export default function App() {
     }
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [action, openFolder, exporting, velocity, reviewing]);
+  }, [action, openFolder, exporting, velocity, reviewing, editor]);
   const reveal = useCallback((channel?: number) => {
     native.reveal(channel).catch((e) => setError(errorText(e)));
+  }, []);
+  const openEditor = useCallback(async (channel: number) => {
+    setBusy(true);
+    try {
+      await serial.current;
+      setEditor(await native.openEditor(channel));
+      setSnapshot((previous) =>
+        previous ? { ...previous, editorInvalidated: false } : previous,
+      );
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
   }, []);
   if (!snapshot)
     return (
@@ -289,7 +314,7 @@ export default function App() {
             <strong>RAMPLE</strong>
             <span>P R E V I E W</span>
           </div>
-          <small>2.2</small>
+          <small>2.3</small>
         </div>
         <div className="library-heading">
           <span>LIBRARY</span>
@@ -471,6 +496,7 @@ export default function App() {
                 activeIndex={transport.activeLayers[i]}
                 onAction={action}
                 onReveal={reveal}
+                onEdit={openEditor}
               />
             ))}
           </section>
@@ -593,6 +619,22 @@ export default function App() {
           </button>
         </div>
       )}
+      {editor && (
+        <SampleEditor
+          initial={editor}
+          transport={transport}
+          invalidated={!!snapshot.editorInvalidated}
+          onClose={() => setEditor(null)}
+          onSaved={(result) =>
+            setSnapshot((previous) =>
+              !previous || result.revision >= previous.revision
+                ? result
+                : previous,
+            )
+          }
+          onToggle={() => action({ type: "togglePlayback" })}
+        />
+      )}
       {reviewing && !exporting && !velocity && (
         <ImportDialog
           items={snapshot.imports}
@@ -667,6 +709,7 @@ const SampleCard = memo(function SampleCard({
   activeIndex,
   onAction,
   onReveal,
+  onEdit,
 }: {
   channel: number;
   voice: Voice;
@@ -678,6 +721,7 @@ const SampleCard = memo(function SampleCard({
   activeIndex: number;
   onAction: (a: Action) => Promise<void>;
   onReveal: (i: number) => void;
+  onEdit: (i: number) => Promise<void>;
 }) {
   const selectedExists = samples.some((s) => s.id === voice.samplePath);
   const missing = !!voice.samplePath && !selectedExists;
@@ -807,6 +851,15 @@ const SampleCard = memo(function SampleCard({
         >
           <Play size={10} fill="currentColor" />
           Audition<kbd>{channel + 1}</kbd>
+        </button>
+        <button
+          className="icon-button"
+          disabled={!selectedExists}
+          title="Edit selected sample with live sequence preview"
+          aria-label={`Edit sample for voice ${channel + 1}`}
+          onClick={() => void onEdit(channel)}
+        >
+          <SlidersHorizontal size={14} />
         </button>
         <button
           className="icon-button"
@@ -1021,70 +1074,6 @@ const TransportBar = memo(function TransportBar({
     </div>
   );
 });
-function Modal({
-  children,
-  onClose,
-  label,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-  label: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement;
-    (
-      ref.current?.querySelector<HTMLElement>("input:not(:disabled)") ??
-      ref.current?.querySelector<HTMLElement>("button")
-    )?.focus();
-    function key(e: KeyboardEvent) {
-      if (e.key === "Escape") closeRef.current();
-      if (e.key === "Tab") {
-        const focusable = ref.current?.querySelectorAll<HTMLElement>(
-          "button:not(:disabled),input:not(:disabled),select:not(:disabled)",
-        );
-        if (!focusable?.length) {
-          e.preventDefault();
-          return;
-        }
-        const first = focusable[0],
-          last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-    window.addEventListener("keydown", key);
-    return () => {
-      window.removeEventListener("keydown", key);
-      previous?.focus();
-    };
-  }, []);
-  return (
-    <div
-      className="modal-shade"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={label}
-        ref={ref}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
 function VelocityDialog({
   channel,
   step,

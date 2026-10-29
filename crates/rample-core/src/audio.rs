@@ -1,4 +1,5 @@
 use crate::{
+    editing::{Engine as EditEngine, Kernel},
     model::{LayerMode, Voice},
     wav::{self, PreparedSample},
 };
@@ -22,12 +23,21 @@ pub enum Command {
     Play,
     Stop,
     Audition(usize),
+    Edit(Option<EditPreview>),
+    AuditionSample(usize, Arc<PreparedSample>),
+}
+#[derive(Clone)]
+pub struct EditPreview {
+    pub channel: usize,
+    pub sample: Arc<PreparedSample>,
+    pub settings: crate::editing::Settings,
 }
 #[derive(Default)]
 pub struct Meters {
     pub running: AtomicBool,
     pub step: AtomicI32,
     pub peak: AtomicU32,
+    pub editor_peak: AtomicU32,
     pub active: [AtomicI32; 4],
     pub underruns: AtomicU64,
     pub frames: AtomicU64,
@@ -40,6 +50,7 @@ pub struct Status {
     pub running: bool,
     pub step: i32,
     pub peak: f32,
+    pub editor_peak: f32,
     pub active_layers: [i32; 4],
     pub underruns: u64,
     pub rendered_frames: u64,
@@ -59,6 +70,7 @@ impl Meters {
             running: self.running.load(Ordering::Relaxed),
             step: self.step.load(Ordering::Relaxed),
             peak: f32::from_bits(self.peak.load(Ordering::Relaxed)),
+            editor_peak: f32::from_bits(self.editor_peak.swap(0, Ordering::Relaxed)),
             active_layers: std::array::from_fn(|i| self.active[i].load(Ordering::Relaxed)),
             underruns: self.underruns.load(Ordering::Relaxed),
             rendered_frames: self.frames.load(Ordering::Relaxed),
@@ -103,7 +115,7 @@ impl DiskReader {
                     let Ok(mut file) = File::open(&sample.path) else {
                         continue;
                     };
-                    let mut frame = sample.head.len() as u64;
+                    let mut frame = sample.head_start + sample.head.len() as u64;
                     while frame < sample.spec.frames {
                         match rx.try_recv() {
                             Ok(next) => {
@@ -170,7 +182,7 @@ impl DiskReader {
         self.current = None;
         while self.chunks.try_recv().is_ok() {}
         let _ = self.requests.try_send(Request {
-            sample: sample.filter(|s| s.spec.frames > s.head.len() as u64),
+            sample: sample.filter(|s| s.spec.frames > s.head_start + s.head.len() as u64),
             token: self.token,
         });
     }
@@ -178,8 +190,10 @@ impl DiskReader {
         if index < 0 || index as u64 >= sample.spec.frames {
             return Some([0.; 2]);
         }
-        if (index as usize) < sample.head.len() {
-            return Some(sample.head[index as usize]);
+        if index as u64 >= sample.head_start
+            && (index as u64 - sample.head_start) < sample.head.len() as u64
+        {
+            return Some(sample.head[(index as u64 - sample.head_start) as usize]);
         }
         let index = index as u64;
         for _ in 0..10 {
@@ -201,51 +215,20 @@ impl DiskReader {
     }
 }
 
-/// Windowed-sinc tables are prepared on the control thread, never in the audio
-/// callback. Matched sample rates take an exact, unfiltered PCM path.
-struct Kernel {
-    phases: Vec<[f32; 32]>,
-}
-impl Kernel {
-    fn new(source: u32, output: u32) -> Arc<Self> {
-        let cutoff = (f64::from(output) / f64::from(source)).min(1.) * 0.95;
-        let phases = (0..1024)
-            .map(|phase| {
-                let mut coefficients = [0.; 32];
-                let mut sum = 0.;
-                for (i, c) in coefficients.iter_mut().enumerate() {
-                    let x = i as f64 - 15. - phase as f64 / 1024.;
-                    let window = if x.abs() < 16. {
-                        0.5 + 0.5 * (std::f64::consts::PI * x / 16.).cos()
-                    } else {
-                        0.
-                    };
-                    let value = if x.abs() < 1e-9 {
-                        cutoff
-                    } else {
-                        (std::f64::consts::PI * x * cutoff).sin() / (std::f64::consts::PI * x)
-                    } * window;
-                    *c = value as f32;
-                    sum += *c;
-                }
-                for c in &mut coefficients {
-                    *c /= sum;
-                }
-                coefficients
-            })
-            .collect();
-        Arc::new(Self { phases })
-    }
-}
 #[derive(Clone)]
 struct Sound {
     sample: Arc<PreparedSample>,
     kernel: Arc<Kernel>,
 }
+struct PlaybackEdit {
+    sample: Arc<PreparedSample>,
+    engine: EditEngine,
+}
 struct Playback {
     sound: Option<Sound>,
     cursor: f64,
     reader: DiskReader,
+    editor: Option<Box<PlaybackEdit>>,
 }
 impl Playback {
     fn new() -> Self {
@@ -253,17 +236,79 @@ impl Playback {
             sound: None,
             cursor: 0.,
             reader: DiskReader::new(),
+            editor: None,
         }
     }
-    fn start(&mut self, sound: Option<Sound>) {
+    fn set_editor(&mut self, value: Option<Box<PlaybackEdit>>) {
+        let active = self.sound.as_ref().is_some_and(|s| {
+            self.editor
+                .as_ref()
+                .is_some_and(|e| e.sample.path == s.sample.path)
+        });
+        match (self.editor.as_mut(), value) {
+            (Some(old), Some(new)) if old.sample.path == new.sample.path => {
+                let moved = old.sample.head_start != new.sample.head_start;
+                old.engine.update(new.engine);
+                old.sample = new.sample;
+                if moved && active {
+                    old.engine.reset();
+                    self.reader.reset(Some(old.sample.clone()));
+                }
+            }
+            (_, mut value) => {
+                if active {
+                    if let Some(old) = &self.editor {
+                        self.cursor = old.engine.source_position();
+                    }
+                }
+                if let Some(new) = &mut value {
+                    if self
+                        .sound
+                        .as_ref()
+                        .is_some_and(|s| s.sample.path == new.sample.path)
+                    {
+                        new.engine.follow_source(self.cursor);
+                    }
+                }
+                self.editor = value;
+            }
+        }
+    }
+    fn start(&mut self, mut sound: Option<Sound>) {
+        if let (Some(sound), Some(editor)) = (&mut sound, &mut self.editor) {
+            if sound.sample.path == editor.sample.path {
+                sound.sample = editor.sample.clone();
+                editor.engine.reset();
+            }
+        }
         self.reader.reset(sound.as_ref().map(|s| s.sample.clone()));
         self.sound = sound;
         self.cursor = 0.;
     }
-    fn next(&mut self, rate: u32, misses: &mut u64) -> [f32; 2] {
+    fn next(&mut self, rate: u32, misses: &mut u64, editor_peak: &mut f32) -> [f32; 2] {
         let Some(sound) = &self.sound else {
             return [0.; 2];
         };
+        if let Some(editor) = &mut self.editor {
+            if editor.sample.path == sound.sample.path {
+                return match editor
+                    .engine
+                    .next(|index| self.reader.frame(&editor.sample, index))
+                {
+                    Some((value, complete)) => {
+                        if !complete {
+                            *misses += 1;
+                        }
+                        *editor_peak = editor_peak.max(value.abs());
+                        [value.clamp(-1., 1.); 2]
+                    }
+                    None => {
+                        self.sound = None;
+                        [0.; 2]
+                    }
+                };
+            }
+        }
         let sample = &sound.sample;
         if self.cursor >= sample.spec.frames as f64 {
             self.sound = None;
@@ -352,12 +397,19 @@ struct RenderBank {
     channel: usize,
     sounds: Vec<Sound>,
 }
+struct RenderEdit {
+    channel: usize,
+    sequence: Box<PlaybackEdit>,
+    preview: Box<PlaybackEdit>,
+}
 enum RenderCommand {
     Settings(Vec<Voice>, f64),
     Bank(RenderBank),
     Play,
     Stop,
     Audition(usize),
+    Edit(Option<RenderEdit>),
+    AuditionSample(usize, Sound),
 }
 /// Own this on a non-audio control thread. Preparation can read disk and build
 /// conversion tables. The renderer consumes only ready-to-play commands.
@@ -384,6 +436,27 @@ impl Control {
                 v.iter_mut().for_each(Voice::normalize);
                 RenderCommand::Settings(v, bpm.clamp(30., 300.))
             }
+            Command::Edit(edit) => RenderCommand::Edit(match edit {
+                Some(edit) => Some(RenderEdit {
+                    channel: edit.channel,
+                    sequence: Box::new(PlaybackEdit {
+                        engine: EditEngine::new(&edit.sample.spec, self.rate, &edit.settings)?,
+                        sample: edit.sample.clone(),
+                    }),
+                    preview: Box::new(PlaybackEdit {
+                        engine: EditEngine::new(&edit.sample.spec, self.rate, &edit.settings)?,
+                        sample: edit.sample,
+                    }),
+                }),
+                None => None,
+            }),
+            Command::AuditionSample(i, sample) => RenderCommand::AuditionSample(
+                i,
+                Sound {
+                    kernel: Kernel::new(sample.spec.rate, self.rate),
+                    sample,
+                },
+            ),
             Command::Play => RenderCommand::Play,
             Command::Stop => RenderCommand::Stop,
             Command::Audition(i) => RenderCommand::Audition(i),
@@ -458,6 +531,25 @@ impl Renderer {
                         .position(|p| p == &self.voices[channel].sample_path);
                     self.meters.active[channel].store(-1, Ordering::Relaxed);
                 }
+                RenderCommand::Edit(edit) => {
+                    for (i, t) in self.tracks.iter_mut().enumerate() {
+                        if edit.as_ref().is_none_or(|e| e.channel != i) {
+                            t.sequence.set_editor(None);
+                            t.preview.set_editor(None);
+                        }
+                    }
+                    if let Some(edit) = edit {
+                        if let Some(track) = self.tracks.get_mut(edit.channel) {
+                            track.sequence.set_editor(Some(edit.sequence));
+                            track.preview.set_editor(Some(edit.preview));
+                        }
+                    }
+                }
+                RenderCommand::AuditionSample(i, sound) => {
+                    if let Some(t) = self.tracks.get_mut(i) {
+                        t.preview.start(Some(sound));
+                    }
+                }
                 RenderCommand::Play => {
                     self.playing = true;
                     self.next_step = 0;
@@ -501,6 +593,7 @@ impl Renderer {
         self.apply_commands();
         let mut peak: f32 = 0.;
         let mut misses = 0;
+        let mut editor_peak = 0f32;
         let any_solo = self.voices.iter().any(|v| v.solo);
         let gains: [f32; 4] = std::array::from_fn(|i| {
             if self.voices[i].muted || (any_solo && !self.voices[i].solo) {
@@ -526,8 +619,8 @@ impl Renderer {
             }
             let mut mixed = [0.; 2];
             for (i, t) in self.tracks.iter_mut().enumerate() {
-                let a = t.sequence.next(self.rate, &mut misses);
-                let b = t.preview.next(self.rate, &mut misses);
+                let a = t.sequence.next(self.rate, &mut misses, &mut editor_peak);
+                let b = t.preview.next(self.rate, &mut misses, &mut editor_peak);
                 mixed[0] += (a[0] + b[0]) * gains[i];
                 mixed[1] += (a[1] + b[1]) * gains[i];
             }
@@ -547,6 +640,9 @@ impl Renderer {
             }
         }
         self.meters.peak.store(peak.to_bits(), Ordering::Relaxed);
+        self.meters
+            .editor_peak
+            .fetch_max(editor_peak.to_bits(), Ordering::Relaxed);
         self.meters.underruns.fetch_add(misses, Ordering::Relaxed);
         self.meters
             .frames
@@ -593,6 +689,7 @@ pub mod native {
                     let mut shadow_bpm = 120.;
                     let mut banks: [Vec<Arc<PreparedSample>>; 4] = std::array::from_fn(|_| vec![]);
                     let mut running = false;
+                    let mut editor = None;
                     let mut connection: Option<(cpal::Stream, Control, String)> = None;
                     let mut checked = Instant::now() - Duration::from_secs(3);
                     loop {
@@ -619,6 +716,7 @@ pub mod native {
                                         for (i, bank) in banks.iter().enumerate() {
                                             let _ = control.send(Command::Bank(i, bank.clone()));
                                         }
+                                        let _ = control.send(Command::Edit(editor.clone()));
                                         if running {
                                             let _ = control.send(Command::Play);
                                         }
@@ -640,6 +738,7 @@ pub mod native {
                                         shadow_bpm = *b
                                     }
                                     Command::Bank(i, b) if *i < 4 => banks[*i] = b.clone(),
+                                    Command::Edit(edit) => editor = edit.clone(),
                                     Command::Play => running = true,
                                     Command::Stop => running = false,
                                     _ => {}

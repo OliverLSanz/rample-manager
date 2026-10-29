@@ -182,7 +182,8 @@ impl Scanner {
                 e.depth() == 0
                     || (!e.file_name().to_string_lossy().starts_with('.')
                         && e.file_name() != "Conversion backups"
-                        && e.file_name() != "_save")
+                        && e.file_name() != "_save"
+                        && e.file_name() != "Sample edit backups")
             })
             .filter_map(Result::ok)
             .filter(|e| e.file_type().is_file() && conversion::is_audio(e.path()))

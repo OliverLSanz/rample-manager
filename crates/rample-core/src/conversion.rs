@@ -110,6 +110,14 @@ fn unchanged(path: &Path, expected: &str) -> bool {
 /// Uses a reviewed fingerprint, rechecks the original bytes before replacement,
 /// and never overwrites a different file at the desired .wav destination.
 pub fn convert(source: &Path, expected: &str, backups: &Path) -> Result<Converted, String> {
+    replace_with(source, expected, backups, transcode)
+}
+pub(crate) fn replace_with(
+    source: &Path,
+    expected: &str,
+    backups: &Path,
+    render: impl FnOnce(&Path, &mut File) -> Result<(), String>,
+) -> Result<Converted, String> {
     if !unchanged(source, expected) {
         return Err("Sample changed since review. Check it again before converting.".into());
     }
@@ -163,7 +171,7 @@ pub fn convert(source: &Path, expected: &str, backups: &Path) -> Result<Converte
         .suffix(".tmp")
         .tempfile_in(parent)
         .map_err(|e| e.to_string())?;
-    transcode(&backup, temp.as_file_mut())?;
+    render(&backup, temp.as_file_mut())?;
     temp.as_file().sync_all().map_err(|e| e.to_string())?;
     let spec = wav::inspect(temp.path())?;
     if spec.rate != 44100
@@ -233,7 +241,7 @@ pub fn convert(source: &Path, expected: &str, backups: &Path) -> Result<Converte
     Ok(converted)
 }
 
-struct PcmWriter<'a> {
+pub(crate) struct PcmWriter<'a> {
     file: BufWriter<&'a mut File>,
     frames: u64,
     channels: u16,
@@ -241,7 +249,7 @@ struct PcmWriter<'a> {
     dither: bool,
 }
 impl<'a> PcmWriter<'a> {
-    fn new(file: &'a mut File, channels: u16, dither: bool) -> Result<Self, String> {
+    pub(crate) fn new(file: &'a mut File, channels: u16, dither: bool) -> Result<Self, String> {
         let mut file = BufWriter::new(file);
         file.write_all(&[0; 44]).map_err(|e| e.to_string())?;
         Ok(Self {
@@ -258,7 +266,7 @@ impl<'a> PcmWriter<'a> {
         self.rng ^= self.rng << 17;
         (self.rng >> 11) as f64 / ((1u64 << 53) as f64)
     }
-    fn frame(&mut self, values: [f64; 2], silence: bool) -> Result<(), String> {
+    pub(crate) fn frame(&mut self, values: [f64; 2], silence: bool) -> Result<(), String> {
         if self.frames >= (u32::MAX as u64 - 36) / (u64::from(self.channels) * 2) {
             return Err(
                 "Converted audio is too large for a standard RIFF WAV. The original is preserved."
@@ -284,7 +292,7 @@ impl<'a> PcmWriter<'a> {
         self.frames += 1;
         Ok(())
     }
-    fn finish(mut self) -> Result<(), String> {
+    pub(crate) fn finish(mut self) -> Result<(), String> {
         if self.frames == 0 {
             return Err("The sample contains no audio. The original is preserved.".into());
         }

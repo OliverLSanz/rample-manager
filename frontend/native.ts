@@ -7,6 +7,9 @@ import type {
   Transport,
   ReviewedFile,
   ConversionReply,
+  EditSettings,
+  EditorInfo,
+  EditorSaveReply,
 } from "./types";
 export const getSnapshot = () => invoke<Snapshot>("get_snapshot");
 export const act = (action: Action) => invoke<Snapshot>("act", { action });
@@ -27,3 +30,24 @@ export const reveal = (channel?: number) =>
 export const convertImports = (files: ReviewedFile[]) =>
   invoke<ConversionReply>("convert_imports", { files });
 export const showBackups = () => invoke<void>("show_backups");
+
+export const openEditor = (channel: number) =>
+  invoke<EditorInfo>("open_editor", { channel });
+export const previewEditor = (
+  id: string,
+  sequence: number,
+  settings: EditSettings,
+  enabled: boolean,
+) =>
+  invoke<{ sequence: number; duration: number }>("preview_editor", {
+    id,
+    sequence,
+    settings,
+    enabled,
+  });
+export const saveEditor = (id: string, settings: EditSettings) =>
+  invoke<EditorSaveReply>("save_editor", { id, settings });
+export const closeEditor = (id: string) => invoke<void>("close_editor", { id });
+export const auditionEditor = (id: string) =>
+  invoke<void>("audition_editor", { id });
+export const showEditBackups = () => invoke<void>("show_edit_backups");

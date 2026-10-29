@@ -80,11 +80,13 @@ export interface Snapshot {
   message: string | null;
   playing: boolean;
   imports: ImportCandidate[];
+  editorInvalidated?: boolean;
 }
 export interface Transport {
   running: boolean;
   step: number;
   peak: number;
+  editorPeak?: number;
   activeLayers: number[];
   underruns: number;
   renderedFrames: number;
@@ -195,4 +197,39 @@ export function compatibilityWarnings(snapshot: Snapshot) {
       ),
     ]),
   ];
+}
+
+export interface EditSettings {
+  start: number;
+  end: number;
+  gainDb: number;
+  pitch: number;
+  lowDb: number;
+  midDb: number;
+  highDb: number;
+  echoMix: number;
+  echoMs: number;
+  echoFeedback: number;
+  reverbMix: number;
+  reverbSeconds: number;
+}
+export interface EditorInfo {
+  id: string;
+  channel: number;
+  path: string;
+  fingerprint: string;
+  duration: number;
+  waveform: number[];
+  settings: EditSettings;
+}
+export interface EditorSaveReply {
+  snapshot: Snapshot;
+  editor: EditorInfo;
+  backup: string;
+  rendered: {
+    frames: number;
+    duration: number;
+    peak: number;
+    clippedFrames: number;
+  };
 }

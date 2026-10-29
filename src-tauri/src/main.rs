@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod editor;
 use notify::{RecursiveMode, Watcher};
 use rample_core::{
     audio::{native::AudioHost, Command, Status},
@@ -35,6 +36,7 @@ struct Snapshot {
     message: Option<String>,
     playing: bool,
     imports: Vec<Candidate>,
+    editor_invalidated: bool,
 }
 struct Library {
     revision: u64,
@@ -47,6 +49,7 @@ struct Library {
     reviews: Reviews,
     message: Option<String>,
     playing: bool,
+    editor: Option<editor::EditorState>,
 }
 impl Library {
     fn new(support: PathBuf) -> Result<Self, String> {
@@ -75,6 +78,7 @@ impl Library {
             support,
             message: None,
             playing: false,
+            editor: None,
         })
     }
     fn snapshot(&self, watching: bool) -> Snapshot {
@@ -99,6 +103,7 @@ impl Library {
             message: self.message.clone(),
             playing: self.playing,
             imports: self.reviews.pending(&self.session.root_path, &self.catalog),
+            editor_invalidated: self.editor.as_ref().is_some_and(|e| e.invalidated),
         }
     }
     fn samples(&self, i: usize) -> Vec<Sample> {
@@ -186,7 +191,13 @@ impl Library {
                 self.message = Some(e);
             }
         }
-        let changed = next != self.catalog || reviews_changed;
+        let mut changed = next != self.catalog || reviews_changed;
+        if let Some(e) = &mut self.editor {
+            if !e.invalidated && catalog::fingerprint(Path::new(&e.source.path)) != e.fingerprint {
+                e.invalidated = true;
+                changed = true;
+            }
+        }
         if changed {
             self.revision += 1;
         }
@@ -199,6 +210,12 @@ impl Library {
         changed
     }
     fn synchronize(&mut self, audio: &AudioHost) -> Result<(), String> {
+        if let Some(e) = &mut self.editor {
+            if e.invalidated && e.enabled {
+                audio.send(Command::Edit(None))?;
+                e.enabled = false;
+            }
+        }
         audio.send(Command::Settings(
             self.session.voices.clone(),
             self.session.bpm,
@@ -662,12 +679,15 @@ async fn convert_imports(
 }
 #[tauri::command]
 fn show_backups(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+    open_backup_folder(&state, "Conversion backups")
+}
+fn open_backup_folder(state: &AppState, folder: &str) -> Result<(), String> {
     let path = state
         .library
         .lock()
         .map_err(|_| "Library is unavailable")?
         .support
-        .join("Conversion backups");
+        .join(folder);
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")
@@ -828,6 +848,12 @@ fn main() {
             export_kit,
             convert_imports,
             show_backups,
+            editor::open_editor,
+            editor::preview_editor,
+            editor::save_editor,
+            editor::close_editor,
+            editor::audition_editor,
+            editor::show_edit_backups,
             reveal
         ])
         .run(tauri::generate_context!())
@@ -837,7 +863,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (
+    pub(super) fn fixture() -> (
         tempfile::TempDir,
         Arc<AppState>,
         std::sync::mpsc::Receiver<Vec<PathBuf>>,

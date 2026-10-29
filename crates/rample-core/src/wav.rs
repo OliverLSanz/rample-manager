@@ -156,13 +156,40 @@ pub struct PreparedSample {
     pub revision: String,
     pub spec: WavSpec,
     pub head: Vec<[f32; 2]>,
+    pub head_start: u64,
     pub waveform: Vec<f32>,
 }
 impl PreparedSample {
     pub fn load(path: &Path, revision: &str) -> Result<Arc<Self>, String> {
+        Self::load_at(path, revision, 0)
+    }
+    pub fn preload_at(&self, start: u64) -> Result<Arc<Self>, String> {
+        let head_start = start.min(self.spec.frames.saturating_sub(1));
+        let head = read_frames(
+            &mut File::open(&self.path).map_err(|e| e.to_string())?,
+            &self.spec,
+            head_start,
+            (self.spec.rate as usize * 2).min(262144),
+        )?;
+        Ok(Arc::new(Self {
+            path: self.path.clone(),
+            revision: self.revision.clone(),
+            spec: self.spec.clone(),
+            head_start,
+            head,
+            waveform: self.waveform.clone(),
+        }))
+    }
+    pub fn load_at(path: &Path, revision: &str, start: u64) -> Result<Arc<Self>, String> {
         let spec = inspect(path)?;
         let mut f = File::open(path).map_err(|e| e.to_string())?;
-        let head = read_frames(&mut f, &spec, 0, (spec.rate as usize * 2).min(262144))?;
+        let head_start = start.min(spec.frames.saturating_sub(1));
+        let head = read_frames(
+            &mut f,
+            &spec,
+            head_start,
+            (spec.rate as usize * 2).min(262144),
+        )?;
         let mut waveform = Vec::with_capacity(100);
         for i in 0..100 {
             let start = spec.frames * i / 100;
@@ -182,6 +209,7 @@ impl PreparedSample {
             revision: revision.into(),
             spec,
             head,
+            head_start,
             waveform,
         }))
     }

@@ -123,6 +123,33 @@ Review history lives in `sample-reviews.json` beside the musical session.
 A0–Z99 directory. Voice 1 is required. Original WAVs and existing kits are never
 overwritten. Export does not encode the sequencer, mixer or layer modes.
 
+### Edit a sample in context
+
+Click the sliders button beside **Audition** on a voice card to edit its selected
+sample. The editor previews just this file, including when automatic layer modes
+choose it; other layers and voices keep their sound. **Audition sample** always
+plays this exact file. **Play sequence** lets you hear the edits in context.
+
+- Drag either trim handle on the waveform, or enter start/end times in seconds.
+- Adjust Gain, Pitch (±24 semitones), and the three EQ bands (120 Hz, 1 kHz, 8 kHz).
+- Add Echo with amount, delay time and feedback, and/or Reverb with amount and decay.
+- Toggle **Preview edits** to compare with the original. Changes reach native audio
+  while playing; **Reset edits** returns controls to the current original file.
+- Pitch changes playback speed and duration. Effect tails are included in the saved
+  sample; repeated sequencer hits retrigger/cut those tails as on the hardware.
+- **Save to sample** replaces the WAV with mono PCM16/44.1 kHz audio containing all
+  edits. The original bytes and restore manifest are kept in **Sample edit backups**
+  beside app preferences; **Show edit backups** opens that folder. Samples shorter
+  than 50 ms are padded with silence. Lower Gain if the editor reports clipping.
+- Closing the editor discards unsaved preview edits. Settings reset after saving,
+  so the baked file is not processed twice. Mixer volume, mute/solo, sequencer
+  steps, velocity and BPM are not baked into the source.
+
+Live playback and saved output use the same bounded-memory DSP. The source stays
+untouched until Save. If an external editor changes the file, reopen it before
+saving so those changes are preserved. To undo a saved edit, close playback and
+restore the backup to the original path described in its `restore.json`.
+
 ### Native Rample SD settings remain pending
 
 The app never modifies `_save/*.rpl`. Its JSON preferences are not native Rample
