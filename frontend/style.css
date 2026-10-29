@@ -1430,3 +1430,33 @@ footer > span {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.library-search,
+.library-metadata label {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+.library-search input,
+.library-metadata input,
+.library-metadata textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #555963;
+  border-radius: 5px;
+  background: #17191e;
+  color: inherit;
+  font: inherit;
+}
+.library-metadata textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+.library-metadata button {
+  margin-top: 10px;
+}
+.library-samples button[aria-pressed="true"] {
+  border-color: #eaa335;
+  background: #40321e;
+}

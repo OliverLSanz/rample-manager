@@ -3,8 +3,21 @@ import { Modal } from "./Modal";
 import * as native from "./native";
 import { basename, type LibrarySample, type LibraryImportReply } from "./types";
 
-export function LibrarySamples({ onClose }: { onClose: () => void }) {
+/** Optional picker returns a Sample ID; display names are never identities. */
+export function LibrarySamples({
+  onClose,
+  onSelect,
+}: {
+  onClose: () => void;
+  onSelect?: (sampleId: string) => void;
+}) {
   const [samples, setSamples] = useState<LibrarySample[]>([]);
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<LibrarySample[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [report, setReport] = useState<LibraryImportReply | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -40,6 +53,51 @@ export function LibrarySamples({ onClose }: { onClose: () => void }) {
         void native.stopSampleAudition(session, true).catch(() => {});
     };
   }, []);
+  useEffect(() => {
+    if (!query.trim()) {
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    setMatches([]);
+    void native
+      .querySamples(query)
+      .then((rows) => {
+        if (!cancelled) setMatches(rows);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setSearching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [query, revision]);
+  const visibleSamples = query.trim() ? matches : samples;
+  const selected = samples.find((sample) => sample.id === selectedId);
+  async function saveMetadata(name: string, tags: string[]) {
+    if (!selectedId) return;
+    setBusy(true);
+    setSaved(false);
+    setError(null);
+    try {
+      const sample = await native.updateSampleMetadata(selectedId, name, tags);
+      if (mounted.current) {
+        setSamples((rows) =>
+          rows.map((row) => (row.id === sample.id ? sample : row)),
+        );
+        setRevision((value) => value + 1);
+        setSaved(true);
+      }
+    } catch (e) {
+      if (mounted.current) setError(String(e));
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
   async function importSources(folder: boolean) {
     setBusy(true);
     setError(null);
@@ -50,6 +108,7 @@ export function LibrarySamples({ onClose }: { onClose: () => void }) {
       if (mounted.current) {
         setSamples(reply.samples);
         setReport(reply);
+        setRevision((value) => value + 1);
       }
     } catch (e) {
       if (mounted.current) setError(String(e));
@@ -113,13 +172,40 @@ export function LibrarySamples({ onClose }: { onClose: () => void }) {
           </ul>
         </>
       )}
-      {!busy && samples.length === 0 && <p>No Samples yet.</p>}
-      {samples.length > 0 && (
+      <label className="library-search">
+        Search Samples by name or tag
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      {searching && <p role="status">Searching Samples…</p>}
+      {!busy && !searching && samples.length === 0 && <p>No Samples yet.</p>}
+      {!busy &&
+        !searching &&
+        samples.length > 0 &&
+        visibleSamples.length === 0 && <p>No matching Samples.</p>}
+      {visibleSamples.length > 0 && (
         <ul className="library-samples" aria-label="Library Samples">
-          {samples.map((sample) => (
+          {visibleSamples.map((sample) => (
             <li key={sample.id}>
               <div>
-                <strong>{sample.name}</strong>
+                <button
+                  disabled={busy}
+                  aria-label={`Select ${sample.name}`}
+                  aria-pressed={selectedId === sample.id}
+                  onClick={() => {
+                    setSelectedId(sample.id);
+                    setSaved(false);
+                    setError(null);
+                  }}
+                >
+                  {sample.name}
+                </button>
+                {sample.tags.length > 0 && (
+                  <small>{sample.tags.join(" · ")}</small>
+                )}
                 <small>
                   {sample.duration.toFixed(2)} s · {sample.rate} Hz ·{" "}
                   {sample.bits}-bit mono
@@ -137,15 +223,81 @@ export function LibrarySamples({ onClose }: { onClose: () => void }) {
           ))}
         </ul>
       )}
+      {selected && (
+        <SampleMetadata
+          key={selected.id}
+          sample={selected}
+          busy={busy}
+          onSave={saveMetadata}
+        />
+      )}
+      {saved && <p role="status">Metadata saved.</p>}
       {error && <p role="alert">{error}</p>}
       <div className="modal-buttons">
         <button disabled={!auditioning} onClick={() => void audition(null)}>
           Stop audition
         </button>
+        {onSelect && (
+          <button
+            disabled={busy || !selected?.readable}
+            onClick={() => {
+              if (selectedId) onSelect(selectedId);
+            }}
+          >
+            Use Sample
+          </button>
+        )}
         <button disabled={busy} onClick={onClose}>
           Close
         </button>
       </div>
     </Modal>
+  );
+}
+
+function SampleMetadata({
+  sample,
+  busy,
+  onSave,
+}: {
+  sample: LibrarySample;
+  busy: boolean;
+  onSave: (name: string, tags: string[]) => Promise<void>;
+}) {
+  const [name, setName] = useState(sample.name);
+  const [tags, setTags] = useState(sample.tags.join("\n"));
+  return (
+    <form
+      className="library-metadata"
+      aria-label="Sample metadata"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSave(
+          name,
+          tags.split(/\r?\n/).filter((tag) => tag.length > 0),
+        );
+      }}
+    >
+      <label>
+        Sample name
+        <input
+          value={name}
+          disabled={busy}
+          onChange={(event) => setName(event.target.value)}
+          required
+        />
+      </label>
+      <label>
+        Tags (one per line)
+        <textarea
+          value={tags}
+          disabled={busy}
+          onChange={(event) => setTags(event.target.value)}
+        />
+      </label>
+      <button disabled={busy || !name.trim()} type="submit">
+        Save metadata
+      </button>
+    </form>
   );
 }

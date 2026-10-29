@@ -854,6 +854,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             managed::list_samples,
+            managed::query_samples,
+            managed::update_sample_metadata,
             managed::import_samples,
             managed::audition_sample,
             managed::stop_sample_audition,

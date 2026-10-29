@@ -14,6 +14,7 @@ pub struct LibrarySample {
     pub id: String,
     pub original_id: String,
     pub name: String,
+    pub tags: Vec<String>,
     pub sha256: String,
     pub duration: f64,
     pub rate: u32,
@@ -60,7 +61,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 1 {
+        if version > 2 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -78,6 +79,15 @@ impl ManagedLibrary {
                 CREATE INDEX samples_original ON samples(original_id);
                 PRAGMA user_version=1;
                 COMMIT;",
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if version < 2 {
+            db.execute_batch(
+                "BEGIN IMMEDIATE;
+                 ALTER TABLE samples ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+                 PRAGMA user_version=2;
+                 COMMIT;",
             )
             .map_err(|e| e.to_string())?;
         }
@@ -101,7 +111,7 @@ impl ManagedLibrary {
             .db
             .prepare(
                 "SELECT s.id, s.original_id, s.name, o.sha256,
-            o.rate, o.channels, o.bits, o.frames FROM samples s JOIN originals o
+            o.rate, o.channels, o.bits, o.frames, s.tags FROM samples s JOIN originals o
             ON s.original_id=o.id ORDER BY s.rowid",
             )
             .map_err(|e| e.to_string())?;
@@ -117,13 +127,29 @@ impl ManagedLibrary {
         }
         Ok(samples)
     }
+    /// Literal Unicode-lowercase substring across the name or an individual tag.
+    /// Empty/whitespace query returns all Samples in stable import order.
+    pub fn query(&self, query: &str) -> Result<Vec<LibrarySample>, String> {
+        let query = query.trim().to_lowercase();
+        Ok(self
+            .list()?
+            .into_iter()
+            .filter(|sample| {
+                sample.name.to_lowercase().contains(&query)
+                    || sample
+                        .tags
+                        .iter()
+                        .any(|tag| tag.to_lowercase().contains(&query))
+            })
+            .collect())
+    }
     fn find_sample(&self, predicate: &str, value: &str) -> Result<Option<LibrarySample>, String> {
         // Predicate is one of the two fixed indexed lookups below, never external input.
         self.db
             .query_row(
                 &format!(
                     "SELECT s.id, s.original_id, s.name, o.sha256,
-            o.rate, o.channels, o.bits, o.frames FROM originals o JOIN samples s
+            o.rate, o.channels, o.bits, o.frames, s.tags FROM originals o JOIN samples s
             ON s.original_id=o.id WHERE {predicate} ORDER BY s.rowid LIMIT 1"
                 ),
                 [value],
@@ -131,6 +157,32 @@ impl ManagedLibrary {
             )
             .optional()
             .map_err(|e| e.to_string())
+    }
+    pub fn update_metadata(
+        &self,
+        id: &str,
+        name: String,
+        tags: Vec<String>,
+    ) -> Result<LibrarySample, String> {
+        if name.trim().is_empty() {
+            return Err("Sample name cannot be empty.".into());
+        }
+        let changed = self
+            .db
+            .execute(
+                "UPDATE samples SET name=?2, tags=?3 WHERE id=?1",
+                params![
+                    id,
+                    name,
+                    serde_json::to_string(&tags).map_err(|e| e.to_string())?
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err("Sample no longer exists".into());
+        }
+        self.find_sample("s.id=?1", id)?
+            .ok_or_else(|| "Sample no longer exists".into())
     }
     pub fn prepare(&self, id: &str) -> Result<Arc<PreparedSample>, String> {
         let sample = self
@@ -223,7 +275,7 @@ impl ManagedLibrary {
             .map_err(|e| e.to_string())?;
         transaction
             .execute(
-                "INSERT INTO samples VALUES (?1,?2,?3)",
+                "INSERT INTO samples (id, original_id, name) VALUES (?1,?2,?3)",
                 params![sample_id, original_id, name],
             )
             .map_err(|e| e.to_string())?;
@@ -233,6 +285,7 @@ impl ManagedLibrary {
                 id: sample_id,
                 original_id,
                 name,
+                tags: vec![],
                 sha256,
                 duration: spec.frames as f64 / f64::from(spec.rate),
                 rate: spec.rate,
@@ -342,6 +395,13 @@ fn sample_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibrarySample> {
         id: row.get(0)?,
         original_id: row.get(1)?,
         name: row.get(2)?,
+        tags: serde_json::from_str(&row.get::<_, String>(8)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                8,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
         sha256: row.get(3)?,
         rate,
         channels: row.get(5)?,
@@ -388,6 +448,23 @@ impl AppState {
             .lock()
             .map_err(|_| "Library is unavailable")?
             .import(paths)
+    }
+    pub fn query_samples(&self, query: String) -> Result<Vec<LibrarySample>, String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .query(&query)
+    }
+    pub fn update_sample_metadata(
+        &self,
+        id: String,
+        name: String,
+        tags: Vec<String>,
+    ) -> Result<LibrarySample, String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .update_metadata(&id, name, tags)
     }
     pub fn open_sample_audition(&self) -> Result<String, String> {
         let mut current = self
@@ -462,6 +539,28 @@ pub(super) async fn import_samples(
         .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub(super) async fn query_samples(
+    query: String,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<LibrarySample>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.query_samples(query))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(super) async fn update_sample_metadata(
+    id: String,
+    name: String,
+    tags: Vec<String>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<LibrarySample, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.update_sample_metadata(id, name, tags))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub(super) async fn audition_sample(
     id: String,
     session: String,
@@ -492,6 +591,134 @@ mod tests {
     use crate::{tests::fixture, Action, Library};
     use rample_core::wav;
     use std::path::Path;
+
+    #[test]
+    fn opening_a_v1_library_preserves_samples_and_adds_editable_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let support = temp.path().join("support");
+        let root = support.join("Library");
+        std::fs::create_dir_all(root.join("Originals")).unwrap();
+        let original = root.join("Originals/existing-original.wav");
+        wav::write_pcm16(&original, &[8192; 4410], 44100).unwrap();
+        let bytes = std::fs::read(&original).unwrap();
+        // A pre-feature store is an input fixture, never the behavioral oracle.
+        let db = rusqlite::Connection::open(root.join("library.sqlite3")).unwrap();
+        db.execute_batch("CREATE TABLE originals (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE,
+            rate INTEGER NOT NULL, channels INTEGER NOT NULL, bits INTEGER NOT NULL, frames INTEGER NOT NULL);
+            CREATE TABLE samples (id TEXT PRIMARY KEY, original_id TEXT NOT NULL REFERENCES originals(id), name TEXT NOT NULL);
+            CREATE INDEX samples_original ON samples(original_id);
+            PRAGMA user_version=1;").unwrap();
+        use sha2::Digest;
+        db.execute(
+            "INSERT INTO originals VALUES ('existing-original',?1,44100,1,16,4410)",
+            [format!("{:x}", sha2::Sha256::digest(&bytes))],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO samples VALUES ('existing-sample','existing-original','Existing name')",
+            [],
+        )
+        .unwrap();
+        drop(db);
+        let library = super::ManagedLibrary::open(&support).unwrap();
+        let sample = library.list().unwrap().remove(0);
+        assert_eq!(sample.id, "existing-sample");
+        assert_eq!(sample.original_id, "existing-original");
+        assert_eq!(sample.name, "Existing name");
+        assert!(sample.tags.is_empty());
+        library
+            .update_metadata(&sample.id, "Renamed".into(), vec!["warm".into()])
+            .unwrap();
+        drop(library);
+        let restarted = super::ManagedLibrary::open(&support).unwrap();
+        let sample = restarted.query("WARM").unwrap().remove(0);
+        assert_eq!(sample.id, "existing-sample");
+        assert_eq!(
+            std::fs::read(&restarted.prepare(&sample.id).unwrap().path).unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn sample_queries_match_literal_name_and_arbitrary_tags_and_keep_duplicate_names_distinct() {
+        let (temp, state, _) = fixture();
+        let first = temp.path().join("First.wav");
+        let second = temp.path().join("Second.wav");
+        wav::write_pcm16(&first, &[8192; 4410], 44100).unwrap();
+        wav::write_pcm16(&second, &[4096; 4410], 44100).unwrap();
+        let samples = state.import_samples(vec![first, second]).unwrap().samples;
+        state
+            .update_sample_metadata(
+                samples[0].id.clone(),
+                "Same kick".into(),
+                vec!["Café / 100%_warm".into(), "低音".into()],
+            )
+            .unwrap();
+        state
+            .update_sample_metadata(
+                samples[1].id.clone(),
+                "Same kick".into(),
+                vec!["dry".into()],
+            )
+            .unwrap();
+        assert_eq!(state.query_samples("SAME KICK".into()).unwrap().len(), 2);
+        assert_eq!(
+            state.query_samples("café / 100%_".into()).unwrap()[0].id,
+            samples[0].id
+        );
+        assert_eq!(
+            state.query_samples("低音".into()).unwrap()[0].id,
+            samples[0].id
+        );
+        assert!(state.query_samples("%wildcard".into()).unwrap().is_empty());
+        assert_eq!(state.query_samples("  ".into()).unwrap().len(), 2);
+        let session = state.open_sample_audition().unwrap();
+        for sample in &samples {
+            state
+                .audition_sample(session.clone(), sample.id.clone())
+                .unwrap();
+        }
+        drop(state);
+        let restarted = super::ManagedLibrary::open(&temp.path().join("support")).unwrap();
+        assert_eq!(restarted.query("DRY").unwrap()[0].id, samples[1].id);
+    }
+
+    #[test]
+    fn metadata_survives_restart_and_renamed_reimport_without_changing_identity_or_audio() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let original = state
+            .import_samples(vec![source.clone()])
+            .unwrap()
+            .samples
+            .remove(0);
+        let tags = vec!["drums".into(), "café / warm, soft".into(), "低音".into()];
+        let edited = state
+            .update_sample_metadata(original.id.clone(), "My warm kick".into(), tags.clone())
+            .unwrap();
+        assert_eq!(
+            (&edited.id, &edited.original_id, &edited.sha256),
+            (&original.id, &original.original_id, &original.sha256)
+        );
+        assert_eq!(edited.name, "My warm kick");
+        assert_eq!(edited.tags, tags);
+        let renamed = temp.path().join("Different.wav");
+        std::fs::rename(source, &renamed).unwrap();
+        drop(state);
+        let mut restarted = super::ManagedLibrary::open(&temp.path().join("support")).unwrap();
+        let reply = restarted.import(vec![renamed]).unwrap();
+        assert_eq!(
+            (reply.imported, reply.recognized, reply.samples.len()),
+            (0, 1, 1)
+        );
+        let sample = &reply.results[0].sample.as_ref().unwrap();
+        assert_eq!(sample.id, original.id);
+        assert_eq!(sample.name, "My warm kick");
+        assert_eq!(sample.tags, tags);
+        assert_eq!(restarted.prepare(&sample.id).unwrap().head[0], [0.25, 0.25]);
+        assert_eq!(restarted.list().unwrap()[0].tags, tags);
+    }
 
     #[test]
     fn import_rejects_truncated_metadata_after_audio_and_preserves_valid_metadata_exactly() {

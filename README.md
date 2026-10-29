@@ -30,6 +30,13 @@ The results show each imported, recognized or failed file; an incomplete import
 is reported explicitly. **Audition** plays the unchanged Original independently
 of the kit mixer and sample editor, and **Stop audition** stops it.
 
+Select a Sample in the Library to edit its descriptive name and tags (one tag per
+line). Tags can contain spaces, punctuation and Unicode text. Search matches a
+literal, case-insensitive part of a name or tag. Renaming and tagging do not rename
+Original files or change Sample identity. Reimporting known audio retains this
+metadata, including after restarting the app. Samples with the same name remain
+separate entries; selecting or auditioning a row always uses its Sample ID.
+
 Completed imports preserve all Original bytes privately and work after removing
 the source. This first managed path supports nonempty mono integer PCM WAVs;
 other formats are reported as unsupported. It coexists with the folder workflow

@@ -4,6 +4,7 @@ export interface LibrarySample {
   id: string;
   originalId: string;
   name: string;
+  tags: string[];
   sha256: string;
   duration: number;
   rate: number;
