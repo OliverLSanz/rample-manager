@@ -881,9 +881,11 @@ const TransportBar = memo(function TransportBar({
   function commit() {
     focused.current = false;
     const value = Number(text);
-    if (Number.isFinite(value) && text.trim())
-      void onAction({ type: "setBpm", value });
-    else setText(String(Math.round(bpm)));
+    if (Number.isFinite(value) && text.trim()) {
+      const normalized = Math.min(300, Math.max(30, Math.round(value)));
+      setText(String(normalized));
+      void onAction({ type: "setBpm", value: normalized });
+    } else setText(String(Math.round(bpm)));
   }
   return (
     <div className="transport">
@@ -920,13 +922,13 @@ const TransportBar = memo(function TransportBar({
           <div>
             <button
               aria-label="Decrease tempo"
-              onClick={() => void onAction({ type: "setBpm", value: bpm - 1 })}
+              onClick={() => void onAction({ type: "adjustBpm", delta: -1 })}
             >
               <Minus size={10} />
             </button>
             <button
               aria-label="Increase tempo"
-              onClick={() => void onAction({ type: "setBpm", value: bpm + 1 })}
+              onClick={() => void onAction({ type: "adjustBpm", delta: 1 })}
             >
               <Plus size={10} />
             </button>

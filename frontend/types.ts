@@ -86,7 +86,8 @@ export type Action =
   | { type: "setVolume"; channel: number; value: number }
   | { type: "toggleMute" | "toggleSolo" | "audition"; channel: number }
   | { type: "setVelocity"; channel: number; step: number; value: number }
-  | { type: "setBpm"; value: number };
+  | { type: "setBpm"; value: number }
+  | { type: "adjustBpm"; delta: number };
 export const modes: { id: LayerMode; title: string; description: string }[] = [
   {
     id: "manual",

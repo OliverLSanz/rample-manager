@@ -288,6 +288,9 @@ enum Action {
     SetBpm {
         value: f64,
     },
+    AdjustBpm {
+        delta: f64,
+    },
     BasicPattern,
     ClearPattern,
     Refresh,
@@ -427,6 +430,11 @@ impl AppState {
             Action::SetBpm { value } => {
                 if value.is_finite() {
                     l.session.bpm = value.clamp(30., 300.)
+                }
+            }
+            Action::AdjustBpm { delta } => {
+                if delta.is_finite() {
+                    l.session.bpm = (l.session.bpm + delta).clamp(30., 300.)
                 }
             }
             Action::BasicPattern => {
@@ -708,6 +716,20 @@ mod tests {
         assert_eq!(original.session.voices[0].steps, before);
         let saved = session::load(Path::new(&original.support_path)).unwrap();
         assert_eq!(saved.voices[0].layer_mode, LayerMode::Reverse);
+    }
+    #[test]
+    fn tempo_adjustments_accumulate_and_clamp() {
+        let (_temp, state, _) = fixture();
+        state.act(Action::SetBpm { value: 137. }).unwrap();
+        state.act(Action::AdjustBpm { delta: 1. }).unwrap();
+        let next = state.act(Action::AdjustBpm { delta: 1. }).unwrap();
+        assert_eq!(next.session.bpm, 139.);
+        let high = state.act(Action::AdjustBpm { delta: 500. }).unwrap();
+        assert_eq!(high.session.bpm, 300.);
+        let low = state.act(Action::AdjustBpm { delta: -500. }).unwrap();
+        assert_eq!(low.session.bpm, 30.);
+        let saved = session::load(Path::new(&low.support_path)).unwrap();
+        assert_eq!(saved.bpm, 30.);
     }
     #[test]
     fn native_watcher_reports_atomic_wav_replacement() {

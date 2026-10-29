@@ -162,6 +162,28 @@ describe("desktop UI parity", () => {
       );
     }
   });
+  it("normalizes the tempo field even when the saved tempo stays at its limit", async () => {
+    snapshot.session.bpm = 300;
+    await boot();
+    const tempo = screen.getByRole("spinbutton", { name: "Tempo in BPM" });
+    fireEvent.focus(tempo);
+    fireEvent.change(tempo, { target: { value: "999" } });
+    fireEvent.blur(tempo);
+    expect((tempo as HTMLInputElement).value).toBe("300");
+    await waitFor(() =>
+      expect(native.act).toHaveBeenCalledWith({ type: "setBpm", value: 300 }),
+    );
+  });
+  it("sends relative tempo adjustments for rapid button presses", async () => {
+    await boot();
+    fireEvent.click(screen.getByLabelText("Increase tempo"));
+    fireEvent.click(screen.getByLabelText("Increase tempo"));
+    await waitFor(() => expect(native.act).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(native.act).mock.calls.map(([action]) => action)).toEqual([
+      { type: "adjustBpm", delta: 1 },
+      { type: "adjustBpm", delta: 1 },
+    ]);
+  });
   it("handles transport keyboard shortcuts while leaving text fields alone", async () => {
     await boot();
     fireEvent.keyDown(window, { code: "Space", key: " " });
