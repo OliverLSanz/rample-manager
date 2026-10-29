@@ -1,5 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
+# Bundling requires Apple tools, not Python packages with the same names.
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 PROJECT_DIR="${0:A:h:h}"
 cd "$PROJECT_DIR"
 INSTALL_DIR="${RAMPLE_INSTALL_DIR:-/Applications}"
