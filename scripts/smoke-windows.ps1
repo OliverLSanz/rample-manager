@@ -1,6 +1,9 @@
 param([string]$InstallerPath)
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Run this check on Windows.' }
+if ($env:GITHUB_ACTIONS -ne 'true') {
+    throw 'Run this installer check only on a disposable GitHub Actions Windows runner.'
+}
 if (-not $InstallerPath) {
     $InstallerPath = (Get-ChildItem 'target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1).FullName
 }
