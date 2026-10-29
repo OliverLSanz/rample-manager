@@ -9,8 +9,7 @@ engine. Everything works locally and offline; no account or server is required.
 - **macOS:** open the DMG and copy **Rample Preview** to Applications. The build
   currently targets Apple Silicon and macOS 14+. Codex installs local changes with
   `./scripts/install.sh`; the previous Swift app is kept as a local backup.
-- **Windows:** run the `Rample Preview_2.0.0_x64-setup.exe` installer. It installs
-  for the current user. Windows 10/11 x64 and the WebView2 runtime are required;
+- **Windows:** run the x64 `.exe` installer. It installs for the current user. Windows 10/11 x64 and the WebView2 runtime are required;
   the installer can install WebView2 if needed. A publisher signing certificate
   is not configured, so Windows may display an unknown-publisher warning.
 
