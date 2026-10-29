@@ -86,6 +86,9 @@ compatibility need controlled saves from Oliver's module before import/write
 support can be enabled. Export still copies one selected sample per voice; it
 does not encode layer modes or the sequencer for the module.
 
+See the [step-by-step capture guide (Spanish)](docs/rample-sd-capture.es.md) to
+generate the controlled STORE/SAVE SETTINGS examples needed for this next step.
+
 Evidence: [Squarp manual](https://squarp.net/rample/manual/) and
 [Romper's hardware-save investigation](https://github.com/peteb4ker/romper/blob/main/docs/developer/rample-save-integration.md).
 
