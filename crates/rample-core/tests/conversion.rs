@@ -112,7 +112,7 @@ fn sample_rate_conversion_preserves_duration_and_dc_level() {
         .all(|v| (v[0] - 8000. / 32768.).abs() < 0.0001));
 }
 #[test]
-fn aiff_stereo_is_converted_renamed_and_backed_up() {
+fn aiff_stereo_is_mixed_to_mono_renamed_and_backed_up() {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("1_stereo.aiff");
     let frames = 4410u32;
@@ -137,21 +137,16 @@ fn aiff_stereo_is_converted_renamed_and_backed_up() {
     assert!(!path.exists());
     assert_eq!(fs::read(&done.backup).unwrap(), bytes);
     let spec = wav::inspect(Path::new(&done.target)).unwrap();
-    assert_eq!((spec.rate, spec.channels, spec.frames), (44100, 2, 4410));
+    assert_eq!((spec.rate, spec.channels, spec.frames), (44100, 1, 4410));
     let audio =
         wav::read_frames(&mut fs::File::open(done.target).unwrap(), &spec, 100, 50).unwrap();
-    assert!(
-        audio
-            .iter()
-            .all(|f| (f[0] - 10000. / 32768.).abs() < 0.0001
-                && (f[1] + 5000. / 32768.).abs() < 0.0001)
-    );
+    assert!(audio.iter().all(|f| (f[0] - 2500. / 32768.).abs() < 0.0001));
 }
 #[test]
 fn flac_and_mp3_decode_to_compatible_wavs() {
     let temp = TempDir::new().unwrap();
     for (name, hex, channels) in [
-        ("1_stereo.flac", include_str!("fixtures/stereo-flac.hex"), 2),
+        ("1_stereo.flac", include_str!("fixtures/stereo-flac.hex"), 1),
         ("2_mono.mp3", include_str!("fixtures/mono-mp3.hex"), 1),
     ] {
         let path = encoded(temp.path(), name, hex);
@@ -311,10 +306,106 @@ fn float_high_bit_depth_and_multichannel_inputs_are_converted() {
         conversion::convert(&path, &fingerprint(&path), &temp.path().join("backups")).unwrap();
         let spec = wav::inspect(&path).unwrap();
         assert_eq!((spec.rate, spec.bits, spec.frames), (44100, 16, 4410));
-        assert_eq!(spec.channels, if channels == 2 { 2 } else { 1 });
+        assert_eq!(spec.channels, 1);
         let audio = wav::read_frames(&mut fs::File::open(path).unwrap(), &spec, 100, 100).unwrap();
-        let expected = if channels > 2 { 0.0625 } else { 0.25 };
+        let expected = if channels > 1 { 0.0625 } else { 0.25 };
         assert!(audio.iter().all(|f| (f[0] - expected).abs() < 0.0001));
+    }
+}
+#[test]
+fn stereo_layers_are_fixable_without_rewriting_compatible_mono_layers() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("SD");
+    pcm(&root, "1_valid.wav", 44100, 4410);
+    let mono = pcm(&root, "4_mono.wav", 44100, 4410);
+    let original_mono = fs::read(&mono).unwrap();
+    let stereo = raw_wave(temp.path(), 1, 16, 2, 44100, &vec![0.5; 8820]);
+    let source = root.join("A0").join("4_stereo.wav");
+    fs::rename(stereo, &source).unwrap();
+    let mut scanner = Scanner::default();
+    let mut reviews = Reviews::default();
+    let key = root.to_str().unwrap();
+    let catalog = scanner.scan(&root, &HashSet::new(), false);
+    reviews.update(key, &catalog);
+    let pending = reviews.pending(key, &catalog);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, source.to_string_lossy());
+    assert!(pending[0].convertible);
+    let converted = conversion::convert(
+        &source,
+        &pending[0].fingerprint,
+        &temp.path().join("backups"),
+    )
+    .unwrap();
+    assert_eq!(
+        wav::inspect(Path::new(&converted.target)).unwrap().channels,
+        1
+    );
+    assert_eq!(fs::read(mono).unwrap(), original_mono);
+    let next = scanner.scan(&root, &HashSet::new(), true);
+    assert!(next.kits[0].warnings.is_empty());
+    reviews.update(key, &next);
+    assert!(reviews.pending(key, &next).is_empty());
+}
+#[test]
+fn mono_policy_reopens_old_stereo_reviews_once_and_respects_new_declines() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("SD");
+    fs::create_dir_all(root.join("A0")).unwrap();
+    let stereo = raw_wave(temp.path(), 1, 16, 2, 44100, &vec![0.5; 8820]);
+    let source = root.join("A0").join("1_stereo.wav");
+    fs::rename(stereo, &source).unwrap();
+    let other = pcm(&root, "2_rate.wav", 48000, 4800);
+    let key = root.to_str().unwrap();
+    let support = temp.path().join("support");
+    fs::create_dir(&support).unwrap();
+    let legacy = serde_json::json!({"libraries": {key: {
+        "fingerprints": {source.to_str().unwrap(): fingerprint(&source), other.to_str().unwrap(): fingerprint(&other)},
+        "pending": []
+    }}});
+    fs::write(
+        support.join("sample-reviews.json"),
+        serde_json::to_vec(&legacy).unwrap(),
+    )
+    .unwrap();
+    let mut reviews = Reviews::load(&support).unwrap();
+    let catalog = Scanner::default().scan(&root, &HashSet::new(), false);
+    // A stereo voice 1 can open on hardware even though this app now targets mono.
+    assert!(!catalog.kits[0]
+        .warnings
+        .iter()
+        .any(|w| w.contains("cannot open")));
+    reviews.update(key, &catalog);
+    let pending = reviews.pending(key, &catalog);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, source.to_string_lossy());
+    reviews.dismiss(
+        key,
+        &[ReviewedFile {
+            id: pending[0].id.clone(),
+            fingerprint: pending[0].fingerprint.clone(),
+        }],
+    );
+    reviews.save(&support).unwrap();
+    let mut restored = Reviews::load(&support).unwrap();
+    restored.update(key, &catalog);
+    assert!(restored.pending(key, &catalog).is_empty());
+    restored.request_all(key, &catalog);
+    assert_eq!(restored.pending(key, &catalog).len(), 2);
+}
+#[test]
+fn mono_mix_averages_both_channels_without_clipping_and_preserves_duration() {
+    let temp = TempDir::new().unwrap();
+    for (left, right, expected) in [(0.75, 0.75, 0.75), (0.5, 0., 0.25), (0.5, -0.5, 0.)] {
+        let samples: Vec<_> = (0..4410).flat_map(|_| [left, right]).collect();
+        let path = raw_wave(temp.path(), 1, 16, 2, 44100, &samples);
+        conversion::convert(&path, &fingerprint(&path), &temp.path().join("backups")).unwrap();
+        let spec = wav::inspect(&path).unwrap();
+        assert_eq!((spec.channels, spec.frames), (1, 4410));
+        let audio = wav::read_frames(&mut fs::File::open(path).unwrap(), &spec, 0, 4410).unwrap();
+        assert!(audio
+            .iter()
+            .all(|frame| (frame[0] - expected).abs() <= 2. / 32768.));
     }
 }
 #[test]

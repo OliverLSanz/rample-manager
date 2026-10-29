@@ -95,8 +95,8 @@ files are left alone. Declining is remembered across refreshes and restarts;
 **Check formats** opens the review again when you want it.
 
 The built-in converter supports WAV, AIFF/AIFC, FLAC, MP3, Ogg Vorbis and supported
-AAC/ALAC M4A files. It writes standard uncompressed **16-bit PCM WAV at 44.1 kHz**,
-preserving mono/stereo. More than two channels are mixed to mono; samples shorter
+AAC/ALAC M4A files. It writes standard uncompressed **mono 16-bit PCM WAV at 44.1 kHz**.
+Stereo is averaged as (L + R) / 2; additional channels are averaged too. Samples shorter
 than 50 ms receive trailing silence. Resampling is band-limited and bit-depth
 reduction uses dither. Non-WAV originals become a `.wav` with the same stem;
 an existing destination WAV is never overwritten. The converter is bundled and
@@ -111,8 +111,12 @@ The library detects the restored audio automatically.
 
 Changes during conversion, unreadable/incomplete files and read-only sources are
 reported without replacing the original. Invalid kit locations, wrong voice
-prefixes, missing voice 1, more than 12 layers and mixed mono/stereo layers are
-shown as issues requiring manual changes. Conversion only fixes audio format.
+prefixes, missing voice 1 and more than 12 layers are shown as issues requiring
+manual changes. Mixed mono/stereo layers are fixed by converting the stereo
+files to mono; compatible mono files are left alone. Stereo WAVs are offered for
+conversion even when their other format settings already meet Rample requirements.
+On upgrading to 2.2, previously reviewed stereo files are offered once again for
+the new mono policy. Later declines are remembered as usual.
 Review history lives in `sample-reviews.json` beside the musical session.
 
 **Export kit** copies one selected compatible mono WAV per voice into a new

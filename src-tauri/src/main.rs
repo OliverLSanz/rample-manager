@@ -924,17 +924,18 @@ mod tests {
         assert_eq!(state.library.lock().unwrap().banks[0][0].spec.rate, 44100);
     }
     #[test]
-    fn successful_conversion_does_not_reprompt_for_remaining_kit_issues() {
+    fn converting_a_stereo_layer_resolves_mixed_layers_without_reprompting() {
         let (_temp, state, _) = fixture();
         let root = PathBuf::from(state.snapshot().session.root_path);
         let path = root.join("A0").join("1_Stereo.wav");
-        wav::write_pcm16(&path, &vec![8000; 9600], 48000).unwrap();
+        wav::write_pcm16(&path, &vec![8000; 9600], 44100).unwrap();
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[22..24].copy_from_slice(&2u16.to_le_bytes());
-        bytes[28..32].copy_from_slice(&192000u32.to_le_bytes());
+        bytes[28..32].copy_from_slice(&176400u32.to_le_bytes());
         bytes[32..34].copy_from_slice(&4u16.to_le_bytes());
         std::fs::write(&path, bytes).unwrap();
         let detected = state.act(Action::Refresh).unwrap();
+        assert_eq!(detected.imports.len(), 1);
         let candidate = detected
             .imports
             .iter()
@@ -949,10 +950,8 @@ mod tests {
             .unwrap();
         assert!(result.results[0].error.is_none());
         assert!(result.snapshot.imports.is_empty());
-        assert!(result.snapshot.catalog.kits[0]
-            .warnings
-            .iter()
-            .any(|w| w.contains("mixed mono")));
+        assert_eq!(wav::inspect(&path).unwrap().channels, 1);
+        assert!(result.snapshot.catalog.kits[0].warnings.is_empty());
         assert!(state.act(Action::Refresh).unwrap().imports.is_empty());
     }
     #[test]

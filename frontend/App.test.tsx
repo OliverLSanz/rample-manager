@@ -281,6 +281,8 @@ describe("new sample review", () => {
     await screen.findByRole("dialog", { name: "New samples detected" });
     expect(native.convertImports).not.toHaveBeenCalled();
     expect(screen.getByText(/backed up before replacement/)).toBeTruthy();
+    expect(screen.getByText("MONO · WAV PCM · 16-bit · 44.1 kHz")).toBeTruthy();
+    expect(screen.getByText(/All audio is converted to mono/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Keep originals" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(native.act).toHaveBeenCalledWith({

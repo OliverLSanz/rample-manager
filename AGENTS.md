@@ -62,11 +62,16 @@ folder loading. `sample-reviews.json` remembers per-library reviews; declining
 must survive force refreshes/restarts and pending reviews must survive restart.
 `Check formats` explicitly reopens all current issues. Keep review state separate
 from the musical session. Files outside an A0–Z99 kit, bad voice prefixes, missing
-voice 1, excess layers and mixed mono/stereo layers require manual fixes.
+voice 1 and excess layers require manual fixes. Mixed mono/stereo layers are
+resolved by converting stereo layers to mono; leave compatible mono layers alone.
 
 Use the bundled Rust decoder/converter; no FFmpeg installation is required.
-Target standard PCM16 WAV at 44.1 kHz; preserve mono/stereo, mix >2 channels to
-mono with disclosed consent, and pad short files with trailing silence to 50 ms.
+Target standard mono PCM16 WAV at 44.1 kHz. Average all input channels (stereo:
+(L + R) / 2) with disclosed consent, and pad short files with silence to 50 ms.
+Mono is the user-requested preparation policy, even for otherwise valid stereo
+WAVs. Reopen old stereo reviews once when introducing this policy; subsequent
+declines must persist. Do not report already compatible mono layers as needing
+manual fixes solely because another layer is stereo.
 Preserve duration and use band-limited resampling and dither where needed.
 Decode/convert in bounded chunks off the audio thread. Corrupt/truncated files,
 read-only files, stale reviews and conflicting .wav names must preserve originals.

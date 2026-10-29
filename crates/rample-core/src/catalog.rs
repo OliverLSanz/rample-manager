@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
+const MONO_WARNING: &str = "This app prepares mono kits. Audio channels will be mixed to mono.";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -124,10 +125,11 @@ impl Scanner {
                 Err(e) => warnings.push(format!("Could not read this kit: {e}")),
             }
             samples.sort_by(|a, b| natord::compare(&a.name, &b.name));
-            if !samples
-                .iter()
-                .any(|s| s.voice == 1 && s.readable && s.warnings.is_empty())
-            {
+            if !samples.iter().any(|s| {
+                s.voice == 1
+                    && s.readable
+                    && s.warnings.iter().all(|warning| warning == MONO_WARNING)
+            }) {
                 warnings
                     .push("Voice 1 needs a compatible WAV; Rample cannot open this kit.".into());
             }
@@ -153,7 +155,8 @@ impl Scanner {
             for sample in &mut samples {
                 for warning in &warnings {
                     if warning.contains("needs a compatible WAV")
-                        || warning.starts_with(&format!("Voice {}:", sample.voice))
+                        || (warning.starts_with(&format!("Voice {}:", sample.voice))
+                            && !warning.contains("mixed mono and stereo"))
                     {
                         sample.warnings.push(warning.clone());
                     }
@@ -274,6 +277,9 @@ fn inspect_sample(path: &Path, voice: usize, revision: String) -> Sample {
             }
             if s.rate != 44100 {
                 warnings.push("Rample requires 44.1 kHz.".into());
+            }
+            if s.channels > 1 {
+                warnings.push(MONO_WARNING.into());
             }
             if duration < 0.05 {
                 warnings.push("Rample requires at least 50 ms.".into());

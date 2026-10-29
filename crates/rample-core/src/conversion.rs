@@ -166,7 +166,12 @@ pub fn convert(source: &Path, expected: &str, backups: &Path) -> Result<Converte
     transcode(&backup, temp.as_file_mut())?;
     temp.as_file().sync_all().map_err(|e| e.to_string())?;
     let spec = wav::inspect(temp.path())?;
-    if spec.rate != 44100 || spec.bits != 16 || spec.format_tag != 1 || spec.frames < 2205 {
+    if spec.rate != 44100
+        || spec.bits != 16
+        || spec.channels != 1
+        || spec.format_tag != 1
+        || spec.frames < 2205
+    {
         return Err("Converted WAV failed Rample validation; the original is preserved.".into());
     }
     if !unchanged(source, expected) || hash(source)? != digest {
@@ -413,7 +418,8 @@ fn transcode(source: &Path, target: &mut File) -> Result<(), String> {
             &AudioDecoderOptions::default().verify(true),
         )
         .map_err(|e| e.to_string())?;
-    let exact = wav::inspect(source).is_ok_and(|s| s.rate == 44100 && s.code == 1 && s.bits <= 16);
+    let exact = wav::inspect(source)
+        .is_ok_and(|s| s.rate == 44100 && s.code == 1 && s.bits <= 16 && s.channels == 1);
     let mut target = Some(target);
     let mut output = None;
     let mut resampler = None;
@@ -437,15 +443,7 @@ fn transcode(source: &Path, target: &mut File) -> Result<(), String> {
             return Err("Unsupported audio sample rate or channel layout.".into());
         }
         if spec.is_none() {
-            output = Some(PcmWriter::new(
-                target.take().unwrap(),
-                if current.channels().count() == 2 {
-                    2
-                } else {
-                    1
-                },
-                !exact,
-            )?);
+            output = Some(PcmWriter::new(target.take().unwrap(), 1, !exact)?);
             resampler = Some(Resampler::new(current.rate()));
             spec = Some(current.clone());
         }
@@ -454,12 +452,9 @@ fn transcode(source: &Path, target: &mut File) -> Result<(), String> {
         let channels = current.channels().count();
         for frame in buffer.chunks_exact(channels) {
             let clean = |v: f64| if v.is_finite() { v } else { 0. };
-            let values = if channels == 2 {
-                [clean(frame[0]), clean(frame[1])]
-            } else {
-                let mono = frame.iter().map(|v| clean(*v)).sum::<f64>() / channels as f64;
-                [mono; 2]
-            };
+            // Average rather than sum to retain headroom when channels correlate.
+            let mono = frame.iter().map(|v| clean(*v)).sum::<f64>() / channels as f64;
+            let values = [mono; 2];
             resampler
                 .as_mut()
                 .unwrap()

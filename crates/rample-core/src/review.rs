@@ -31,6 +31,8 @@ pub struct Candidate {
 struct LibraryReview {
     fingerprints: BTreeMap<String, String>,
     pending: BTreeSet<String>,
+    #[serde(default)]
+    mono_policy: bool,
 }
 #[derive(Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Reviews {
@@ -61,7 +63,10 @@ impl Reviews {
             return false;
         }
         let previous = self.libraries.entry(root.into()).or_default();
-        let mut next = LibraryReview::default();
+        let mut next = LibraryReview {
+            mono_policy: true,
+            ..Default::default()
+        };
         for sample in catalog
             .kits
             .iter()
@@ -71,7 +76,8 @@ impl Reviews {
             let stamp = catalog::fingerprint(Path::new(&sample.id));
             if !sample.warnings.is_empty()
                 && (previous.fingerprints.get(&sample.id) != Some(&stamp)
-                    || previous.pending.contains(&sample.id))
+                    || previous.pending.contains(&sample.id)
+                    || (!previous.mono_policy && sample.channels > 1))
             {
                 next.pending.insert(sample.id.clone());
             }
@@ -125,8 +131,10 @@ impl Reviews {
                         .push("The file is read-only. Make it writable before converting.".into());
                 }
                 let info = conversion::inspect(path);
-                if info.as_ref().is_ok_and(|info| info.channels > 2) {
-                    issues.push("More than two channels will be mixed to mono.".into());
+                if info.as_ref().is_ok_and(|info| info.channels > 1)
+                    && !issues.iter().any(|issue| issue.contains("mixed to mono"))
+                {
+                    issues.push("Audio channels will be mixed to mono.".into());
                 }
                 let convertible = !readonly
                     && sample.needs_conversion

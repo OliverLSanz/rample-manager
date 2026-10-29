@@ -289,7 +289,7 @@ export default function App() {
             <strong>RAMPLE</strong>
             <span>P R E V I E W</span>
           </div>
-          <small>2.1</small>
+          <small>2.2</small>
         </div>
         <div className="library-heading">
           <span>LIBRARY</span>
@@ -1350,10 +1350,12 @@ function ImportDialog({
       ) : (
         <>
           <p>
-            These samples do not meet Rample’s requirements. Convert the
+            These samples need conversion for a mono Rample kit. Convert the
             selected files and replace the originals?
           </p>
-          <div className="conversion-target">WAV PCM · 16-bit · 44.1 kHz</div>
+          <div className="conversion-target">
+            MONO · WAV PCM · 16-bit · 44.1 kHz
+          </div>
           <div className="import-list">
             {items.map((item) => (
               <label className="import-item" key={item.id}>
@@ -1392,9 +1394,10 @@ function ImportDialog({
             ))}
           </div>
           <p className="small">
-            Stereo is preserved. More than two channels are mixed to mono. Short
-            samples are padded with silence to reach 50 ms. Names and kit
-            structure require manual changes.
+            All audio is converted to mono. Stereo channels are averaged (L + R)
+            / 2; additional channels are averaged too. Short samples are padded
+            with silence to reach 50 ms. Names and kit structure require manual
+            changes.
           </p>
           <p className="small">
             Original files are backed up before replacement in {backupPath}.
