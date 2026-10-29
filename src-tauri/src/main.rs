@@ -345,7 +345,7 @@ impl AppState {
         }
         match action {
             Action::Root { path } => {
-                let root = std::fs::canonicalize(&path)
+                let root = dunce::canonicalize(&path)
                     .map_err(|e| format!("Could not open folder: {e}"))?;
                 if !root.is_dir() {
                     return Err("Choose a folder containing your kits.".into());
@@ -565,10 +565,11 @@ fn reveal(channel: Option<usize>, state: tauri::State<'_, Arc<AppState>>) -> Res
     #[cfg(target_os = "windows")]
     {
         let mut c = std::process::Command::new("explorer.exe");
+        let shell_path = dunce::simplified(Path::new(&path)).to_string_lossy();
         c.arg(if channel.is_some() {
-            format!("/select,{path}")
+            format!("/select,{shell_path}")
         } else {
-            path
+            shell_path.into_owned()
         });
         c.spawn().map_err(|e| e.to_string())?;
     }
@@ -716,6 +717,18 @@ mod tests {
         assert_eq!(original.session.voices[0].steps, before);
         let saved = session::load(Path::new(&original.support_path)).unwrap();
         assert_eq!(saved.voices[0].layer_mode, LayerMode::Reverse);
+    }
+    #[test]
+    fn folder_selection_keeps_paths_usable_by_the_shell() {
+        let (_temp, state, _) = fixture();
+        let root = state.snapshot().session.root_path;
+        let result = state.act(Action::Root { path: root }).unwrap();
+        assert!(Path::new(&result.session.root_path).is_absolute());
+        assert!(result.banks.iter().all(|bank| !bank.is_empty()));
+        #[cfg(target_os = "windows")]
+        assert!(!result.session.root_path.starts_with(r"\\?\"));
+        let saved = session::load(Path::new(&result.support_path)).unwrap();
+        assert_eq!(saved.root_path, result.session.root_path);
     }
     #[test]
     fn tempo_adjustments_accumulate_and_clamp() {
