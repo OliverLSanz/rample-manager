@@ -20,6 +20,8 @@ const CHUNK: usize = 2048;
 pub enum Command {
     Settings(Vec<Voice>, f64),
     Bank(usize, Vec<Arc<PreparedSample>>),
+    /// Stable occurrence IDs are independent of the physical audio file.
+    LayerBank(usize, Vec<LayerSample>),
     Play,
     Stop,
     Audition(usize),
@@ -27,6 +29,11 @@ pub enum Command {
     AuditionSample(usize, Arc<PreparedSample>),
     /// Independent, unmodified Library listening, unaffected by the Kit mixer/editor.
     OriginalAudition(Option<Arc<PreparedSample>>),
+}
+#[derive(Clone)]
+pub struct LayerSample {
+    pub id: String,
+    pub sample: Arc<PreparedSample>,
 }
 #[derive(Clone)]
 pub struct EditPreview {
@@ -219,6 +226,7 @@ impl DiskReader {
 
 #[derive(Clone)]
 struct Sound {
+    id: String,
     sample: Arc<PreparedSample>,
     kernel: Arc<Kernel>,
 }
@@ -429,8 +437,20 @@ impl Control {
                 sounds: samples
                     .into_iter()
                     .map(|sample| Sound {
+                        id: sample.path.clone(),
                         kernel: Kernel::new(sample.spec.rate, self.rate),
                         sample,
+                    })
+                    .collect(),
+            }),
+            Command::LayerBank(channel, samples) => RenderCommand::Bank(RenderBank {
+                channel,
+                sounds: samples
+                    .into_iter()
+                    .map(|entry| Sound {
+                        id: entry.id,
+                        kernel: Kernel::new(entry.sample.spec.rate, self.rate),
+                        sample: entry.sample,
                     })
                     .collect(),
             }),
@@ -457,12 +477,14 @@ impl Control {
             Command::AuditionSample(i, sample) => RenderCommand::AuditionSample(
                 i,
                 Sound {
+                    id: sample.path.clone(),
                     kernel: Kernel::new(sample.spec.rate, self.rate),
                     sample,
                 },
             ),
             Command::OriginalAudition(sample) => {
                 RenderCommand::OriginalAudition(sample.map(|sample| Sound {
+                    id: sample.path.clone(),
                     kernel: Kernel::new(sample.spec.rate, self.rate),
                     sample,
                 }))
@@ -521,12 +543,13 @@ impl Renderer {
                     }
                     let track = &mut self.tracks[channel];
                     let old_path = track.previous.and_then(|i| track.paths.get(i).cloned());
-                    let new_paths: Vec<_> = sounds.iter().map(|s| s.sample.path.clone()).collect();
+                    let new_paths: Vec<_> = sounds.iter().map(|s| s.id.clone()).collect();
                     // A sounding stream is kept only if its exact revision still exists.
                     for playback in [&mut track.sequence, &mut track.preview] {
                         if playback.sound.as_ref().is_some_and(|old| {
                             !sounds.iter().any(|s| {
-                                s.sample.path == old.sample.path
+                                s.id == old.id
+                                    && s.sample.path == old.sample.path
                                     && s.sample.revision == old.sample.revision
                             })
                         }) {
@@ -703,7 +726,7 @@ pub mod native {
                 .spawn(move || {
                     let mut shadow_voices = vec![Voice::default(); 4];
                     let mut shadow_bpm = 120.;
-                    let mut banks: [Vec<Arc<PreparedSample>>; 4] = std::array::from_fn(|_| vec![]);
+                    let mut banks: [Command; 4] = std::array::from_fn(|i| Command::Bank(i, vec![]));
                     let mut running = false;
                     let mut editor = None;
                     let mut connection: Option<(cpal::Stream, Control, String)> = None;
@@ -729,8 +752,8 @@ pub mod native {
                                             shadow_voices.clone(),
                                             shadow_bpm,
                                         ));
-                                        for (i, bank) in banks.iter().enumerate() {
-                                            let _ = control.send(Command::Bank(i, bank.clone()));
+                                        for bank in &banks {
+                                            let _ = control.send(bank.clone());
                                         }
                                         let _ = control.send(Command::Edit(editor.clone()));
                                         if running {
@@ -753,7 +776,9 @@ pub mod native {
                                         shadow_voices = v.clone();
                                         shadow_bpm = *b
                                     }
-                                    Command::Bank(i, b) if *i < 4 => banks[*i] = b.clone(),
+                                    Command::Bank(i, _) | Command::LayerBank(i, _) if *i < 4 => {
+                                        banks[*i] = command.clone()
+                                    }
                                     Command::Edit(edit) => editor = edit.clone(),
                                     Command::Play => running = true,
                                     Command::Stop => running = false,

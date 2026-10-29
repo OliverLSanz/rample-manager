@@ -365,3 +365,64 @@ fn resampling_preserves_dc_and_stays_finite() {
     assert!(out.iter().all(|v| v.is_finite()));
     assert!(out[128..].iter().all(|v| (*v - 0.08).abs() < 0.001));
 }
+
+#[test]
+fn repeated_layer_occurrences_keep_selection_when_reordered() {
+    use rample_core::audio::LayerSample;
+    let temp = TempDir::new().unwrap();
+    let path = write(temp.path(), "A0", "1.wav", 4410, 44100, 8192);
+    let sample = PreparedSample::load(&path, "original").unwrap();
+    let meters = Meters::new();
+    let (mut renderer, control) = Renderer::new(44100, meters.clone());
+    let mut voice = Voice {
+        sample_path: "second".into(),
+        volume: 1.,
+        ..Voice::default()
+    };
+    let entry = |id: &str| LayerSample {
+        id: id.into(),
+        sample: sample.clone(),
+    };
+    control
+        .send(Command::Settings(vec![voice.clone()], 120.))
+        .unwrap();
+    control
+        .send(Command::LayerBank(0, vec![entry("first"), entry("second")]))
+        .unwrap();
+    control.send(Command::Audition(0)).unwrap();
+    let mut pcm = [0.; 2];
+    renderer.render(&mut pcm, 2);
+    assert_eq!(meters.snapshot().active_layers[0], 1);
+    assert!((pcm[0] - 0.1).abs() < 0.00001);
+    control
+        .send(Command::LayerBank(0, vec![entry("second"), entry("first")]))
+        .unwrap();
+    control.send(Command::Audition(0)).unwrap();
+    renderer.render(&mut pcm, 2);
+    assert_eq!(meters.snapshot().active_layers[0], 0);
+    for (mode, expected) in [
+        (LayerMode::Sequential, vec![0, 1, 0]),
+        (LayerMode::Reverse, vec![0, 1, 0]),
+        (LayerMode::Velocity, vec![1, 1, 1]),
+    ] {
+        voice.layer_mode = mode;
+        control
+            .send(Command::Settings(vec![voice.clone()], 120.))
+            .unwrap();
+        let actual: Vec<_> = (0..3)
+            .map(|_| {
+                control.send(Command::Audition(0)).unwrap();
+                renderer.render(&mut pcm, 2);
+                meters.snapshot().active_layers[0]
+            })
+            .collect();
+        assert_eq!(actual, expected);
+    }
+    voice.layer_mode = LayerMode::Random;
+    control.send(Command::Settings(vec![voice], 120.)).unwrap();
+    for _ in 0..20 {
+        control.send(Command::Audition(0)).unwrap();
+        renderer.render(&mut pcm, 2);
+        assert!((0..2).contains(&meters.snapshot().active_layers[0]));
+    }
+}
