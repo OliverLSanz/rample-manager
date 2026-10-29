@@ -17,6 +17,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     strategy:
@@ -43,6 +46,8 @@ jobs:
         with:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - run: npm ci
       - run: npm run build
       - run: npm test
@@ -51,6 +56,10 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Package desktop app
         run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+      - name: Check Windows install, launch and upgrade
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: Rample-Preview-${{ matrix.platform }}
