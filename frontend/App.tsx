@@ -1045,7 +1045,10 @@ function Modal({
         const focusable = ref.current?.querySelectorAll<HTMLElement>(
           "button:not(:disabled),input:not(:disabled),select:not(:disabled)",
         );
-        if (!focusable?.length) return;
+        if (!focusable?.length) {
+          e.preventDefault();
+          return;
+        }
         const first = focusable[0],
           last = focusable[focusable.length - 1];
         if (e.shiftKey && document.activeElement === first) {

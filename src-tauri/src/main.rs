@@ -612,6 +612,20 @@ impl AppState {
             }
         }
         l.scan(&HashSet::new(), true);
+        let root = l.session.root_path.clone();
+        let converted_files: Vec<_> = results
+            .iter()
+            .filter(|r| r.error.is_none())
+            .filter_map(|r| r.target.as_ref())
+            .map(|id| ReviewedFile {
+                id: id.clone(),
+                fingerprint: catalog::fingerprint(Path::new(id)),
+            })
+            .collect();
+        // The user has already reviewed these successful replacements. Keep
+        // remaining kit warnings, but do not interpret our own writes as imports.
+        l.reviews.dismiss(&root, &converted_files);
+        l.reviews.save(&l.support)?;
         l.synchronize(&self.audio)?;
         l.save()?;
         l.revision += 1;
@@ -891,6 +905,38 @@ mod tests {
             original
         );
         assert_eq!(state.library.lock().unwrap().banks[0][0].spec.rate, 44100);
+    }
+    #[test]
+    fn successful_conversion_does_not_reprompt_for_remaining_kit_issues() {
+        let (_temp, state, _) = fixture();
+        let root = PathBuf::from(state.snapshot().session.root_path);
+        let path = root.join("A0/1_Stereo.wav");
+        wav::write_pcm16(&path, &vec![8000; 9600], 48000).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[22..24].copy_from_slice(&2u16.to_le_bytes());
+        bytes[28..32].copy_from_slice(&192000u32.to_le_bytes());
+        bytes[32..34].copy_from_slice(&4u16.to_le_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        let detected = state.act(Action::Refresh).unwrap();
+        let candidate = detected
+            .imports
+            .iter()
+            .find(|c| c.id == path.to_string_lossy())
+            .unwrap();
+        assert!(candidate.convertible);
+        let result = state
+            .convert_imports(vec![ReviewedFile {
+                id: candidate.id.clone(),
+                fingerprint: candidate.fingerprint.clone(),
+            }])
+            .unwrap();
+        assert!(result.results[0].error.is_none());
+        assert!(result.snapshot.imports.is_empty());
+        assert!(result.snapshot.catalog.kits[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("mixed mono")));
+        assert!(state.act(Action::Refresh).unwrap().imports.is_empty());
     }
     #[test]
     fn conversion_requires_a_current_pending_review() {

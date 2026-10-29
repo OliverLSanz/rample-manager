@@ -352,6 +352,30 @@ describe("new sample review", () => {
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+  it("keeps focus inside the modal while every control is disabled during conversion", async () => {
+    snapshot.imports = [candidate()];
+    let finish!: (reply: import("./types").ConversionReply) => void;
+    vi.mocked(native.convertImports).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await boot();
+    await screen.findByRole("dialog", { name: "New samples detected" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Convert and replace (1)" }),
+    );
+    await screen.findByRole("button", { name: "Converting…" });
+    expect(fireEvent.keyDown(window, { key: "Tab", cancelable: true })).toBe(
+      false,
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    const next = structuredClone(snapshot);
+    next.imports = [];
+    finish({ snapshot: next, results: [], backupPath: "/backups" });
+    await screen.findByText("Conversion complete");
+  });
   it("keeps conversion failures visible instead of dismissing the review", async () => {
     snapshot.imports = [candidate()];
     vi.mocked(native.convertImports).mockRejectedValue(
