@@ -567,6 +567,7 @@ struct ConversionReply {
 impl AppState {
     fn convert_imports(&self, files: Vec<ReviewedFile>) -> Result<ConversionReply, String> {
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
+        l.message = None;
         l.scan(&HashSet::new(), true);
         let candidates = l.reviews.pending(&l.session.root_path, &l.catalog);
         let backups = l.support.join("Conversion backups");
@@ -625,9 +626,21 @@ impl AppState {
         // The user has already reviewed these successful replacements. Keep
         // remaining kit warnings, but do not interpret our own writes as imports.
         l.reviews.dismiss(&root, &converted_files);
-        l.reviews.save(&l.support)?;
-        l.synchronize(&self.audio)?;
-        l.save()?;
+        // Files have already been published. Report their actual outcomes even
+        // if persisting app preferences or reloading the audio engine fails.
+        let mut warnings = l.message.take().into_iter().collect::<Vec<_>>();
+        if let Err(error) = l.reviews.save(&l.support) {
+            warnings.push(format!("Could not save review decisions: {error}"));
+        }
+        if let Err(error) = l.synchronize(&self.audio) {
+            warnings.push(format!(
+                "Could not reload playback: {error}. Refresh files to retry."
+            ));
+        }
+        if let Err(error) = l.save() {
+            warnings.push(format!("Could not save the session: {error}"));
+        }
+        l.message = (!warnings.is_empty()).then(|| warnings.join(" "));
         l.revision += 1;
         let reply = ConversionReply {
             snapshot: l.snapshot(self.watching.load(Ordering::Relaxed)),
@@ -850,7 +863,11 @@ mod tests {
         let (_temp, state, _) = fixture();
         let root = PathBuf::from(state.snapshot().session.root_path);
         std::fs::create_dir(root.join("B12")).unwrap();
-        std::fs::copy(root.join("A0/1_Sub kick.wav"), root.join("B12/1_Kick.wav")).unwrap();
+        std::fs::copy(
+            root.join("A0").join("1_Sub kick.wav"),
+            root.join("B12").join("1_Kick.wav"),
+        )
+        .unwrap();
         state.act(Action::Refresh).unwrap();
         state
             .act(Action::SetMode {
@@ -874,7 +891,7 @@ mod tests {
     fn new_import_conversion_reloads_selected_audio_and_keeps_a_backup() {
         let (_temp, state, _) = fixture();
         let root = PathBuf::from(state.snapshot().session.root_path);
-        let path = root.join("A0/1_Imported.wav");
+        let path = root.join("A0").join("1_Imported.wav");
         wav::write_pcm16(&path, &vec![8000; 4800], 48000).unwrap();
         let original = std::fs::read(&path).unwrap();
         let detected = state.act(Action::Refresh).unwrap();
@@ -910,7 +927,7 @@ mod tests {
     fn successful_conversion_does_not_reprompt_for_remaining_kit_issues() {
         let (_temp, state, _) = fixture();
         let root = PathBuf::from(state.snapshot().session.root_path);
-        let path = root.join("A0/1_Stereo.wav");
+        let path = root.join("A0").join("1_Stereo.wav");
         wav::write_pcm16(&path, &vec![8000; 9600], 48000).unwrap();
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[22..24].copy_from_slice(&2u16.to_le_bytes());
@@ -939,6 +956,30 @@ mod tests {
         assert!(state.act(Action::Refresh).unwrap().imports.is_empty());
     }
     #[test]
+    fn conversion_reports_file_outcomes_even_if_saving_preferences_fails() {
+        let (_temp, state, _) = fixture();
+        let root = PathBuf::from(state.snapshot().session.root_path);
+        let path = root.join("A0").join("1_Imported.wav");
+        wav::write_pcm16(&path, &vec![8000; 4800], 48000).unwrap();
+        let detected = state.act(Action::Refresh).unwrap();
+        let candidate = &detected.imports[0];
+        std::fs::create_dir(Path::new(&detected.support_path).join("session.json")).unwrap();
+        let reply = state
+            .convert_imports(vec![ReviewedFile {
+                id: candidate.id.clone(),
+                fingerprint: candidate.fingerprint.clone(),
+            }])
+            .unwrap();
+        assert!(reply.results[0].error.is_none());
+        assert!(reply.results[0].backup.is_some());
+        assert_eq!(wav::inspect(&path).unwrap().rate, 44100);
+        assert!(reply
+            .snapshot
+            .message
+            .unwrap()
+            .contains("Could not save the session"));
+    }
+    #[test]
     fn conversion_requires_a_current_pending_review() {
         let (_temp, state, _) = fixture();
         let snapshot = state.snapshot();
@@ -952,7 +993,9 @@ mod tests {
             .unwrap();
         assert!(reply.results[0].error.is_some());
         assert_eq!(std::fs::read(&path).unwrap(), original);
-        let bad = PathBuf::from(snapshot.session.root_path).join("A0/2_New.wav");
+        let bad = PathBuf::from(snapshot.session.root_path)
+            .join("A0")
+            .join("2_New.wav");
         wav::write_pcm16(&bad, &vec![8000; 4800], 48000).unwrap();
         let detected = state.act(Action::Refresh).unwrap();
         let candidate = &detected.imports[0];
@@ -1003,7 +1046,7 @@ mod tests {
         state.watch();
         assert!(state.watching.load(Ordering::Relaxed));
         let root = PathBuf::from(state.snapshot().session.root_path);
-        let path = root.join("A0/1_Sub kick.wav");
+        let path = root.join("A0").join("1_Sub kick.wav");
         let temp = path.with_extension("tmp");
         wav::write_pcm16(&temp, &vec![1200; 8820], 44100).unwrap();
         std::fs::rename(&temp, &path).unwrap();

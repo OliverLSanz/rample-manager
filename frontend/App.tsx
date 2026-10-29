@@ -1313,6 +1313,11 @@ function ImportDialog({
           <p className="small">
             Originals and restore information are saved in {reply.backupPath}.
           </p>
+          {reply.snapshot.message && (
+            <p className="import-error" role="alert">
+              {reply.snapshot.message}
+            </p>
+          )}
           <div className="modal-buttons">
             <button
               className="secondary"

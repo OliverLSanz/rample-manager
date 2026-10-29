@@ -302,6 +302,7 @@ describe("new sample review", () => {
     vi.mocked(native.convertImports).mockImplementation(async () => {
       const next = structuredClone(snapshot);
       next.revision = 2;
+      next.message = "Could not save the session: permission denied";
       next.imports = [snapshot.imports[1]];
       return {
         snapshot: next,
@@ -330,6 +331,9 @@ describe("new sample review", () => {
       { id: candidate().id, fingerprint: "checked-version" },
     ]);
     expect(screen.getByText("Saved as 1_New.wav")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Could not save the session",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Show backups" }));
     expect(native.showBackups).toHaveBeenCalled();
   });
