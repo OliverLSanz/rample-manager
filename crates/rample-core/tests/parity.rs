@@ -46,7 +46,7 @@ fn kit_names_and_natural_order() {
         ["A0", "A2", "A10"]
     );
     assert_eq!(c.kits[0].samples[0].name, "1_Kick2");
-    assert!(c.kits[0].warnings.is_empty());
+    assert!(c.kits[0].warnings.iter().any(|w| w.contains("filenames")));
     assert!(!c.kits[1].warnings.is_empty());
 }
 #[test]

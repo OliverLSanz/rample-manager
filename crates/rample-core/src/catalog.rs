@@ -1,4 +1,4 @@
-use crate::wav;
+use crate::{conversion, wav};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -20,6 +20,7 @@ pub struct Sample {
     pub bits: u16,
     pub warnings: Vec<String>,
     pub readable: bool,
+    pub needs_conversion: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Kit {
@@ -33,6 +34,7 @@ pub struct Kit {
 pub struct Catalog {
     pub kits: Vec<Kit>,
     pub error: Option<String>,
+    pub unassigned: Vec<Sample>,
 }
 #[derive(Default)]
 pub struct Scanner {
@@ -45,7 +47,7 @@ pub fn is_kit_name(s: &str) -> bool {
         && b[0].is_ascii_uppercase()
         && b[1..].iter().all(u8::is_ascii_digit)
 }
-fn revision(path: &Path) -> String {
+pub fn fingerprint(path: &Path) -> String {
     let Ok(m) = fs::symlink_metadata(path) else {
         return String::new();
     };
@@ -68,12 +70,12 @@ fn revision(path: &Path) -> String {
     }
     #[cfg(not(unix))]
     {
-        format!("{}-{time}", m.len())
+        format!("{}-{time}-{}", m.len(), m.permissions().readonly())
     }
 }
 impl Scanner {
     pub fn scan(&mut self, root: &Path, invalidated: &HashSet<PathBuf>, force: bool) -> Catalog {
-        let dirs=match fs::read_dir(root){Ok(d)=>d,Err(e)=>return Catalog{kits:vec![],error:Some(format!("Could not read the library. Check that the folder or SD card is connected. {e}"))}};
+        let dirs=match fs::read_dir(root){Ok(d)=>d,Err(e)=>return Catalog{kits:vec![],error:Some(format!("Could not read the library. Check that the folder or SD card is connected. {e}")),unassigned:vec![]}};
         self.epoch += 1;
         let mut next = HashMap::new();
         let mut kits = Vec::new();
@@ -90,20 +92,17 @@ impl Scanner {
                     for file in files.flatten() {
                         let p = file.path();
                         let filename = file.file_name().to_string_lossy().into_owned();
-                        if !file.file_type().is_ok_and(|t| t.is_file())
-                            || !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wav"))
+                        if !file.file_type().is_ok_and(|t| t.is_file()) || !conversion::is_audio(&p)
                         {
                             continue;
                         }
-                        let Some(voice) = filename
+                        let voice = filename
                             .as_bytes()
                             .first()
                             .filter(|c| b"1234".contains(c))
                             .map(|n| (n - b'0') as usize)
-                        else {
-                            continue;
-                        };
-                        let stamp = revision(&p);
+                            .unwrap_or(0);
+                        let stamp = fingerprint(&p);
                         let invalid = force
                             || invalidated.contains(&p)
                             || invalidated.contains(&path)
@@ -151,6 +150,19 @@ impl Scanner {
                         .into(),
                 );
             }
+            for sample in &mut samples {
+                for warning in &warnings {
+                    if warning.contains("needs a compatible WAV")
+                        || warning.starts_with(&format!("Voice {}:", sample.voice))
+                    {
+                        sample.warnings.push(warning.clone());
+                    }
+                }
+                if sample.voice == 0 && !warnings.iter().any(|w| w.contains("filename")) {
+                    warnings
+                        .push("Some sample filenames must start with voice 1, 2, 3 or 4.".into());
+                }
+            }
             kits.push(Kit {
                 id: name.clone(),
                 bank: name[..1].into(),
@@ -159,9 +171,55 @@ impl Scanner {
                 warnings,
             });
         }
+        let mut unassigned = vec![];
+        for entry in walkdir::WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                e.depth() == 0
+                    || (!e.file_name().to_string_lossy().starts_with('.')
+                        && e.file_name() != "Conversion backups"
+                        && e.file_name() != "_save")
+            })
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file() && conversion::is_audio(e.path()))
+        {
+            let p = entry.path();
+            let relative = p.strip_prefix(root).unwrap_or(p);
+            let parts: Vec<_> = relative.components().collect();
+            if parts.len() == 2 && is_kit_name(&parts[0].as_os_str().to_string_lossy()) {
+                continue;
+            }
+            let stamp = fingerprint(p);
+            let mut sample = if let Some((_, cached)) = self
+                .cache
+                .get(p)
+                .filter(|(old, _)| old == &stamp && !force && !invalidated.contains(p))
+            {
+                cached.clone()
+            } else {
+                let voice = p
+                    .file_name()
+                    .and_then(|x| x.to_str())
+                    .and_then(|s| s.as_bytes().first().copied())
+                    .filter(|n| b"1234".contains(n))
+                    .map_or(0, |n| (n - b'0') as usize);
+                let mut sample = inspect_sample(p, voice, format!("{stamp}-{}", self.epoch));
+                sample.warnings.push("Move this file directly into an A0–Z99 kit folder at the library root before converting.".into());
+                sample
+            };
+            sample.voice = 0;
+            next.insert(p.to_owned(), (stamp, sample.clone()));
+            unassigned.push(sample);
+        }
+        unassigned.sort_by(|a, b| natord::compare(&a.id, &b.id));
         kits.sort_by(|a, b| natord::compare(&a.id, &b.id));
         self.cache = next;
-        Catalog { kits, error: None }
+        Catalog {
+            kits,
+            error: None,
+            unassigned,
+        }
     }
 }
 fn inspect_sample(path: &Path, voice: usize, revision: String) -> Sample {
@@ -171,11 +229,44 @@ fn inspect_sample(path: &Path, voice: usize, revision: String) -> Sample {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
+    let name_issue = if voice == 0 {
+        vec![
+            "Filename must start with voice 1, 2, 3 or 4. Rename the file before converting."
+                .into(),
+        ]
+    } else {
+        vec![]
+    };
+    if !path
+        .extension()
+        .is_some_and(|x| x.eq_ignore_ascii_case("wav"))
+    {
+        let info = conversion::inspect(path);
+        let mut warnings = name_issue;
+        warnings.push("Rample requires a .wav file; this audio format needs conversion.".into());
+        if let Err(e) = &info {
+            warnings.push(format!("Cannot decode audio: {e}"));
+        }
+        let info = info.unwrap_or_default();
+        return Sample {
+            id,
+            name,
+            voice,
+            revision,
+            duration: info.duration,
+            rate: info.rate,
+            channels: info.channels,
+            bits: info.bits,
+            warnings,
+            readable: false,
+            needs_conversion: true,
+        };
+    }
     match wav::inspect(path) {
         Ok(s) => {
             let duration = s.frames as f64 / f64::from(s.rate);
-            let mut warnings = vec![];
-            if s.code != 1 {
+            let mut warnings = name_issue.clone();
+            if s.code != 1 || s.format_tag != 1 {
                 warnings.push("Rample requires uncompressed integer PCM WAV.".into());
             }
             if ![8, 16].contains(&s.bits) {
@@ -196,6 +287,7 @@ fn inspect_sample(path: &Path, voice: usize, revision: String) -> Sample {
                 rate: s.rate,
                 channels: s.channels,
                 bits: s.bits,
+                needs_conversion: warnings.len() > name_issue.len() && s.frames > 0,
                 warnings,
                 readable: s.frames > 0,
             }
@@ -209,8 +301,12 @@ fn inspect_sample(path: &Path, voice: usize, revision: String) -> Sample {
             rate: 0,
             channels: 0,
             bits: 0,
-            warnings: vec![format!("Unreadable WAV: {e}")],
+            warnings: name_issue
+                .into_iter()
+                .chain([format!("Unreadable WAV: {e}")])
+                .collect(),
             readable: false,
+            needs_conversion: true,
         },
     }
 }
@@ -225,7 +321,7 @@ pub fn export(samples: &[Option<Sample>], parent: &Path, name: &str) -> Result<P
     let chosen: Vec<_> = samples.iter().flatten().collect();
     if chosen
         .iter()
-        .any(|s| !s.readable || !s.warnings.is_empty() || s.channels != 1)
+        .any(|s| !s.readable || s.needs_conversion || s.voice == 0 || s.channels != 1)
     {
         return Err("Export requires compatible mono WAV files. Review the voice warnings.".into());
     }
@@ -259,7 +355,7 @@ pub fn export(samples: &[Option<Sample>], parent: &Path, name: &str) -> Result<P
             || copied
                 .samples
                 .iter()
-                .any(|s| !s.readable || !s.warnings.is_empty() || s.channels != 1)
+                .any(|s| !s.readable || s.needs_conversion || s.voice == 0 || s.channels != 1)
         {
             return Err("A sample changed during export. Please try again.".into());
         }

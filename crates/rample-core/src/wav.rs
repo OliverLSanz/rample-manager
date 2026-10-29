@@ -11,6 +11,7 @@ pub struct WavSpec {
     pub channels: u16,
     pub bits: u16,
     pub code: u16,
+    pub format_tag: u16,
     pub data_offset: u64,
     pub frames: u64,
     pub block_align: u16,
@@ -57,6 +58,7 @@ pub fn inspect(path: &Path) -> Result<WavSpec, String> {
             }
             fmt = Some((
                 code,
+                u16le(&b),
                 u16le(&b[2..]),
                 u32le(&b[4..]),
                 u16le(&b[12..]),
@@ -71,7 +73,7 @@ pub fn inspect(path: &Path) -> Result<WavSpec, String> {
         f.seek(SeekFrom::Start(start + size + (size % 2)))
             .map_err(|e| e.to_string())?;
     }
-    let (code, channels, rate, block_align, bits) = fmt.ok_or("Missing WAV format")?;
+    let (code, format_tag, channels, rate, block_align, bits) = fmt.ok_or("Missing WAV format")?;
     let (data_offset, bytes) = data.ok_or("Missing WAV audio data")?;
     if !(1..=2).contains(&channels) || rate == 0 || rate > 384000 {
         return Err(error(
@@ -93,6 +95,7 @@ pub fn inspect(path: &Path) -> Result<WavSpec, String> {
         channels,
         bits,
         code,
+        format_tag,
         data_offset,
         frames: bytes / u64::from(block_align),
         block_align,

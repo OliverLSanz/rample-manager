@@ -86,6 +86,35 @@ in the root; filenames starting with 1–4; 44.1 kHz integer PCM WAV, 8/16 bits,
 at least 50 ms, up to 12 layers per voice. Other readable PCM/float WAVs can be
 auditioned with compatibility warnings. Symlinks inside the library are skipped.
 
+### Review and convert new samples
+
+New or changed audio is checked automatically, including when opening a library.
+The **New samples detected** dialog lists each incompatibility and lets you choose
+**Keep originals** or **Convert and replace** for the selected files. Compatible
+files are left alone. Declining is remembered across refreshes and restarts;
+**Check formats** opens the review again when you want it.
+
+The built-in converter supports WAV, AIFF/AIFC, FLAC, MP3, Ogg Vorbis and supported
+AAC/ALAC M4A files. It writes standard uncompressed **16-bit PCM WAV at 44.1 kHz**,
+preserving mono/stereo. More than two channels are mixed to mono; samples shorter
+than 50 ms receive trailing silence. Resampling is band-limited and bit-depth
+reduction uses dither. Non-WAV originals become a `.wav` with the same stem;
+an existing destination WAV is never overwritten. The converter is bundled and
+requires no FFmpeg or other external installation.
+
+Before replacement, the original bytes are saved under **Conversion backups**
+in the app support folder. **Show backups** opens that folder after conversion.
+Each backup has a `restore.json` describing the original and converted paths plus
+the original SHA-256. To restore, close playback and copy the backup to the
+original path in that manifest; remove the converted `.wav` if its name differs.
+The library detects the restored audio automatically.
+
+Changes during conversion, unreadable/incomplete files and read-only sources are
+reported without replacing the original. Invalid kit locations, wrong voice
+prefixes, missing voice 1, more than 12 layers and mixed mono/stereo layers are
+shown as issues requiring manual changes. Conversion only fixes audio format.
+Review history lives in `sample-reviews.json` beside the musical session.
+
 **Export kit** copies one selected compatible mono WAV per voice into a new
 A0–Z99 directory. Voice 1 is required. Original WAVs and existing kits are never
 overwritten. Export does not encode the sequencer, mixer or layer modes.

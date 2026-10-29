@@ -48,6 +48,9 @@ import {
   type Snapshot,
   type Transport,
   type Voice,
+  type ReviewedFile,
+  type ImportCandidate,
+  type ConversionReply,
 } from "./types";
 import "./style.css";
 const colors = ["#f68061", "#83c9ad", "#afa0df", "#dfc275"];
@@ -70,6 +73,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [bank, setBank] = useState("All");
   const [exporting, setExporting] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [velocity, setVelocity] = useState<{
     channel: number;
     step: number;
@@ -174,6 +178,28 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+  useEffect(() => {
+    if (snapshot?.imports.length && !exporting && !velocity && !reviewing)
+      setReviewing(true);
+  }, [snapshot?.imports.length, exporting, velocity, reviewing]);
+  const convertImports = useCallback(async (files: ReviewedFile[]) => {
+    await serial.current;
+    const result = await native.convertImports(files);
+    if (alive.current)
+      setSnapshot((previous) =>
+        !previous || result.snapshot.revision >= previous.revision
+          ? result.snapshot
+          : previous,
+      );
+    return result;
+  }, []);
+  const dismissImports = useCallback(
+    async (files: ReviewedFile[]) => {
+      await action({ type: "dismissImports", files });
+      setReviewing(false);
+    },
+    [action],
+  );
   const openFolder = useCallback(async () => {
     try {
       const path = await native.chooseFolder();
@@ -188,7 +214,7 @@ export default function App() {
   }, [action]);
   useEffect(() => {
     function keydown(e: KeyboardEvent) {
-      if (exporting || velocity) return;
+      if (exporting || velocity || reviewing) return;
       const target = e.target;
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
         if (e.key.toLowerCase() === "o") {
@@ -219,7 +245,7 @@ export default function App() {
     }
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [action, openFolder, exporting, velocity]);
+  }, [action, openFolder, exporting, velocity, reviewing]);
   const reveal = useCallback((channel?: number) => {
     native.reveal(channel).catch((e) => setError(errorText(e)));
   }, []);
@@ -263,7 +289,7 @@ export default function App() {
             <strong>RAMPLE</strong>
             <span>P R E V I E W</span>
           </div>
-          <small>2.0</small>
+          <small>2.1</small>
         </div>
         <div className="library-heading">
           <span>LIBRARY</span>
@@ -373,6 +399,15 @@ export default function App() {
               onClick={() => void action({ type: "refresh" })}
             >
               <RefreshCw size={15} />
+            </button>
+            <button
+              className="format-button"
+              aria-label="Check sample formats"
+              title="Review sample formats"
+              onClick={() => void action({ type: "reviewFormats" })}
+            >
+              <TriangleAlert size={16} />
+              <span>Check formats</span>
             </button>
             <span className="divider" />
             <button
@@ -557,6 +592,14 @@ export default function App() {
             <X size={15} />
           </button>
         </div>
+      )}
+      {reviewing && !exporting && !velocity && (
+        <ImportDialog
+          items={snapshot.imports}
+          backupPath={`${snapshot.supportPath}/Conversion backups`}
+          onConvert={convertImports}
+          onDismiss={dismissImports}
+        />
       )}
       {exporting && (
         <ExportDialog
@@ -993,14 +1036,14 @@ function Modal({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement;
     (
-      ref.current?.querySelector<HTMLElement>("input") ??
+      ref.current?.querySelector<HTMLElement>("input:not(:disabled)") ??
       ref.current?.querySelector<HTMLElement>("button")
     )?.focus();
     function key(e: KeyboardEvent) {
       if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab") {
         const focusable = ref.current?.querySelectorAll<HTMLElement>(
-          "button:not(:disabled),input,select",
+          "button:not(:disabled),input:not(:disabled),select:not(:disabled)",
         );
         if (!focusable?.length) return;
         const first = focusable[0],
@@ -1177,6 +1220,203 @@ function ExportDialog({
           Choose destination…
         </button>
       </div>
+    </Modal>
+  );
+}
+
+function ImportDialog({
+  items,
+  backupPath,
+  onConvert,
+  onDismiss,
+}: {
+  items: ImportCandidate[];
+  backupPath: string;
+  onConvert: (files: ReviewedFile[]) => Promise<ConversionReply>;
+  onDismiss: (files: ReviewedFile[]) => Promise<void>;
+}) {
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reply, setReply] = useState<ConversionReply | null>(null);
+  const reviewed = useRef<ReviewedFile[]>([]);
+  const selected = items.filter(
+    (item) => item.convertible && !excluded.has(item.id),
+  );
+  async function close() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onDismiss(
+        reply
+          ? reviewed.current
+          : items.map(({ id, fingerprint }) => ({ id, fingerprint })),
+      );
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function convert() {
+    if (!selected.length || busy) return;
+    reviewed.current = items.map(({ id, fingerprint }) => ({
+      id,
+      fingerprint,
+    }));
+    setBusy(true);
+    setError(null);
+    try {
+      setReply(
+        await onConvert(
+          selected.map(({ id, fingerprint }) => ({ id, fingerprint })),
+        ),
+      );
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal label="New samples detected" onClose={() => void close()}>
+      <div className="modal-heading">
+        <TriangleAlert size={21} />
+        <h2>{reply ? "Conversion complete" : "New samples detected"}</h2>
+        <button
+          aria-label="Close sample review"
+          disabled={busy}
+          onClick={() => void close()}
+        >
+          <X size={17} />
+        </button>
+      </div>
+      {reply ? (
+        <>
+          <p>
+            {reply.results.filter((r) => !r.error).length} converted ·{" "}
+            {reply.results.filter((r) => r.error).length} kept unchanged
+          </p>
+          <div className="import-list">
+            {reply.results.map((r, i) => (
+              <div className="import-result" key={i}>
+                <strong>{r.name}</strong>
+                <small className={r.error ? "import-error" : "import-success"}>
+                  {r.error || `Saved as ${basename(r.target || "")}`}
+                </small>
+              </div>
+            ))}
+          </div>
+          <p className="small">
+            Originals and restore information are saved in {reply.backupPath}.
+          </p>
+          <div className="modal-buttons">
+            <button
+              className="secondary"
+              onClick={() =>
+                void native.showBackups().catch((e) => setError(errorText(e)))
+              }
+            >
+              Show backups
+            </button>
+            {reply.results.some((r) => r.error) && (
+              <button
+                className="secondary"
+                onClick={() => {
+                  setReply(null);
+                  setExcluded(new Set());
+                }}
+              >
+                Review remaining
+              </button>
+            )}
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => void close()}
+            >
+              Done
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>
+            These samples do not meet Rample’s requirements. Convert the
+            selected files and replace the originals?
+          </p>
+          <div className="conversion-target">WAV PCM · 16-bit · 44.1 kHz</div>
+          <div className="import-list">
+            {items.map((item) => (
+              <label className="import-item" key={item.id}>
+                <input
+                  type="checkbox"
+                  aria-label={`Convert ${item.kit}/${item.name}`}
+                  disabled={busy || !item.convertible}
+                  checked={item.convertible && !excluded.has(item.id)}
+                  onChange={(e) =>
+                    setExcluded((previous) => {
+                      const next = new Set(previous);
+                      if (e.target.checked) next.delete(item.id);
+                      else next.add(item.id);
+                      return next;
+                    })
+                  }
+                />
+                <div>
+                  <strong title={item.id}>
+                    {item.kit}/{item.name}
+                  </strong>
+                  {item.issues.map((issue, i) => (
+                    <small key={i}>{issue}</small>
+                  ))}
+                  <small
+                    className={
+                      item.convertible ? "import-success" : "import-error"
+                    }
+                  >
+                    {item.convertible
+                      ? `Replace with ${item.target}`
+                      : "Manual fix required · original will be kept"}
+                  </small>
+                </div>
+              </label>
+            ))}
+          </div>
+          <p className="small">
+            Stereo is preserved. More than two channels are mixed to mono. Short
+            samples are padded with silence to reach 50 ms. Names and kit
+            structure require manual changes.
+          </p>
+          <p className="small">
+            Original files are backed up before replacement in {backupPath}.
+          </p>
+          <div className="modal-buttons">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => void close()}
+            >
+              Keep originals
+            </button>
+            <button
+              className="primary"
+              disabled={busy || !selected.length}
+              onClick={() => void convert()}
+            >
+              {busy && <LoaderCircle className="spin" size={14} />}
+              {busy
+                ? "Converting…"
+                : `Convert and replace (${selected.length})`}
+            </button>
+          </div>
+        </>
+      )}
+      {error && (
+        <p className="import-error" role="alert">
+          {error}
+        </p>
+      )}
     </Modal>
   );
 }

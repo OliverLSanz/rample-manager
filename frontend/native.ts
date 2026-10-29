@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Action, Snapshot, Transport } from "./types";
+import type {
+  Action,
+  Snapshot,
+  Transport,
+  ReviewedFile,
+  ConversionReply,
+} from "./types";
 export const getSnapshot = () => invoke<Snapshot>("get_snapshot");
 export const act = (action: Action) => invoke<Snapshot>("act", { action });
 export const getTransport = () => invoke<Transport>("get_transport");
@@ -17,3 +23,7 @@ export const exportKit = (name: string, parent: string) =>
   invoke<string>("export_kit", { name, parent });
 export const reveal = (channel?: number) =>
   invoke("reveal", { channel: channel ?? null });
+
+export const convertImports = (files: ReviewedFile[]) =>
+  invoke<ConversionReply>("convert_imports", { files });
+export const showBackups = () => invoke<void>("show_backups");

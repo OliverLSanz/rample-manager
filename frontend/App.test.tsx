@@ -24,6 +24,8 @@ vi.mock("./native", () => ({
   chooseFolder: vi.fn(),
   exportKit: vi.fn(),
   reveal: vi.fn(),
+  convertImports: vi.fn(),
+  showBackups: vi.fn(),
 }));
 let snapshot: Snapshot;
 let update: (s: Snapshot) => void;
@@ -49,6 +51,7 @@ function fixture(): Snapshot {
       kitConfigurations: { libraries: {} },
     },
     catalog: {
+      unassigned: [],
       kits: [
         {
           id: "A0",
@@ -66,6 +69,7 @@ function fixture(): Snapshot {
             bits: 16,
             warnings: [],
             readable: true,
+            needsConversion: false,
           })),
         },
       ],
@@ -78,6 +82,7 @@ function fixture(): Snapshot {
     supportPath: "/support",
     message: null,
     playing: false,
+    imports: [],
   };
 }
 beforeEach(() => {
@@ -96,12 +101,20 @@ beforeEach(() => {
   vi.mocked(native.act).mockImplementation(async (action) => {
     if (action.type === "setMode")
       snapshot.session.voices[action.channel].layerMode = action.mode;
+    if (action.type === "dismissImports")
+      snapshot.imports = snapshot.imports.filter(
+        (s) =>
+          !action.files.some(
+            (f) => f.id === s.id && f.fingerprint === s.fingerprint,
+          ),
+      );
     if (action.type === "toggleStep")
       snapshot.session.voices[action.channel].steps[action.step] =
         !snapshot.session.voices[action.channel].steps[action.step];
     return structuredClone(snapshot);
   });
   vi.mocked(native.reveal).mockResolvedValue(undefined);
+  vi.mocked(native.showBackups).mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
@@ -245,6 +258,115 @@ describe("desktop UI parity", () => {
     await waitFor(() =>
       expect(native.exportKit).toHaveBeenCalledWith("B0", "/destination"),
     );
+  });
+});
+describe("new sample review", () => {
+  function candidate(convertible = true) {
+    return {
+      id: "/samples/A0/1_New.flac",
+      fingerprint: "checked-version",
+      name: "1_New.flac",
+      kit: "A0",
+      issues: ["Rample requires a .wav file."],
+      convertible,
+      target: "1_New.wav",
+    };
+  }
+  it("opens automatically after a live file event and keeps originals without conversion", async () => {
+    await boot();
+    const next = structuredClone(snapshot);
+    next.imports = [candidate()];
+    snapshot = next;
+    update(next);
+    await screen.findByRole("dialog", { name: "New samples detected" });
+    expect(native.convertImports).not.toHaveBeenCalled();
+    expect(screen.getByText(/backed up before replacement/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep originals" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(native.act).toHaveBeenCalledWith({
+      type: "dismissImports",
+      files: [{ id: candidate().id, fingerprint: "checked-version" }],
+    });
+    expect(native.convertImports).not.toHaveBeenCalled();
+  });
+  it("converts only selected reviewed files after explicit consent and shows the result", async () => {
+    snapshot.imports = [
+      candidate(),
+      {
+        ...candidate(),
+        id: "/samples/A0/2_Other.wav",
+        name: "2_Other.wav",
+        target: "2_Other.wav",
+      },
+    ];
+    vi.mocked(native.convertImports).mockImplementation(async () => {
+      const next = structuredClone(snapshot);
+      next.revision = 2;
+      next.imports = [snapshot.imports[1]];
+      return {
+        snapshot: next,
+        backupPath: "/support/Conversion backups",
+        results: [
+          {
+            name: "1_New.flac",
+            target: "/samples/A0/1_New.wav",
+            backup: "/backup/1_New.flac",
+            error: null,
+          },
+        ],
+      };
+    });
+    await boot();
+    await screen.findByRole("dialog", { name: "New samples detected" });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Convert A0/2_Other.wav" }),
+    );
+    expect(native.convertImports).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Convert and replace (1)" }),
+    );
+    await screen.findByText("Conversion complete");
+    expect(native.convertImports).toHaveBeenCalledWith([
+      { id: candidate().id, fingerprint: "checked-version" },
+    ]);
+    expect(screen.getByText("Saved as 1_New.wav")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show backups" }));
+    expect(native.showBackups).toHaveBeenCalled();
+  });
+  it("shows unfixable files and blocks accidental transport shortcuts", async () => {
+    snapshot.imports = [candidate(false)];
+    await boot();
+    await screen.findByRole("dialog", { name: "New samples detected" });
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Convert and replace (0)",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(screen.getByText(/Manual fix required/)).toBeTruthy();
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(native.act).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close sample review" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+  it("keeps conversion failures visible instead of dismissing the review", async () => {
+    snapshot.imports = [candidate()];
+    vi.mocked(native.convertImports).mockRejectedValue(
+      "The source changed during conversion.",
+    );
+    await boot();
+    await screen.findByRole("dialog", { name: "New samples detected" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Convert and replace (1)" }),
+    );
+    await screen.findByRole("alert");
+    expect(
+      screen.getByText("The source changed during conversion."),
+    ).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });
 describe("cross-platform view models", () => {

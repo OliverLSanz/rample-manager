@@ -3,7 +3,9 @@ use notify::{RecursiveMode, Watcher};
 use rample_core::{
     audio::{native::AudioHost, Command, Status},
     catalog::{self, Catalog, Sample, Scanner},
+    conversion,
     model::{LayerMode, Session},
+    review::{Candidate, ReviewedFile, Reviews},
     session,
     wav::{self, PreparedSample},
 };
@@ -32,6 +34,7 @@ struct Snapshot {
     support_path: String,
     message: Option<String>,
     playing: bool,
+    imports: Vec<Candidate>,
 }
 struct Library {
     revision: u64,
@@ -41,6 +44,7 @@ struct Library {
     prepared: HashMap<String, Arc<PreparedSample>>,
     banks: [Vec<Arc<PreparedSample>>; 4],
     support: PathBuf,
+    reviews: Reviews,
     message: Option<String>,
     playing: bool,
 }
@@ -67,6 +71,7 @@ impl Library {
             scanner: Scanner::default(),
             prepared: HashMap::new(),
             banks: std::array::from_fn(|_| vec![]),
+            reviews: Reviews::load(&support)?,
             support,
             message: None,
             playing: false,
@@ -93,6 +98,7 @@ impl Library {
             support_path: self.support.to_string_lossy().into_owned(),
             message: self.message.clone(),
             playing: self.playing,
+            imports: self.reviews.pending(&self.session.root_path, &self.catalog),
         }
     }
     fn samples(&self, i: usize) -> Vec<Sample> {
@@ -174,7 +180,13 @@ impl Library {
         let next = self
             .scanner
             .scan(Path::new(&self.session.root_path), paths, force);
-        let changed = next != self.catalog;
+        let reviews_changed = self.reviews.update(&self.session.root_path, &next);
+        if reviews_changed {
+            if let Err(e) = self.reviews.save(&self.support) {
+                self.message = Some(e);
+            }
+        }
+        let changed = next != self.catalog || reviews_changed;
         if changed {
             self.revision += 1;
         }
@@ -294,6 +306,10 @@ enum Action {
     BasicPattern,
     ClearPattern,
     Refresh,
+    ReviewFormats,
+    DismissImports {
+        files: Vec<ReviewedFile>,
+    },
     TogglePlayback,
     Stop,
     Audition {
@@ -457,6 +473,21 @@ impl AppState {
                 l.scan(&HashSet::new(), true);
                 persist = false;
             }
+            Action::ReviewFormats => {
+                l.scan(&HashSet::new(), true);
+                let root = l.session.root_path.clone();
+                let catalog = l.catalog.clone();
+                l.reviews.request_all(&root, &catalog);
+                l.reviews.save(&l.support)?;
+                l.message = Some("Sample formats checked.".into());
+                persist = false;
+            }
+            Action::DismissImports { files } => {
+                let root = l.session.root_path.clone();
+                l.reviews.dismiss(&root, &files);
+                l.reviews.save(&l.support)?;
+                persist = false;
+            }
             Action::TogglePlayback => {
                 if !l.playing && l.banks.iter().all(Vec::is_empty) {
                     return Err("Select at least one readable WAV to play.".into());
@@ -517,6 +548,111 @@ fn get_transport(state: tauri::State<'_, Arc<AppState>>) -> Transport {
         status: state.audio.meters.snapshot(),
         error: state.audio.error.lock().ok().and_then(|e| e.clone()),
     }
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversionResult {
+    name: String,
+    target: Option<String>,
+    backup: Option<String>,
+    error: Option<String>,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversionReply {
+    snapshot: Snapshot,
+    results: Vec<ConversionResult>,
+    backup_path: String,
+}
+impl AppState {
+    fn convert_imports(&self, files: Vec<ReviewedFile>) -> Result<ConversionReply, String> {
+        let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
+        l.scan(&HashSet::new(), true);
+        let candidates = l.reviews.pending(&l.session.root_path, &l.catalog);
+        let backups = l.support.join("Conversion backups");
+        let mut results = vec![];
+        let mut processed = HashSet::new();
+        for file in files {
+            if !processed.insert(file.id.clone()) {
+                continue;
+            }
+            let name = Path::new(&file.id)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let checked = candidates
+                .iter()
+                .find(|c| c.id == file.id && c.fingerprint == file.fingerprint && c.convertible);
+            let result = if checked.is_some() {
+                conversion::convert(Path::new(&file.id), &file.fingerprint, &backups)
+            } else {
+                Err("Sample changed or is no longer eligible. Review the current file before converting.".into())
+            };
+            match result {
+                Ok(done) => {
+                    for voice in &mut l.session.voices {
+                        if voice.sample_path == done.source {
+                            voice.sample_path = done.target.clone();
+                        }
+                    }
+                    results.push(ConversionResult {
+                        name,
+                        target: Some(done.target),
+                        backup: Some(done.backup),
+                        error: None,
+                    });
+                }
+                Err(error) => results.push(ConversionResult {
+                    name,
+                    target: None,
+                    backup: None,
+                    error: Some(error),
+                }),
+            }
+        }
+        l.scan(&HashSet::new(), true);
+        l.synchronize(&self.audio)?;
+        l.save()?;
+        l.revision += 1;
+        let reply = ConversionReply {
+            snapshot: l.snapshot(self.watching.load(Ordering::Relaxed)),
+            results,
+            backup_path: backups.to_string_lossy().into(),
+        };
+        Ok(reply)
+    }
+}
+#[tauri::command]
+async fn convert_imports(
+    files: Vec<ReviewedFile>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<ConversionReply, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.convert_imports(files))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn show_backups(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+    let path = state
+        .library
+        .lock()
+        .map_err(|_| "Library is unavailable")?
+        .support
+        .join("Conversion backups");
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer.exe")
+        .arg(dunce::simplified(&path))
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 #[tauri::command]
 async fn export_kit(
@@ -663,6 +799,8 @@ fn main() {
             get_transport,
             act,
             export_kit,
+            convert_imports,
+            show_backups,
             reveal
         ])
         .run(tauri::generate_context!())
@@ -717,6 +855,75 @@ mod tests {
         assert_eq!(original.session.voices[0].steps, before);
         let saved = session::load(Path::new(&original.support_path)).unwrap();
         assert_eq!(saved.voices[0].layer_mode, LayerMode::Reverse);
+    }
+    #[test]
+    fn new_import_conversion_reloads_selected_audio_and_keeps_a_backup() {
+        let (_temp, state, _) = fixture();
+        let root = PathBuf::from(state.snapshot().session.root_path);
+        let path = root.join("A0/1_Imported.wav");
+        wav::write_pcm16(&path, &vec![8000; 4800], 48000).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let detected = state.act(Action::Refresh).unwrap();
+        assert_eq!(detected.imports.len(), 1);
+        let candidate = &detected.imports[0];
+        assert!(candidate.convertible);
+        state
+            .act(Action::SelectSample {
+                channel: 0,
+                path: path.to_string_lossy().into(),
+            })
+            .unwrap();
+        let reply = state
+            .convert_imports(vec![ReviewedFile {
+                id: candidate.id.clone(),
+                fingerprint: candidate.fingerprint.clone(),
+            }])
+            .unwrap();
+        assert!(reply.results[0].error.is_none());
+        assert!(reply.snapshot.imports.is_empty());
+        assert_eq!(
+            reply.snapshot.session.voices[0].sample_path,
+            path.to_string_lossy()
+        );
+        assert_eq!(wav::inspect(&path).unwrap().rate, 44100);
+        assert_eq!(
+            std::fs::read(reply.results[0].backup.as_ref().unwrap()).unwrap(),
+            original
+        );
+        assert_eq!(state.library.lock().unwrap().banks[0][0].spec.rate, 44100);
+    }
+    #[test]
+    fn conversion_requires_a_current_pending_review() {
+        let (_temp, state, _) = fixture();
+        let snapshot = state.snapshot();
+        let path = PathBuf::from(&snapshot.session.voices[0].sample_path);
+        let original = std::fs::read(&path).unwrap();
+        let reply = state
+            .convert_imports(vec![ReviewedFile {
+                id: path.to_string_lossy().into(),
+                fingerprint: catalog::fingerprint(&path),
+            }])
+            .unwrap();
+        assert!(reply.results[0].error.is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let bad = PathBuf::from(snapshot.session.root_path).join("A0/2_New.wav");
+        wav::write_pcm16(&bad, &vec![8000; 4800], 48000).unwrap();
+        let detected = state.act(Action::Refresh).unwrap();
+        let candidate = &detected.imports[0];
+        let file = ReviewedFile {
+            id: candidate.id.clone(),
+            fingerprint: candidate.fingerprint.clone(),
+        };
+        state
+            .act(Action::DismissImports {
+                files: vec![file.clone()],
+            })
+            .unwrap();
+        assert!(state.act(Action::Refresh).unwrap().imports.is_empty());
+        let refused = state.convert_imports(vec![file]).unwrap();
+        assert!(refused.results[0].error.is_some());
+        assert_eq!(wav::inspect(&bad).unwrap().rate, 48000);
+        assert_eq!(state.act(Action::ReviewFormats).unwrap().imports.len(), 1);
     }
     #[test]
     fn folder_selection_keeps_paths_usable_by_the_shell() {

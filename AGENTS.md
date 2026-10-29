@@ -49,7 +49,29 @@ Keep headless PCM/timing tests separate from hardware-dependent smoke tests:
 
 Changes to selected or automatic layers must reload in real time. Preserve the
 selected filename when a file is removed, so restoring it restores playback.
-Source WAVs are read-only. Export copies to a new kit and never overwrites one.
+Source audio is read-only during browsing/playback. The explicit exception is
+conversion approved in the sample-review modal: validate the reviewed fingerprint,
+back up the original under the app support folder, validate the complete output,
+recheck the source bytes and only then replace it. Never overwrite a different
+existing destination WAV. Export copies to a new kit and never overwrites one.
+
+## Sample validation and conversion
+
+New or revised audio is reviewed against the official manual, including initial
+folder loading. `sample-reviews.json` remembers per-library reviews; declining
+must survive force refreshes/restarts and pending reviews must survive restart.
+`Check formats` explicitly reopens all current issues. Keep review state separate
+from the musical session. Files outside an A0–Z99 kit, bad voice prefixes, missing
+voice 1, excess layers and mixed mono/stereo layers require manual fixes.
+
+Use the bundled Rust decoder/converter; no FFmpeg installation is required.
+Target standard PCM16 WAV at 44.1 kHz; preserve mono/stereo, mix >2 channels to
+mono with disclosed consent, and pad short files with trailing silence to 50 ms.
+Preserve duration and use band-limited resampling and dither where needed.
+Decode/convert in bounded chunks off the audio thread. Corrupt/truncated files,
+read-only files, stale reviews and conflicting .wav names must preserve originals.
+Backups contain the original bytes and a restore.json manifest with paths/SHA-256.
+Never guess a voice/kit, silently rename collisions or write native .rpl settings.
 
 ## Session migration
 

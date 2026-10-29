@@ -37,6 +37,7 @@ export interface Sample {
   bits: number;
   warnings: string[];
   readable: boolean;
+  needsConversion: boolean;
 }
 export interface Kit {
   id: string;
@@ -45,10 +46,32 @@ export interface Kit {
   samples: Sample[];
   warnings: string[];
 }
+export interface ReviewedFile {
+  id: string;
+  fingerprint: string;
+}
+export interface ImportCandidate extends ReviewedFile {
+  name: string;
+  kit: string;
+  issues: string[];
+  convertible: boolean;
+  target: string;
+}
+export interface ConversionResult {
+  name: string;
+  target: string | null;
+  backup: string | null;
+  error: string | null;
+}
+export interface ConversionReply {
+  snapshot: Snapshot;
+  results: ConversionResult[];
+  backupPath: string;
+}
 export interface Snapshot {
   revision: number;
   session: Session;
-  catalog: { kits: Kit[]; error: string | null };
+  catalog: { kits: Kit[]; error: string | null; unassigned: Sample[] };
   waveforms: Record<string, number[]>;
   banks: string[][];
   isDemo: boolean;
@@ -56,6 +79,7 @@ export interface Snapshot {
   supportPath: string;
   message: string | null;
   playing: boolean;
+  imports: ImportCandidate[];
 }
 export interface Transport {
   running: boolean;
@@ -75,6 +99,7 @@ export type Action =
         | "basicPattern"
         | "clearPattern"
         | "refresh"
+        | "reviewFormats"
         | "togglePlayback"
         | "stop";
     }
@@ -87,7 +112,8 @@ export type Action =
   | { type: "toggleMute" | "toggleSolo" | "audition"; channel: number }
   | { type: "setVelocity"; channel: number; step: number; value: number }
   | { type: "setBpm"; value: number }
-  | { type: "adjustBpm"; delta: number };
+  | { type: "adjustBpm"; delta: number }
+  | { type: "dismissImports"; files: ReviewedFile[] };
 export const modes: { id: LayerMode; title: string; description: string }[] = [
   {
     id: "manual",
