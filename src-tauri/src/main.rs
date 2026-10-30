@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
 mod managed;
+mod patches;
 use notify::{RecursiveMode, Watcher};
 use rample_core::{
     audio::{native::AudioHost, Command, Status},
@@ -269,6 +270,7 @@ impl Library {
 }
 struct AppState {
     managed: Mutex<managed::ManagedLibrary>,
+    patch_active: AtomicBool,
     original_audition: Mutex<managed::AuditionSession>,
     library: Mutex<Library>,
     audio: AudioHost,
@@ -792,6 +794,7 @@ fn main() {
             let (tx, rx) = std::sync::mpsc::channel();
             let state = Arc::new(AppState {
                 managed: Mutex::new(managed),
+                patch_active: AtomicBool::new(false),
                 original_audition: Mutex::default(),
                 library: Mutex::new(library),
                 audio,
@@ -827,7 +830,7 @@ fn main() {
                         let Some(state) = weak.upgrade() else { break };
                         let mut l = state.library.lock().unwrap();
                         let changed = l.scan(&paths, false);
-                        if changed {
+                        if changed && !state.patch_active.load(Ordering::Relaxed) {
                             if let Err(e) = l.synchronize(&state.audio) {
                                 l.message = Some(e);
                             }
@@ -853,6 +856,8 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            patches::patch_action,
+            patches::close_patch,
             managed::list_samples,
             managed::query_samples,
             managed::update_sample_metadata,
@@ -896,6 +901,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let state = Arc::new(AppState {
             managed: Mutex::new(managed),
+            patch_active: AtomicBool::new(false),
             original_audition: Mutex::default(),
             library: Mutex::new(library),
             audio,

@@ -62,7 +62,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 3 {
+        if version > 4 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -91,6 +91,10 @@ impl ManagedLibrary {
             db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE originals ADD COLUMN format TEXT NOT NULL DEFAULT 'WAV'; PRAGMA user_version=3; COMMIT;")
                 .map_err(|e| e.to_string())?;
         }
+        if version < 4 {
+            db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE patch_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); PRAGMA user_version=4; COMMIT;")
+                .map_err(|e| e.to_string())?;
+        }
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
@@ -103,6 +107,25 @@ impl ManagedLibrary {
             }
         }
         Ok(Self { root, db })
+    }
+    pub fn load_patches(&self) -> Result<patches::PatchGraph, String> {
+        let payload: Option<String> = self
+            .db
+            .query_row("SELECT payload FROM patch_state WHERE id=1", [], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(|e| e.to_string())?;
+        match payload {
+            Some(payload) => serde_json::from_str(&payload)
+                .map_err(|e| format!("Could not read saved Patches: {e}")),
+            None => Ok(patches::PatchGraph::default()),
+        }
+    }
+    pub fn save_patches(&self, graph: &patches::PatchGraph) -> Result<(), String> {
+        let payload = serde_json::to_string(graph).map_err(|e| e.to_string())?;
+        self.db.execute("INSERT INTO patch_state(id,payload) VALUES (1,?1) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [payload]).map_err(|e| e.to_string())?;
+        Ok(())
     }
     fn original_path(&self, id: &str) -> PathBuf {
         self.root.join("Originals").join(format!("{id}.wav"))
