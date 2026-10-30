@@ -472,14 +472,18 @@ fn decoded_original_audition_keeps_stereo_channels_and_source_rate() {
     let mut out = vec![0.; 1000];
     renderer.render(&mut out, 2);
     assert!(out
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .all(|f| (f[0] - 0.2).abs() < 1e-6 && (f[1] + 0.1).abs() < 1e-6));
     for _ in 0..240 {
         renderer.render(&mut out, 2);
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert!(out
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .all(|f| (f[0] - 0.2).abs() < 1e-6 && (f[1] + 0.1).abs() < 1e-6));
     assert_eq!(fs::read(source).unwrap(), bytes);
 }
