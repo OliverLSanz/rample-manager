@@ -25,9 +25,11 @@ Processing order for edited Rample audio is complete Original playback source â†
 `editing::render` at 44.1 kHz (trim/varispeed, channel average, gain/EQ/echo/reverb)
 â†’ dithered mono PCM16. The shared engine resets effects per trigger and writes
 the full tail. Unedited Revisions retain the existing band-limited Rample
-preparation policy. Preparation and complete validation happen in bounded chunks
-on the command/control thread. Immutable derived files are disposable caches;
-Originals and Revision records are the masters.
+preparation policy, including unchanged/reset drafts and saved neutral recipes.
+Delay/feedback and reverb duration controls remain saved but do not change this
+preparation when their effect mixes are zero. Preparation and complete validation
+happen in bounded chunks on the command/control thread. Immutable derived files
+are disposable caches; Originals and Revision records are the masters.
 
 Drafts use this same final Rample rendering path, then replace only the selected
 occurrence's prepared bank entry. Other occurrences and Voices keep saved assets.

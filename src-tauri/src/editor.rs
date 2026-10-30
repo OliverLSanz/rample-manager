@@ -786,6 +786,93 @@ mod tests {
             .is_err());
     }
     #[test]
+    fn managed_reset_and_unchanged_preview_preserve_unedited_rample_pcm() {
+        use crate::patches::PatchAction;
+        for rate in [48000, 96000] {
+            let (temp, original_state, _) = crate::tests::fixture();
+            let (audio, mut renderer) = AudioHost::offline(44100);
+            let mut state = Arc::try_unwrap(original_state).ok().unwrap();
+            state.audio = audio;
+            let source = temp.path().join("High-frequency original.wav");
+            let signal: Vec<i16> = (0..rate / 10)
+                .map(|i| {
+                    (12000. * (std::f64::consts::TAU * 18000. * i as f64 / rate as f64).sin())
+                        as i16
+                })
+                .collect();
+            wav::write_pcm16(&source, &signal, rate).unwrap();
+            let sample = state
+                .import_samples(vec![source])
+                .unwrap()
+                .samples
+                .remove(0);
+            state
+                .patch_action(PatchAction::CreatePatch {
+                    name: "Reset".into(),
+                })
+                .unwrap();
+            state
+                .patch_action(PatchAction::CreateKit {
+                    bank: "A".into(),
+                    number: 0,
+                })
+                .unwrap();
+            state
+                .patch_action(PatchAction::AddLayer {
+                    channel: 0,
+                    sample: sample.id,
+                })
+                .unwrap();
+            let editor = state.open_managed_editor(0).unwrap();
+            state.audition_editor(editor.id.clone()).unwrap();
+            let mut saved = vec![0.; 8820];
+            renderer.render(&mut saved, 2);
+            assert!(saved.iter().any(|v| v.abs() > 0.01));
+            let mut changed = editor.settings.clone();
+            changed.gain_db = -12.;
+            let mut inactive_effects = editor.settings.clone();
+            inactive_effects.echo_ms = 750.;
+            inactive_effects.echo_feedback = 0.7;
+            inactive_effects.reverb_seconds = 4.5;
+            for (sequence, settings, enabled) in [
+                (1, editor.settings.clone(), true),
+                (2, changed, true),
+                (3, editor.settings.clone(), true),
+                (4, editor.settings.clone(), false),
+                (5, editor.settings.clone(), true),
+                (6, inactive_effects.clone(), true),
+            ] {
+                state
+                    .preview_editor(editor.id.clone(), sequence, settings, enabled)
+                    .unwrap();
+                state.audition_editor(editor.id.clone()).unwrap();
+                let mut pcm = vec![0.; saved.len()];
+                renderer.render(&mut pcm, 2);
+                if sequence == 2 {
+                    assert_ne!(pcm, saved);
+                } else {
+                    let error = pcm
+                        .iter()
+                        .zip(&saved)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0., f32::max);
+                    assert!(
+                        error < 0.00003,
+                        "{rate} Hz, preview {sequence}: peak difference {error}"
+                    );
+                }
+            }
+            let result = state
+                .save_managed_editor(editor.id, inactive_effects.clone(), None)
+                .unwrap();
+            assert_eq!(result.editor.settings, inactive_effects);
+            state.audition_editor(result.editor.id).unwrap();
+            let mut pcm = vec![0.; saved.len()];
+            renderer.render(&mut pcm, 2);
+            assert!(pcm.iter().zip(&saved).all(|(a, b)| (a - b).abs() < 0.00003));
+        }
+    }
+    #[test]
     fn managed_drafts_are_local_cancel_restores_saved_and_variant_retargets_one_occurrence() {
         use crate::patches::PatchAction;
         let (temp, original_state, _) = crate::tests::fixture();

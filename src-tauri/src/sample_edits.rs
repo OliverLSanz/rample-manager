@@ -79,6 +79,15 @@ impl managed::ManagedLibrary {
     ) -> Result<Arc<PreparedSample>, String> {
         let source = self.prepare(id)?;
         settings.validate(&source.spec)?;
+        let mut unedited = Settings::original(source.spec.frames as f64 / source.spec.rate as f64);
+        // With dry effects these controls do not change the sound. Keep the same
+        // preparation quality as the initial saved Revision, including after Reset.
+        unedited.echo_ms = settings.echo_ms;
+        unedited.echo_feedback = settings.echo_feedback;
+        unedited.reverb_seconds = settings.reverb_seconds;
+        if *settings == unedited {
+            return self.prepare_target(id, true);
+        }
         let path = self
             .root
             .join("Derived")
