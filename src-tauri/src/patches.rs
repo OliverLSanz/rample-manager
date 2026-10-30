@@ -85,6 +85,13 @@ impl Patch {
         }
     }
 }
+#[derive(Clone)]
+pub(super) struct PatchPreview {
+    key: String,
+    samples: Vec<managed::LibrarySample>,
+    errors: Vec<String>,
+    ready: [Vec<LayerSample>; 4],
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSnapshot {
@@ -171,6 +178,14 @@ impl AppState {
         let mut legacy = self.library.lock().map_err(|_| "Library is unavailable")?;
         let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
         let mut graph = store.load_patches()?;
+        let refresh = matches!(&action, PatchAction::Open);
+        let persist = !matches!(
+            &action,
+            PatchAction::Open
+                | PatchAction::Musical {
+                    action: Action::Stop | Action::TogglePlayback | Action::Audition { .. }
+                }
+        );
         let mut trigger = None;
         let mut transport = None;
         let mut reset = !self.patch_active.load(Ordering::Relaxed);
@@ -333,8 +348,9 @@ impl AppState {
             }
         }
         // Durable arrangement first. A missing/corrupt asset remains a visible draft issue.
-        store.save_patches(&graph)?;
-        let samples = store.list()?;
+        if persist {
+            store.save_patches(&graph)?;
+        }
         let mut validation = vec![];
         for patch in &graph.patches {
             for kit in &patch.kits {
@@ -350,29 +366,58 @@ impl AppState {
             }
         }
         let session = graph.current().map(Patch::session);
-        let mut ready: [Vec<LayerSample>; 4] = std::array::from_fn(|_| vec![]);
-        if let Some(kit) = graph.current().and_then(Patch::kit) {
-            // Prepare each distinct Sample once, outside the audio callback.
-            let mut prepared = HashMap::new();
-            for (i, voice) in kit.voices.iter().enumerate() {
-                for layer in &voice.layers {
-                    let result = prepared
-                        .entry(layer.sample_id.clone())
-                        .or_insert_with(|| store.prepare_rample(&layer.sample_id));
-                    match result {
-                        Ok(sample) => ready[i].push(LayerSample {
-                            id: layer.id.clone(),
-                            sample: sample.clone(),
-                        }),
-                        Err(error) => validation.push(format!(
-                            "Voice {}, Layer {}: {error}",
-                            i + 1,
-                            voice.layers.iter().position(|l| l.id == layer.id).unwrap() + 1
-                        )),
+        // Musical controls reuse ready assets: no probing, hashing, decoding or
+        // bank replacement for tempo, sequencer, mixer, selection or mode changes.
+        // Future saved-revision publication must invalidate this transient cache.
+        let key = serde_json::to_string(&graph.current().and_then(Patch::kit).map(|kit| {
+            (
+                &kit.id,
+                kit.voices
+                    .iter()
+                    .map(|voice| &voice.layers)
+                    .collect::<Vec<_>>(),
+            )
+        }))
+        .map_err(|e| e.to_string())?;
+        let reload = refresh
+            || legacy
+                .patch_preview
+                .as_ref()
+                .is_none_or(|cache| cache.key != key);
+        let preview = if reload {
+            let mut ready: [Vec<LayerSample>; 4] = std::array::from_fn(|_| vec![]);
+            let mut errors = vec![];
+            if let Some(kit) = graph.current().and_then(Patch::kit) {
+                let mut prepared = HashMap::new();
+                for (i, voice) in kit.voices.iter().enumerate() {
+                    for (position, layer) in voice.layers.iter().enumerate() {
+                        let result = prepared
+                            .entry(layer.sample_id.clone())
+                            .or_insert_with(|| store.prepare_rample(&layer.sample_id));
+                        match result {
+                            Ok(sample) => ready[i].push(LayerSample {
+                                id: layer.id.clone(),
+                                sample: sample.clone(),
+                            }),
+                            Err(error) => errors.push(format!(
+                                "Voice {}, Layer {}: {error}",
+                                i + 1,
+                                position + 1
+                            )),
+                        }
                     }
                 }
             }
-        }
+            PatchPreview {
+                key,
+                samples: store.list()?,
+                errors,
+                ready,
+            }
+        } else {
+            legacy.patch_preview.as_ref().unwrap().clone()
+        };
+        validation.extend(preview.errors.clone());
         if reset {
             self.audio.send(Command::Stop)?;
             self.audio.send(Command::Edit(None))?;
@@ -386,9 +431,12 @@ impl AppState {
                 .unwrap_or_else(|| vec![Voice::default(); 4]),
             session.as_ref().map(|s| s.bpm).unwrap_or(120.),
         ))?;
-        for (channel, bank) in ready.into_iter().enumerate() {
-            self.audio.send(Command::LayerBank(channel, bank))?;
+        if reload || reset {
+            for (channel, bank) in preview.ready.iter().enumerate() {
+                self.audio.send(Command::LayerBank(channel, bank.clone()))?;
+            }
         }
+        legacy.patch_preview = Some(preview.clone());
         if let Some(playing) = transport {
             self.audio.send(if playing {
                 Command::Play
@@ -403,7 +451,7 @@ impl AppState {
         Ok(PatchSnapshot {
             graph,
             session,
-            samples,
+            samples: preview.samples,
             validation,
             playing: legacy.playing,
         })
@@ -444,6 +492,49 @@ pub async fn close_patch(state: tauri::State<'_, Arc<AppState>>) -> Result<(), S
 mod tests {
     use super::*;
     use crate::tests::fixture;
+    #[test]
+    fn musical_controls_keep_ready_audio_until_arrangement_refresh() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let id = state.import_samples(vec![source]).unwrap().samples[0]
+            .id
+            .clone();
+        state
+            .patch_action(PatchAction::CreatePatch { name: "Set".into() })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: id,
+            })
+            .unwrap();
+        // Owned storage loss should be reported on refresh, not turn a mixer change
+        // into a new decode or abruptly replace an already-prepared playing bank.
+        std::fs::rename(
+            temp.path().join("support/Library/Originals"),
+            temp.path().join("safe-originals"),
+        )
+        .unwrap();
+        let changed = state
+            .patch_action(PatchAction::Musical {
+                action: Action::ToggleMute { channel: 0 },
+            })
+            .unwrap();
+        assert!(changed.validation.is_empty());
+        assert!(changed.session.unwrap().voices[0].muted);
+        let refreshed = state.patch_action(PatchAction::Open).unwrap();
+        assert!(refreshed
+            .validation
+            .iter()
+            .any(|issue| issue.contains("Layer 1")));
+    }
     #[test]
     fn patches_share_samples_and_persist_duplicate_occurrences_selection_and_drafts() {
         let (temp, state, _) = fixture();

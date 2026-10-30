@@ -52,6 +52,7 @@ struct Library {
     message: Option<String>,
     playing: bool,
     editor: Option<editor::EditorState>,
+    patch_preview: Option<patches::PatchPreview>,
 }
 impl Library {
     fn new(support: PathBuf) -> Result<Self, String> {
@@ -81,6 +82,7 @@ impl Library {
             message: None,
             playing: false,
             editor: None,
+            patch_preview: None,
         })
     }
     fn snapshot(&self, watching: bool) -> Snapshot {
