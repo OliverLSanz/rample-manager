@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -18,6 +19,9 @@ import {
 } from "./types";
 vi.mock("./native", () => ({
   getSnapshot: vi.fn(),
+  patchAction: vi.fn(),
+  migrationStatus: vi.fn(),
+  migrateLegacy: vi.fn(),
   getTransport: vi.fn(),
   onLibraryChange: vi.fn(),
   act: vi.fn(),
@@ -90,6 +94,14 @@ function fixture(): Snapshot {
 }
 beforeEach(() => {
   snapshot = fixture();
+  vi.mocked(native.migrationStatus).mockResolvedValue({
+    status: "idle",
+    processed: 0,
+    total: 0,
+    current: null,
+    backup: null,
+    errors: [],
+  });
   vi.mocked(native.getSnapshot).mockImplementation(async () =>
     structuredClone(snapshot),
   );
@@ -445,4 +457,29 @@ describe("cross-platform view models", () => {
     s.catalog.kits[0].samples[0].warnings = ["Bad rate"];
     expect(compatibilityWarnings(s)).toEqual(["Kit warning", "Bad rate"]);
   });
+});
+
+it("opens the managed workspace on restart without folder conversion controls", async () => {
+  snapshot.managed = true;
+  vi.mocked(native.patchAction).mockResolvedValue({
+    graph: { selectedPatch: "", patches: [] },
+    session: null,
+    samples: [],
+    validation: [],
+    playing: false,
+  });
+  render(<App />);
+  expect(await screen.findByRole("heading", { name: "Patches" })).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Check sample formats" }),
+  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "Open folder…" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Back to folders" })).toBeNull();
+  const stale = fixture();
+  stale.revision = 100;
+  await act(async () => update(stale));
+  expect(screen.getByRole("heading", { name: "Patches" })).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Check sample formats" }),
+  ).toBeNull();
 });

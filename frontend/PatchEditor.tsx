@@ -17,11 +17,14 @@ import {
 export function PatchEditor({
   transport,
   onClose,
+  managed = false,
 }: {
   transport: Transport;
   onClose: () => void;
+  managed?: boolean;
 }) {
   const [sdImport, setSdImport] = useState(false);
+  const [library, setLibrary] = useState(false);
   const [view, setView] = useState<PatchSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -94,7 +97,7 @@ export function PatchEditor({
     await act({ type: "musical", action });
   }
   async function close() {
-    if (busy) return;
+    if (busy || managed) return;
     setBusy(true);
     try {
       await queue.current.catch(() => {});
@@ -153,6 +156,15 @@ export function PatchEditor({
         }}
       />
     );
+  if (library)
+    return (
+      <LibrarySamples
+        onClose={() => {
+          setLibrary(false);
+          void act({ type: "open" });
+        }}
+      />
+    );
   if (picker !== null)
     return (
       <LibrarySamples
@@ -208,9 +220,14 @@ export function PatchEditor({
             <button disabled={busy} onClick={() => void act({ type: "open" })}>
               Refresh preview
             </button>
-            <button disabled={busy} onClick={() => void close()}>
-              Back to folders
+            <button disabled={busy} onClick={() => setLibrary(true)}>
+              Library samples…
             </button>
+            {!managed && (
+              <button disabled={busy} onClick={() => void close()}>
+                Back to folders
+              </button>
+            )}
           </div>
         </header>
         {error && <p role="alert">{error}</p>}
@@ -380,145 +397,159 @@ export function PatchEditor({
         {kit && view?.session && (
           <>
             <fieldset disabled={busy} className="patch-voices">
-              {kit.voices.map((voice, channel) => (
-                <section
-                  key={channel}
-                  aria-label={`Patch Voice ${channel + 1}`}
-                >
-                  <h3>Voice {channel + 1}</h3>
-                  <label>
-                    Layer mode
-                    <select
-                      aria-label={`Layer mode for Voice ${channel + 1}`}
-                      value={voice.mode}
-                      onChange={(e) =>
-                        void musical({
-                          type: "setMode",
-                          channel,
-                          mode: e.target.value as typeof voice.mode,
-                        })
-                      }
-                    >
-                      {modes.map((mode) => (
-                        <option key={mode.id} value={mode.id}>
-                          {mode.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <ol>
-                    {voice.layers.map((layer, index) => {
-                      const sample = view.samples.find(
-                        (s) => s.id === layer.sampleId,
-                      );
-                      return (
-                        <li
-                          key={layer.id}
-                          className={
-                            voice.selectedLayer === layer.id ? "selected" : ""
-                          }
-                        >
-                          <button
-                            aria-label={`Select Layer ${index + 1}: ${sample?.name ?? "Unavailable Sample"}`}
-                            aria-pressed={voice.selectedLayer === layer.id}
-                            onClick={() =>
-                              void act({
-                                type: "selectLayer",
-                                channel,
-                                layer: layer.id,
-                              })
+              {kit.voices.map((_, channel) => {
+                const source =
+                  patch?.kits.find(
+                    (k) => k.id === (patch.voiceKits?.[channel] ?? kit.id),
+                  ) ?? kit;
+                const voice = source.voices[channel];
+                return (
+                  <section
+                    key={channel}
+                    aria-label={`Patch Voice ${channel + 1}`}
+                  >
+                    <h3>Voice {channel + 1}</h3>
+                    <p>
+                      Source Kit {source.bank}
+                      {source.number}
+                    </p>
+                    <label>
+                      Layer mode
+                      <select
+                        aria-label={`Layer mode for Voice ${channel + 1}`}
+                        value={voice.mode}
+                        onChange={(e) =>
+                          void musical({
+                            type: "setMode",
+                            channel,
+                            mode: e.target.value as typeof voice.mode,
+                          })
+                        }
+                      >
+                        {modes.map((mode) => (
+                          <option key={mode.id} value={mode.id}>
+                            {mode.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <ol>
+                      {voice.layers.map((layer, index) => {
+                        const sample = view.samples.find(
+                          (s) => s.id === layer.sampleId,
+                        );
+                        return (
+                          <li
+                            key={layer.id}
+                            className={
+                              voice.selectedLayer === layer.id ? "selected" : ""
                             }
                           >
-                            {index + 1}. {sample?.name ?? "Unavailable Sample"}
-                          </button>
-                          <div className="patch-layer-actions">
                             <button
-                              aria-label={`Move Layer ${index + 1} up`}
-                              disabled={index === 0}
+                              aria-label={`Select Layer ${index + 1}: ${sample?.name ?? "Unavailable Sample"}`}
+                              aria-pressed={voice.selectedLayer === layer.id}
                               onClick={() =>
                                 void act({
-                                  type: "moveLayer",
-                                  channel,
-                                  layer: layer.id,
-                                  to: index - 1,
-                                })
-                              }
-                            >
-                              ↑
-                            </button>
-                            <button
-                              aria-label={`Move Layer ${index + 1} down`}
-                              disabled={index === voice.layers.length - 1}
-                              onClick={() =>
-                                void act({
-                                  type: "moveLayer",
-                                  channel,
-                                  layer: layer.id,
-                                  to: index + 1,
-                                })
-                              }
-                            >
-                              ↓
-                            </button>
-                            <button
-                              aria-label={`Repeat Layer ${index + 1}`}
-                              onClick={() =>
-                                void act({
-                                  type: "addLayer",
-                                  channel,
-                                  sample: layer.sampleId,
-                                })
-                              }
-                            >
-                              Repeat
-                            </button>
-                            <button
-                              aria-label={`Remove Layer ${index + 1}`}
-                              onClick={() =>
-                                void act({
-                                  type: "removeLayer",
+                                  type: "selectLayer",
                                   channel,
                                   layer: layer.id,
                                 })
                               }
                             >
-                              Remove
+                              {index + 1}.{" "}
+                              {sample?.name ?? "Unavailable Sample"}
                             </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                  <button
-                    aria-label={`Add Sample to Voice ${channel + 1}`}
-                    onClick={() => setPicker(channel)}
-                  >
-                    Add Sample…
-                  </button>
-                  <button
-                    aria-label={`Edit selected Sample in Voice ${channel + 1}`}
-                    disabled={!voice.layers.length}
-                    onClick={() => {
-                      setBusy(true);
-                      setError(null);
-                      void native
-                        .openManagedEditor(channel)
-                        .then(setEditor)
-                        .catch((e) => setError(String(e)))
-                        .finally(() => setBusy(false));
-                    }}
-                  >
-                    Edit Sample…
-                  </button>
-                  <button
-                    aria-label={`Audition Voice ${channel + 1}`}
-                    disabled={!voice.layers.length}
-                    onClick={() => void musical({ type: "audition", channel })}
-                  >
-                    Audition
-                  </button>
-                </section>
-              ))}
+                            <div className="patch-layer-actions">
+                              <button
+                                aria-label={`Move Layer ${index + 1} up`}
+                                disabled={index === 0}
+                                onClick={() =>
+                                  void act({
+                                    type: "moveLayer",
+                                    channel,
+                                    layer: layer.id,
+                                    to: index - 1,
+                                  })
+                                }
+                              >
+                                ↑
+                              </button>
+                              <button
+                                aria-label={`Move Layer ${index + 1} down`}
+                                disabled={index === voice.layers.length - 1}
+                                onClick={() =>
+                                  void act({
+                                    type: "moveLayer",
+                                    channel,
+                                    layer: layer.id,
+                                    to: index + 1,
+                                  })
+                                }
+                              >
+                                ↓
+                              </button>
+                              <button
+                                aria-label={`Repeat Layer ${index + 1}`}
+                                onClick={() =>
+                                  void act({
+                                    type: "addLayer",
+                                    channel,
+                                    sample: layer.sampleId,
+                                  })
+                                }
+                              >
+                                Repeat
+                              </button>
+                              <button
+                                aria-label={`Remove Layer ${index + 1}`}
+                                onClick={() =>
+                                  void act({
+                                    type: "removeLayer",
+                                    channel,
+                                    layer: layer.id,
+                                  })
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                    <button
+                      aria-label={`Add Sample to Voice ${channel + 1}`}
+                      onClick={() => setPicker(channel)}
+                    >
+                      Add Sample…
+                    </button>
+                    <button
+                      aria-label={`Edit selected Sample in Voice ${channel + 1}`}
+                      disabled={!voice.layers.length}
+                      onClick={() => {
+                        setBusy(true);
+                        setError(null);
+                        void native
+                          .openManagedEditor(channel)
+                          .then(setEditor)
+                          .catch((e) => setError(String(e)))
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      Edit Sample…
+                    </button>
+                    <button
+                      aria-label={`Audition Voice ${channel + 1}`}
+                      disabled={!voice.layers.length}
+                      onClick={() =>
+                        void musical({ type: "audition", channel })
+                      }
+                    >
+                      Audition
+                    </button>
+                  </section>
+                );
+              })}
             </fieldset>
             <section className="sequencer" aria-label="Patch 16-step sequencer">
               <h3>Sequencer · 16 steps</h3>

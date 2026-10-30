@@ -555,6 +555,13 @@ impl ManagedLibrary {
         ))
     }
     pub fn import(&mut self, paths: Vec<PathBuf>) -> Result<ImportReply, String> {
+        self.import_progress(paths, |_, _, _| {})
+    }
+    pub(super) fn import_progress(
+        &mut self,
+        paths: Vec<PathBuf>,
+        mut progress: impl FnMut(usize, usize, &Path),
+    ) -> Result<ImportReply, String> {
         let mut inputs = vec![];
         for path in paths {
             if !path.is_dir() {
@@ -584,7 +591,9 @@ impl ManagedLibrary {
             }
         }
         let mut results = vec![];
-        for (source, prior_error) in inputs {
+        let total = inputs.len();
+        for (index, (source, prior_error)) in inputs.into_iter().enumerate() {
+            progress(index, total, &source);
             let outcome = match prior_error {
                 Some(error) => Err(error),
                 None => self.import_file(&source),
@@ -1597,6 +1606,6 @@ mod tests {
         assert_eq!(prepared.head[0], [0.25, 0.25]);
         let owner = state.open_sample_audition().unwrap();
         state.audition_sample(owner, samples[0].id.clone()).unwrap();
-        assert_eq!(Library::new(support).unwrap().session, legacy);
+        assert_eq!(Library::new(support, false).unwrap().session, legacy);
     }
 }

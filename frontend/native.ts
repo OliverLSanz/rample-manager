@@ -136,3 +136,8 @@ export const finishSdImport = (
   choice: import("./types").SdImportChoice,
 ) =>
   invoke<import("./types").PatchSnapshot>("finish_sd_import", { id, choice });
+
+export const migrationStatus = () =>
+  invoke<import("./types").MigrationStatus>("migration_status");
+export const migrateLegacy = () =>
+  invoke<import("./types").MigrationStatus>("migrate_legacy");

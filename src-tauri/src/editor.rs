@@ -76,6 +76,12 @@ pub(super) struct SaveReply {
 }
 impl AppState {
     pub(super) fn open_editor(&self, channel: usize) -> Result<EditorInfo, String> {
+        if matches!(
+            self.migration_status().status.as_str(),
+            "working" | "complete"
+        ) {
+            return Err("Use Edit Sample in the managed Patch workspace.".into());
+        }
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         if channel >= 4 {
             return Err("Invalid voice".into());
@@ -395,7 +401,7 @@ impl ManagedEdit {
         let valid = graph
             .current()
             .filter(|p| p.id == self.patch)
-            .and_then(|p| p.kit())
+            .and_then(|p| p.voice_kit(channel))
             .filter(|k| k.id == self.kit)
             .and_then(|k| k.voices.get(channel))
             .is_some_and(|v| {
@@ -459,7 +465,7 @@ impl AppState {
         }
         let graph = store.load_patches()?;
         let patch = graph.current().ok_or("Select a Patch first.")?;
-        let kit = patch.kit().ok_or("Select a Kit first.")?;
+        let kit = patch.voice_kit(channel).ok_or("Select a Kit first.")?;
         let voice = kit.voices.get(channel).ok_or("Invalid Voice.")?;
         let layer = voice
             .layers

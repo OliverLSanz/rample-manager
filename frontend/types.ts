@@ -97,6 +97,7 @@ export interface ConversionReply {
   backupPath: string;
 }
 export interface Snapshot {
+  managed?: boolean;
   revision: number;
   session: Session;
   catalog: { kits: Kit[]; error: string | null; unassigned: Sample[] };
@@ -288,6 +289,7 @@ export interface PatchKit {
   voices: PatchVoice[];
 }
 export interface Patch {
+  voiceKits?: string[];
   importedSd?: ImportedSd | null;
   id: string;
   name: string;
@@ -341,3 +343,12 @@ export type SdImportChoice =
   | { type: "new"; name: string }
   | { type: "update"; patch: string }
   | { type: "reuse" };
+
+export interface MigrationStatus {
+  status: string;
+  processed: number;
+  total: number;
+  current: string | null;
+  errors: string[];
+  backup: string | null;
+}

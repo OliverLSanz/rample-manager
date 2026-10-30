@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
+mod legacy_migration;
 mod managed;
 mod patches;
 mod sample_edits;
@@ -41,6 +42,7 @@ struct Snapshot {
     playing: bool,
     imports: Vec<Candidate>,
     editor_invalidated: bool,
+    managed: bool,
 }
 struct Library {
     revision: u64,
@@ -57,10 +59,14 @@ struct Library {
     patch_preview: Option<patches::PatchPreview>,
 }
 impl Library {
-    fn new(support: PathBuf) -> Result<Self, String> {
+    fn new(support: PathBuf, managed_mode: bool) -> Result<Self, String> {
         std::fs::create_dir_all(&support).map_err(|e| e.to_string())?;
-        let mut session = session::load(&support)?;
-        if session.root_path.is_empty() {
+        let mut session = if managed_mode {
+            Session::default()
+        } else {
+            session::load(&support)?
+        };
+        if !managed_mode && session.root_path.is_empty() {
             session.root_path = wav::create_demo(&support)?.to_string_lossy().into_owned();
             let hits = [
                 vec![0, 4, 8, 12],
@@ -79,7 +85,11 @@ impl Library {
             scanner: Scanner::default(),
             prepared: HashMap::new(),
             banks: std::array::from_fn(|_| vec![]),
-            reviews: Reviews::load(&support)?,
+            reviews: if managed_mode {
+                Reviews::default()
+            } else {
+                Reviews::load(&support)?
+            },
             support,
             message: None,
             playing: false,
@@ -110,6 +120,7 @@ impl Library {
             playing: self.playing,
             imports: self.reviews.pending(&self.session.root_path, &self.catalog),
             editor_invalidated: self.editor.as_ref().is_some_and(|e| e.invalidated),
+            managed: false,
         }
     }
     fn samples(&self, i: usize) -> Vec<Sample> {
@@ -274,6 +285,7 @@ impl Library {
 }
 struct AppState {
     managed: Mutex<managed::ManagedLibrary>,
+    migration: Mutex<legacy_migration::MigrationStatus>,
     patch_active: AtomicBool,
     original_audition: Mutex<managed::AuditionSession>,
     library: Mutex<Library>,
@@ -344,10 +356,13 @@ enum Action {
 }
 impl AppState {
     fn snapshot(&self) -> Snapshot {
-        self.library
+        let mut snapshot = self
+            .library
             .lock()
             .unwrap()
-            .snapshot(self.watching.load(Ordering::Relaxed))
+            .snapshot(self.watching.load(Ordering::Relaxed));
+        snapshot.managed = self.migration.lock().unwrap().status == "complete";
+        snapshot
     }
     fn watch(&self) {
         self.watching.store(false, Ordering::Relaxed);
@@ -370,6 +385,18 @@ impl AppState {
             .store(self.watcher.lock().unwrap().is_some(), Ordering::Relaxed);
     }
     fn act(&self, action: Action) -> Result<Snapshot, String> {
+        if matches!(
+            self.migration
+                .lock()
+                .map_err(|_| "Migration status unavailable")?
+                .status
+                .as_str(),
+            "working" | "complete"
+        ) {
+            return Err(
+                "Use the managed Library and Patch controls during or after migration.".into(),
+            );
+        }
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         l.message = None;
         let mut watch = false;
@@ -596,6 +623,18 @@ struct ConversionReply {
 }
 impl AppState {
     fn convert_imports(&self, files: Vec<ReviewedFile>) -> Result<ConversionReply, String> {
+        if matches!(
+            self.migration
+                .lock()
+                .map_err(|_| "Migration status unavailable")?
+                .status
+                .as_str(),
+            "working" | "complete"
+        ) {
+            return Err(
+                "Use the managed Library and Patch controls during or after migration.".into(),
+            );
+        }
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         l.message = None;
         l.scan(&HashSet::new(), true);
@@ -793,14 +832,20 @@ fn main() {
                     .join("Rample Preview")
             };
             let managed = managed::ManagedLibrary::open(&support)?;
-            let mut library = Library::new(support)?;
+            let migrated = legacy_migration::initialize(&managed)?;
+            let mut library = Library::new(support, migrated)?;
             let audio = AudioHost::new();
-            library.scan(&HashSet::new(), false);
-            library.synchronize(&audio)?;
-            library.save()?;
+            if !migrated {
+                library.scan(&HashSet::new(), false);
+                library.synchronize(&audio)?;
+            }
             let (tx, rx) = std::sync::mpsc::channel();
             let state = Arc::new(AppState {
                 managed: Mutex::new(managed),
+                migration: Mutex::new(legacy_migration::MigrationStatus {
+                    status: if migrated { "complete" } else { "idle" }.into(),
+                    ..Default::default()
+                }),
                 patch_active: AtomicBool::new(false),
                 original_audition: Mutex::default(),
                 library: Mutex::new(library),
@@ -809,7 +854,11 @@ fn main() {
                 watching: AtomicBool::new(false),
                 events: tx,
             });
-            state.watch();
+            if migrated {
+                state.patch_action(patches::PatchAction::Open)?;
+            } else {
+                state.watch();
+            }
             app.manage(state.clone());
             let handle = app.handle().clone();
             let weak = Arc::downgrade(&state);
@@ -866,10 +915,14 @@ fn main() {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 let state = window.state::<Arc<AppState>>();
                 let _ = state.audio.send(Command::Stop);
-                let _ = state.library.lock().unwrap().save();
+                if state.migration_status().status != "complete" {
+                    let _ = state.library.lock().unwrap().save();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
+            legacy_migration::migration_status,
+            legacy_migration::migrate_legacy,
             sd_import::prepare_sd_import,
             sd_import::sd_native_blob,
             sd_import::finish_sd_import,
@@ -923,13 +976,22 @@ mod tests {
         support: PathBuf,
     ) -> (Arc<AppState>, std::sync::mpsc::Receiver<Vec<PathBuf>>) {
         let managed = managed::ManagedLibrary::open(&support).unwrap();
-        let mut library = Library::new(support).unwrap();
-        library.scan(&HashSet::new(), false);
+        let migrated = legacy_migration::initialize(&managed).unwrap();
+        let mut library = Library::new(support, migrated).unwrap();
+        if !migrated {
+            library.scan(&HashSet::new(), false);
+        }
         let audio = AudioHost::headless();
-        library.synchronize(&audio).unwrap();
+        if !migrated {
+            library.synchronize(&audio).unwrap();
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         let state = Arc::new(AppState {
             managed: Mutex::new(managed),
+            migration: Mutex::new(legacy_migration::MigrationStatus {
+                status: if migrated { "complete" } else { "idle" }.into(),
+                ..Default::default()
+            }),
             patch_active: AtomicBool::new(false),
             original_audition: Mutex::default(),
             library: Mutex::new(library),
@@ -938,6 +1000,9 @@ mod tests {
             watching: AtomicBool::new(false),
             events: tx,
         });
+        if migrated {
+            state.patch_action(patches::PatchAction::Open).unwrap();
+        }
         (state, rx)
     }
     #[test]

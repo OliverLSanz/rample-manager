@@ -55,8 +55,7 @@ without making that artifact or the mono Rample preparation the Library master.
 Decode and preparation use the bundled Rust codecs, work in bounded chunks off
 the audio callback, and need no FFmpeg installation. Playback artifacts currently
 support mono/stereo audio up to 384 kHz and standard RIFF size limits; files that
-cannot be completely decoded are reported individually. This coexists with the folder workflow
-below. Legacy conversion and **Save to sample** cannot modify managed
+cannot be completely decoded are reported individually. The folder workflow below remains available until its session has migrated. Legacy conversion and **Save to sample** cannot modify managed
 Originals, and managed storage cannot be opened as a legacy folder.
 
 Open **Patches…** to create multiple named Patches that share Library Samples.
@@ -86,7 +85,7 @@ controls reuse prepared audio, so changing a step or stopping playback does not
 reread/decode long Originals. **Refresh preview** explicitly revalidates assets.
 Incomplete drafts remain editable: missing Voice 1 and more than 12 Layers are
 reported visibly, retaining every Layer. Patches save locally in the private
-Library database, independently of the folder session. **Back to folders** restores
+Library database, independently of the folder session. Before migration, **Back to folders** restores
 that workflow. Native settings and complete Build Patch remain pending verified
 device evidence. No typed native settings are imported or written by these controls.
 
@@ -105,12 +104,29 @@ the intended Voice to place them explicitly. Excess Layers are retained. The
 draft validation. A partial copy reports the failures and asks you to retain the
 source for retry. Completed copies, pending reviews, and committed Patches survive
 removing the source and restarting. Managed playback suspends the legacy folder
-watcher; returning to folders resumes that separate workflow.
+watcher; before migration, returning to folders resumes that separate workflow.
 
 Native files in `_save` and other non-audio files are retained as exact opaque
 bytes in the Library database. Known operating-system filesystem metadata is
 ignored. Native playback settings remain explicitly unverified; the app modes
 are preview preferences, and this intake does not enable complete Build Patch.
+
+Existing folder sessions show **Move current folder into Library**. Migration copies
+and validates audio in bounded chunks, backs up the saved session byte for byte as
+`session-before-managed.backup.json`, and preserves Kits, selected filenames,
+all five modes, each Kit's remembered choices, mixed source Kits across Voices,
+BPM, patterns, velocities and mixer state. External audio and native configuration
+stay untouched. Previously baked audio becomes an unedited Original with its current
+sound; transient old editor controls cannot be reconstructed.
+
+Progress shows the current file and file count. A failed copy, missing selected
+filename or failed activation leaves the folder session usable, reports the problem,
+and retains verified copies for retry. Restore a missing selected file before retrying;
+migration never silently chooses another Layer. After success, the managed workspace
+and reversible editor replace the folder conversion controls. Restart uses private
+audio without scanning or watching the source, which can be disconnected.
+
+The following controls describe compatibility with folder sessions before migration.
 
 Choose **Open folder…** and select the root containing your kits:
 

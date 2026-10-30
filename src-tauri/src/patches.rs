@@ -21,6 +21,8 @@ pub struct Patch {
     pub bpm: f64,
     /// Sequencer/mixer memory is shared between Kits, as in the folder workflow.
     pub voices: Vec<Voice>,
+    #[serde(default)]
+    pub voice_kits: Vec<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,16 +66,31 @@ impl Patch {
             .find(|k| k.id == self.selected_kit)
             .ok_or("Select a Kit first.".into())
     }
+    pub fn voice_kit(&self, channel: usize) -> Option<&PatchKit> {
+        let Some(id) = self.voice_kits.get(channel) else {
+            return self.kit();
+        };
+        self.kits.iter().find(|k| &k.id == id)
+    }
     fn voice_mut(&mut self, channel: usize) -> Result<&mut PatchVoice, String> {
-        self.kit_mut()?
+        let id = self
+            .voice_kits
+            .get(channel)
+            .unwrap_or(&self.selected_kit)
+            .clone();
+        self.kits
+            .iter_mut()
+            .find(|k| k.id == id)
+            .ok_or("Select a Kit first.")?
             .voices
             .get_mut(channel)
             .ok_or("Invalid Voice.".into())
     }
     fn session(&self) -> Session {
         let mut voices = self.voices.clone();
-        if let Some(kit) = self.kit() {
-            for (voice, arrangement) in voices.iter_mut().zip(&kit.voices) {
+        for (channel, voice) in voices.iter_mut().enumerate() {
+            if let Some(kit) = self.voice_kit(channel) {
+                let arrangement = &kit.voices[channel];
                 voice.kit_id = kit.id.clone();
                 voice.sample_path = arrangement.selected_layer.clone();
                 voice.layer_mode = arrangement.mode;
@@ -212,6 +229,7 @@ impl AppState {
                     kits: vec![],
                     bpm: 120.,
                     voices: vec![Voice::default(); 4],
+                    voice_kits: vec![],
                 });
                 graph.selected_patch = id;
                 reset = true;
@@ -238,6 +256,7 @@ impl AppState {
                     voices: vec![PatchVoice::default(); 4],
                 });
                 patch.selected_kit = id;
+                patch.voice_kits.clear();
             }
             PatchAction::AddressKit { bank, number } => {
                 let patch = graph.current_mut()?;
@@ -252,6 +271,7 @@ impl AppState {
                     return Err("Kit no longer exists.".into());
                 }
                 patch.selected_kit = kit;
+                patch.voice_kits.clear();
             }
             PatchAction::AddLayer { channel, sample } => {
                 if !store.list()?.iter().any(|s| s.id == sample && !s.retired) {
@@ -397,12 +417,15 @@ impl AppState {
         // Musical controls reuse ready assets: no probing, hashing, decoding or
         // bank replacement for tempo, sequencer, mixer, selection or mode changes.
         // Future saved-revision publication must invalidate this transient cache.
-        let key = serde_json::to_string(&graph.current().and_then(Patch::kit).map(|kit| {
+        let key = serde_json::to_string(&graph.current().map(|patch| {
             (
-                &kit.id,
-                kit.voices
-                    .iter()
-                    .map(|voice| &voice.layers)
+                &patch.selected_kit,
+                (0..4)
+                    .map(|channel| {
+                        patch
+                            .voice_kit(channel)
+                            .map(|kit| &kit.voices[channel].layers)
+                    })
                     .collect::<Vec<_>>(),
             )
         }))
@@ -415,15 +438,19 @@ impl AppState {
         let preview = if reload {
             let mut ready: [Vec<LayerSample>; 4] = std::array::from_fn(|_| vec![]);
             let mut errors = vec![];
-            if let Some(kit) = graph.current().and_then(Patch::kit) {
+            if let Some(patch) = graph.current() {
                 let mut prepared = HashMap::new();
-                for (i, voice) in kit.voices.iter().enumerate() {
+                for (i, bank) in ready.iter_mut().enumerate() {
+                    let Some(kit) = patch.voice_kit(i) else {
+                        continue;
+                    };
+                    let voice = &kit.voices[i];
                     for (position, layer) in voice.layers.iter().enumerate() {
                         let result = prepared
                             .entry(layer.sample_id.clone())
                             .or_insert_with(|| store.prepare_rample(&layer.sample_id));
                         match result {
-                            Ok(sample) => ready[i].push(LayerSample {
+                            Ok(sample) => bank.push(LayerSample {
                                 id: layer.id.clone(),
                                 sample: sample.clone(),
                             }),
@@ -491,6 +518,15 @@ impl AppState {
         })
     }
     pub fn close_patch(&self) -> Result<(), String> {
+        if self
+            .migration
+            .lock()
+            .map_err(|_| "Migration status unavailable")?
+            .status
+            == "complete"
+        {
+            return Ok(());
+        }
         let mut legacy = self.library.lock().map_err(|_| "Library is unavailable")?;
         self.audio.send(Command::Stop)?;
         legacy.playing = false;

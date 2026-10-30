@@ -202,3 +202,29 @@ it("reports a failed picker add and prevents a second add while publication is p
     "Error: Library disk is full",
   );
 });
+
+it("keeps migrated users in the managed workspace and shows each Voice's source Kit", async () => {
+  const initial = view();
+  const other = structuredClone(initial.graph.patches[0].kits[0]);
+  other.id = "other-kit";
+  other.bank = "B";
+  other.number = 12;
+  other.voices[0].selectedLayer = "other-layer";
+  other.voices[0].layers = [{ id: "other-layer", sampleId: "sample" }];
+  const patch = {
+    ...initial.graph.patches[0],
+    voiceKits: ["other-kit", "kit", "kit", "kit"],
+  };
+  patch.kits.push(other);
+  initial.graph.patches[0] = patch;
+  vi.mocked(native.patchAction).mockResolvedValue(initial);
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  const voice = await screen.findByRole("region", { name: "Patch Voice 1" });
+  expect(within(voice).getByText("Source Kit B12")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Back to folders" })).toBeNull();
+  expect(
+    within(voice)
+      .getByRole("button", { name: "Select Layer 1: Warm kick" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+});

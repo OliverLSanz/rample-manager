@@ -99,6 +99,7 @@ fn draft(name: String) -> Patch {
         bpm: 120.,
         voices: vec![rample_core::model::Voice::default(); 4],
         imported_sd: None,
+        voice_kits: vec![],
     }
 }
 impl ManagedLibrary {
@@ -132,6 +133,13 @@ impl ManagedLibrary {
         Ok(same.then_some(id))
     }
     fn prepare_sd(&mut self, source: &Path) -> Result<SdImportReview, String> {
+        self.prepare_sd_progress(source, |_, _, _| {})
+    }
+    pub(super) fn prepare_sd_progress(
+        &mut self,
+        source: &Path,
+        progress: impl FnMut(usize, usize, &Path),
+    ) -> Result<SdImportReview, String> {
         if !source.is_dir() {
             return Err("Choose the root folder of a Rample SD or its copy.".into());
         }
@@ -276,7 +284,10 @@ impl ManagedLibrary {
             }
         }
         audio_paths.sort_by(|a, b| natord::compare(&a.0, &b.0));
-        let audio = self.import(audio_paths.iter().map(|(_, path)| path.clone()).collect())?;
+        let audio = self.import_progress(
+            audio_paths.iter().map(|(_, path)| path.clone()).collect(),
+            progress,
+        )?;
         state.copy_complete &= audio.complete;
         for ((path, source), result) in audio_paths.iter().zip(&audio.results) {
             let file = SdFile {

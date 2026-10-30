@@ -37,6 +37,7 @@ import { Modal } from "./Modal";
 import { SampleEditor } from "./SampleEditor";
 import { SdImport } from "./SdImport";
 import { LibrarySamples } from "./LibrarySamples";
+import { LibraryMigration } from "./LibraryMigration";
 import { PatchEditor } from "./PatchEditor";
 import { SequencerRow, TransportBar } from "./Sequencer";
 import {
@@ -67,6 +68,12 @@ function errorText(error: unknown) {
     : error instanceof Error
       ? error.message
       : String(error);
+}
+
+function acceptSnapshot(previous: Snapshot | null, next: Snapshot): Snapshot {
+  // Queued folder events cannot reopen destructive compatibility controls after activation.
+  if (previous?.managed && !next.managed) return previous;
+  return !previous || next.revision >= previous.revision ? next : previous;
 }
 
 export default function App() {
@@ -109,11 +116,7 @@ export default function App() {
       .then(() => native.act(a))
       .then((result) => {
         if (alive.current)
-          setSnapshot((previous) =>
-            !previous || result.revision >= previous.revision
-              ? result
-              : previous,
-          );
+          setSnapshot((previous) => acceptSnapshot(previous, result));
       })
       .catch((e) => {
         if (alive.current) setError(errorText(e));
@@ -124,11 +127,7 @@ export default function App() {
           setBusy(false);
           if (latestLibrary.current) {
             const latest = latestLibrary.current;
-            setSnapshot((previous) =>
-              !previous || latest.revision >= previous.revision
-                ? latest
-                : previous,
-            );
+            setSnapshot((previous) => acceptSnapshot(previous, latest));
             latestLibrary.current = null;
           }
         }
@@ -144,10 +143,7 @@ export default function App() {
       .onLibraryChange((s) => {
         if (pending.current) {
           latestLibrary.current = s;
-        } else
-          setSnapshot((previous) =>
-            !previous || s.revision >= previous.revision ? s : previous,
-          );
+        } else setSnapshot((previous) => acceptSnapshot(previous, s));
       })
       .then((fn) => {
         if (cancelled) fn();
@@ -157,10 +153,7 @@ export default function App() {
     native
       .getSnapshot()
       .then((s) => {
-        if (!cancelled)
-          setSnapshot((previous) =>
-            !previous || s.revision >= previous.revision ? s : previous,
-          );
+        if (!cancelled) setSnapshot((previous) => acceptSnapshot(previous, s));
       })
       .catch((e) => {
         if (!cancelled) setError(errorText(e));
@@ -188,6 +181,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (
+      !snapshot?.managed &&
       snapshot?.imports.length &&
       !exporting &&
       !velocity &&
@@ -212,11 +206,7 @@ export default function App() {
     await serial.current;
     const result = await native.convertImports(files);
     if (alive.current)
-      setSnapshot((previous) =>
-        !previous || result.snapshot.revision >= previous.revision
-          ? result.snapshot
-          : previous,
-      );
+      setSnapshot((previous) => acceptSnapshot(previous, result.snapshot));
     return result;
   }, []);
   const dismissImports = useCallback(
@@ -241,6 +231,7 @@ export default function App() {
   useEffect(() => {
     function keydown(e: KeyboardEvent) {
       if (
+        snapshot?.managed ||
         exporting ||
         velocity ||
         reviewing ||
@@ -290,6 +281,7 @@ export default function App() {
     librarySamples,
     patchEditor,
     sdImport,
+    snapshot?.managed,
   ]);
   const reveal = useCallback((channel?: number) => {
     native.reveal(channel).catch((e) => setError(errorText(e)));
@@ -326,6 +318,8 @@ export default function App() {
         )}
       </div>
     );
+  if (snapshot.managed)
+    return <PatchEditor managed transport={transport} onClose={() => {}} />;
   const { session, catalog } = snapshot;
   const banks = [...new Set(catalog.kits.map((k) => k.bank))];
   const filtered = catalog.kits.filter(
@@ -494,6 +488,17 @@ export default function App() {
           </div>
         </header>
         <div className="workspace">
+          <LibraryMigration
+            onComplete={() => {
+              setReviewing(false);
+              setEditor(null);
+              setSnapshot((previous) =>
+                previous
+                  ? { ...previous, managed: true, imports: [] }
+                  : previous,
+              );
+            }}
+          />
           <section className="kit-heading">
             <div className="kit-code">{session.selectedKit || "—"}</div>
             <div>
@@ -699,11 +704,7 @@ export default function App() {
           invalidated={!!snapshot.editorInvalidated}
           onClose={() => setEditor(null)}
           onSaved={(result) =>
-            setSnapshot((previous) =>
-              !previous || result.revision >= previous.revision
-                ? result
-                : previous,
-            )
+            setSnapshot((previous) => acceptSnapshot(previous, result))
           }
           onToggle={() => action({ type: "togglePlayback" })}
         />
