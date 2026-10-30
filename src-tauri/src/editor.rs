@@ -767,7 +767,7 @@ mod tests {
         assert_eq!(old.spec.frames, 4410);
         assert!(prepared.spec.frames > 4410);
         assert!(prepared.head[5000..].iter().any(|v| v[0].abs() > 0.00001));
-        for (audio, encoded) in pcm.chunks_exact(2).zip(&prepared.head) {
+        for (audio, encoded) in pcm.as_chunks::<2>().0.iter().zip(&prepared.head) {
             assert!((audio[0] - encoded[0] * 0.32).abs() < 0.00001);
         }
         assert_eq!(
