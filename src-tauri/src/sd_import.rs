@@ -230,12 +230,18 @@ impl ManagedLibrary {
                         }
                     }
                 }
-                state.files.push(SdFile {
-                    path,
-                    sha256: String::new(),
-                    kind: "directory".into(),
-                    sample_id: None,
-                });
+                // Empty Kits are musical layout; native directories are opaque state.
+                // Other directories contribute only through audio or layout errors below.
+                if (!path.contains('/') && address(&path).is_some())
+                    || path.split('/').next() == Some("_save")
+                {
+                    state.files.push(SdFile {
+                        path,
+                        sha256: String::new(),
+                        kind: "directory".into(),
+                        sample_id: None,
+                    });
+                }
             } else if entry.file_type().is_file() {
                 // _save is always opaque, even when a future native file happens
                 // to use a supported audio extension.
@@ -659,6 +665,34 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("Unknown.wav")));
+    }
+    #[test]
+    fn unrelated_directories_do_not_change_sd_recognition_but_empty_kits_do() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        std::fs::create_dir_all(source.join("A0")).unwrap();
+        wav::write_pcm16(&source.join("A0/1_Kick.wav"), &[8192; 4410], 44100).unwrap();
+        let review = state.prepare_sd_import(source.clone()).unwrap();
+        let imported = state
+            .finish_sd_import(
+                &review.id,
+                super::SdImportChoice::New { name: "Set".into() },
+            )
+            .unwrap();
+        std::fs::create_dir_all(source.join("firmware-notes/archive")).unwrap();
+        std::fs::create_dir_all(source.join("A0/notes/empty")).unwrap();
+        std::fs::write(source.join("firmware-notes/readme.txt"), b"unrelated").unwrap();
+        let review = state.prepare_sd_import(source.clone()).unwrap();
+        assert_eq!(review.status, "recognized");
+        assert_eq!(review.recognized_patch, Some(imported.graph.selected_patch));
+        std::fs::create_dir_all(source.join("B12")).unwrap();
+        let changed = state.prepare_sd_import(source).unwrap();
+        assert_eq!(changed.status, "changed");
+        assert!(changed
+            .draft
+            .kits
+            .iter()
+            .any(|kit| kit.bank == "B" && kit.number == 12));
     }
     #[test]
     fn changed_sd_requires_explicit_choice_and_old_state_is_not_mistaken_for_updated_patch() {
