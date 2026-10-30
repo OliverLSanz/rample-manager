@@ -121,10 +121,21 @@ export function PatchEditor({
   }
   useEffect(() => {
     function key(event: KeyboardEvent) {
-      if (busy || sdImport || picker !== null || velocity || editor) return;
+      if (
+        busy ||
+        sdImport ||
+        library ||
+        snapshots ||
+        picker !== null ||
+        velocity ||
+        editor
+      )
+        return;
       if (
         event.target instanceof Element &&
-        event.target.closest('input,textarea,select,[contenteditable="true"]')
+        event.target.closest(
+          'button,a[href],input,textarea,select,[role="button"],[contenteditable="true"]',
+        )
       )
         return;
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey)

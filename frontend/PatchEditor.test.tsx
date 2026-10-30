@@ -9,6 +9,7 @@ import {
 import { PatchEditor } from "./PatchEditor";
 import * as native from "./native";
 import { idleTransport } from "./types";
+import userEvent from "@testing-library/user-event";
 vi.mock("./native", () => ({
   libraryRecoverySnapshots: vi.fn(),
   chooseFolder: vi.fn(),
@@ -262,4 +263,61 @@ it("opens Library restore controls and refreshes Patch state after activation", 
   expect(
     await screen.findByRole("option", { name: "Restored set" }),
   ).toBeTruthy();
+});
+
+it("Space activates a focused Patch button instead of hidden playback", async () => {
+  vi.mocked(native.patchAction).mockResolvedValue(view());
+  const user = userEvent.setup();
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  const add = await screen.findByRole("button", {
+    name: "Add Sample to Voice 1",
+  });
+  vi.mocked(native.openSampleAudition).mockResolvedValue("picker");
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  add.focus();
+  await user.keyboard(" ");
+  expect(await screen.findByRole("searchbox")).toBeTruthy();
+  expect(native.patchAction).not.toHaveBeenCalledWith({
+    type: "musical",
+    action: { type: "togglePlayback" },
+  });
+});
+
+it("keeps Patch shortcuts suspended throughout Library and snapshot child views", async () => {
+  vi.mocked(native.patchAction).mockResolvedValue(view());
+  vi.mocked(native.openSampleAudition).mockResolvedValue("library");
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  vi.mocked(native.libraryRecoverySnapshots).mockResolvedValue([
+    "/recovery/previous",
+  ]);
+  const user = userEvent.setup();
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  await user.click(
+    await screen.findByRole("button", { name: "Library samples…" }),
+  );
+  await screen.findByRole("searchbox");
+  (document.activeElement as HTMLElement).blur();
+  await user.keyboard(" 1");
+  expect(native.patchAction).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Library backup and restore…" }),
+  );
+  const recover = await screen.findByRole("button", {
+    name: "Restore this recovery snapshot…",
+  });
+  (document.activeElement as HTMLElement).blur();
+  await user.keyboard(" 1");
+  expect(native.patchAction).toHaveBeenCalledTimes(2);
+  recover.focus();
+  await user.keyboard(" ");
+  expect(
+    await screen.findByRole("button", { name: "Replace Library" }),
+  ).toBeTruthy();
+  expect(native.patchAction).not.toHaveBeenCalledWith({
+    type: "musical",
+    action: { type: "togglePlayback" },
+  });
 });
