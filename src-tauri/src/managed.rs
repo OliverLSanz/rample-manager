@@ -311,10 +311,10 @@ impl ManagedLibrary {
         PreparedSample::load(&path, &format!("{}-{kind}", sample.sha256))
     }
     fn recognize_export(&mut self, sha256: &str) -> Result<Option<LibrarySample>, String> {
-        let record: Option<(String, String, Option<String>, String)> = self.db.query_row(
-            "SELECT e.sample_id,e.revision_id,e.recovered_id,r.settings FROM exported_audio e JOIN sample_revisions r ON r.id=e.revision_id WHERE e.sha256=?1 ORDER BY CASE WHEN EXISTS (SELECT 1 FROM sample_current c WHERE c.sample_id=e.sample_id AND c.revision_id=e.revision_id) THEN 0 ELSE 1 END,e.rowid LIMIT 1",
-            [sha256], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))) .optional().map_err(|e| e.to_string())?;
-        let Some((source, revision, recovered, settings)) = record else {
+        let record: Option<(String, String, String)> = self.db.query_row(
+            "SELECT e.sample_id,e.revision_id,r.settings FROM exported_audio e JOIN sample_revisions r ON r.id=e.revision_id WHERE e.sha256=?1 ORDER BY CASE WHEN EXISTS (SELECT 1 FROM sample_current c WHERE c.sample_id=e.sample_id AND c.revision_id=e.revision_id) THEN 0 ELSE 1 END,e.rowid LIMIT 1",
+            [sha256], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))) .optional().map_err(|e| e.to_string())?;
+        let Some((source, revision, settings)) = record else {
             return Ok(None);
         };
         let current = self.sample_edits(&source)?;
@@ -322,10 +322,22 @@ impl ManagedLibrary {
             self.prepare(&source)?;
             return self.find_sample("s.id=?1", &source);
         }
-        if let Some(id) = recovered {
+        // Recovery belongs to this source Sample's saved recipe, not one emitted
+        // container hash. Intentional Variants keep their own source identities.
+        let recovered = {
+            let mut query = self.db.prepare("SELECT DISTINCT e.recovered_id FROM exported_audio e JOIN sample_revisions r ON r.id=e.revision_id WHERE e.sample_id=?1 AND r.settings=?2 AND e.recovered_id IS NOT NULL ORDER BY e.rowid").map_err(|e| e.to_string())?;
+            let ids = query
+                .query_map(params![source, settings], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            ids
+        };
+        for id in recovered {
             let saved = self.sample_edits(&id)?;
             if serde_json::to_string(&saved.settings).map_err(|e| e.to_string())? == settings {
                 self.prepare(&id)?;
+                self.db.execute("UPDATE exported_audio SET recovered_id=?1 WHERE sha256=?2 AND sample_id=?3 AND revision_id=?4", params![id,sha256,source,revision]).map_err(|e| e.to_string())?;
                 return self.find_sample("s.id=?1", &id);
             }
         }

@@ -708,6 +708,19 @@ mod tests {
         state
             .export_sample(sample.id.clone(), exported.clone())
             .unwrap();
+        let same_revision_export = temp.path().join("export-again.wav");
+        state
+            .export_sample(sample.id.clone(), same_revision_export.clone())
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let saved = state
+            .save_managed_editor(editor.id, editor.settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let same_recipe_export = temp.path().join("same-recipe.wav");
+        state
+            .export_sample(sample.id.clone(), same_recipe_export.clone())
+            .unwrap();
         let editor = state.open_managed_editor(0).unwrap();
         let mut settings = editor.settings.clone();
         settings.gain_db = -6.;
@@ -751,6 +764,10 @@ mod tests {
                 .id,
             recovered_id
         );
+        for exported in [same_revision_export, same_recipe_export] {
+            let reply = state.import_samples(vec![exported]).unwrap();
+            assert_eq!(reply.results[0].sample.as_ref().unwrap().id, recovered_id);
+        }
         let recovered = state.prepare_library_sample(&recovered_id, true).unwrap();
         assert_eq!(recovered.head.len(), emitted.head.len());
         assert!(recovered
@@ -810,9 +827,43 @@ mod tests {
         let a_pcm = PreparedSample::load(&a, "a").unwrap();
         let b_pcm = PreparedSample::load(&b, "b").unwrap();
         assert_eq!(a_pcm.head, b_pcm.head);
-        let reply = state.import_samples(vec![a, b]).unwrap();
+        let reply = state.import_samples(vec![a.clone(), b.clone()]).unwrap();
         assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
         assert_eq!(reply.results[1].sample.as_ref().unwrap().id, variant);
+        // Equal historical recipes from independent Samples also keep separate recoveries.
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let added = state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let layer = added.graph.current().unwrap().kit().unwrap().voices[0].layers[1]
+            .id
+            .clone();
+        state
+            .patch_action(PatchAction::SelectLayer { channel: 0, layer })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let recovered = state.import_samples(vec![a.clone(), b.clone()]).unwrap();
+        let first = &recovered.results[0].sample.as_ref().unwrap().id;
+        let second = &recovered.results[1].sample.as_ref().unwrap().id;
+        assert_ne!(first, second);
+        let repeated = state.import_samples(vec![a, b]).unwrap();
+        assert_eq!(&repeated.results[0].sample.as_ref().unwrap().id, first);
+        assert_eq!(&repeated.results[1].sample.as_ref().unwrap().id, second);
     }
 
     #[test]
