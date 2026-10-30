@@ -83,7 +83,12 @@ impl AppState {
                 status.errors.push(error);
             }
         }
-        Ok(status.clone())
+        let result = status.clone();
+        drop(status);
+        if result.status == "failed" {
+            self.watch();
+        }
+        Ok(result)
     }
     fn migrate_legacy_inner(&self) -> Result<(), String> {
         let mut legacy = self.library.lock().map_err(|_| "Library is unavailable")?;
@@ -280,11 +285,13 @@ impl AppState {
             tx.commit().map_err(|e| e.to_string())?;
             self.patch_active.store(false, Ordering::Relaxed);
             legacy.patch_preview = None;
+            legacy.restore_legacy_audio = true;
             legacy.synchronize(&self.audio)?;
             return Err(format!(
                 "Migration could not activate: {error}. The folder session remains active."
             ));
         }
+        legacy.restore_legacy_audio = false;
         legacy.editor = None;
         legacy.catalog = Catalog::default();
         legacy.prepared.clear();
@@ -377,6 +384,40 @@ mod tests {
             "1_Sub kick"
         );
     }
+    #[test]
+    fn late_activation_failure_restores_folder_audio_before_the_first_recovered_audition() {
+        let (_temp, original, _) = fixture();
+        let (audio, mut renderer) = AudioHost::offline(44100);
+        let mut state = Arc::try_unwrap(original).ok().unwrap();
+        state.audio = audio;
+        {
+            let mut legacy = state.library.lock().unwrap();
+            legacy.banks = std::array::from_fn(|_| vec![]);
+            legacy.synchronize(&state.audio).unwrap();
+        }
+        renderer.render(&mut [0.; 256], 2);
+        let mut capacity = 0;
+        while state.audio.send(Command::Stop).is_ok() {
+            capacity += 1;
+        }
+        renderer.render(&mut [0.; 256], 2);
+        // Permit Stop, Edit, Settings and the first managed bank, then fail.
+        for _ in 0..capacity - 4 {
+            state.audio.send(Command::Stop).unwrap();
+        }
+        assert_eq!(state.migrate_legacy().unwrap().status, "failed");
+        assert!(!state.snapshot().managed);
+        renderer.render(&mut [0.; 256], 2);
+        state.act(Action::Audition { channel: 0 }).unwrap();
+        let mut pcm = vec![0.; 1024];
+        renderer.render(&mut pcm, 2);
+        assert!(
+            pcm.iter().any(|v| v.abs() > 0.01),
+            "Folder audio was not restored before audition"
+        );
+        assert!(state.snapshot().watching);
+    }
+
     #[test]
     fn audio_activation_failure_keeps_the_previous_session_and_existing_patches_retryable() {
         let (temp, original, _) = fixture();

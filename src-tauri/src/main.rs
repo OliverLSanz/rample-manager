@@ -57,6 +57,7 @@ struct Library {
     playing: bool,
     editor: Option<editor::EditorState>,
     patch_preview: Option<patches::PatchPreview>,
+    restore_legacy_audio: bool,
 }
 impl Library {
     fn new(support: PathBuf, managed_mode: bool) -> Result<Self, String> {
@@ -95,6 +96,7 @@ impl Library {
             playing: false,
             editor: None,
             patch_preview: None,
+            restore_legacy_audio: false,
         })
     }
     fn snapshot(&self, watching: bool) -> Snapshot {
@@ -227,6 +229,14 @@ impl Library {
         changed
     }
     fn synchronize(&mut self, audio: &AudioHost) -> Result<(), String> {
+        if self.restore_legacy_audio {
+            // An incomplete managed handoff may have replaced any subset of banks.
+            // Keep this pending until all settings and banks have been republished.
+            for channel in 0..4 {
+                audio.send(Command::Bank(channel, vec![]))?;
+            }
+            self.banks = std::array::from_fn(|_| vec![]);
+        }
         if let Some(e) = &mut self.editor {
             if e.invalidated && e.enabled {
                 audio.send(Command::Edit(None))?;
@@ -267,6 +277,7 @@ impl Library {
             audio.send(Command::Bank(i, bank.clone()))?;
             self.banks[i] = bank;
         }
+        self.restore_legacy_audio = false;
         if self.prepared.len() > 64 {
             let active: HashSet<_> = self
                 .banks
@@ -399,6 +410,9 @@ impl AppState {
         }
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         l.message = None;
+        if l.restore_legacy_audio {
+            l.synchronize(&self.audio)?;
+        }
         let mut watch = false;
         let mut persist = true;
         fn channel(i: usize) -> Result<usize, String> {
