@@ -165,3 +165,39 @@ it("adds another occurrence from the searchable Library picker and restores the 
   await vi.waitFor(() => expect(close).toHaveBeenCalled());
   expect(native.closePatch).toHaveBeenCalled();
 });
+
+it("reports a failed picker add and prevents a second add while publication is pending", async () => {
+  vi.mocked(native.patchAction).mockResolvedValueOnce(view());
+  let rejectAdd: (error: Error) => void = () => {};
+  vi.mocked(native.openSampleAudition).mockResolvedValue("picker");
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  render(<PatchEditor transport={idleTransport} onClose={() => {}} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add Sample to Voice 1" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Select Warm kick" }),
+  );
+  vi.mocked(native.patchAction).mockImplementation(
+    () =>
+      new Promise((_, reject) => {
+        rejectAdd = reject;
+      }),
+  );
+  const use = screen.getByRole("button", { name: "Use Sample" });
+  fireEvent.click(use);
+  await vi.waitFor(() => expect(use.hasAttribute("disabled")).toBe(true));
+  await vi.waitFor(() =>
+    expect(native.patchAction).toHaveBeenLastCalledWith({
+      type: "addLayer",
+      channel: 0,
+      sample: "sample",
+    }),
+  );
+  rejectAdd(new Error("Library disk is full"));
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Error: Library disk is full",
+  );
+});

@@ -128,12 +128,9 @@ export function PatchEditor({
           setPicker(null);
           void act({ type: "open" });
         }}
-        onSelect={(id) => {
-          void act({ type: "addLayer", channel: picker, sample: id }).then(
-            (ok) => {
-              if (ok) setPicker(null);
-            },
-          );
+        onSelect={async (id) => {
+          await act({ type: "addLayer", channel: picker, sample: id });
+          setPicker(null);
         }}
       />
     );

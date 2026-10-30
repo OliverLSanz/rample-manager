@@ -9,7 +9,7 @@ export function LibrarySamples({
   onSelect,
 }: {
   onClose: () => void;
-  onSelect?: (sampleId: string) => void;
+  onSelect?: (sampleId: string) => void | Promise<void>;
 }) {
   const [samples, setSamples] = useState<LibrarySample[]>([]);
   const [query, setQuery] = useState("");
@@ -267,8 +267,16 @@ export function LibrarySamples({
         {onSelect && (
           <button
             disabled={busy || !selected?.readable}
-            onClick={() => {
-              if (selectedId) onSelect(selectedId);
+            onClick={async () => {
+              if (!selectedId) return;
+              setBusy(true);
+              try {
+                await onSelect(selectedId);
+              } catch (e) {
+                if (mounted.current) setError(String(e));
+              } finally {
+                if (mounted.current) setBusy(false);
+              }
             }}
           >
             Use Sample
