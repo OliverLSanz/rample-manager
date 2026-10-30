@@ -151,8 +151,15 @@ impl AppState {
                     .ok_or("Layer changed. Reopen the editor.")?;
                 target.sample = prepared;
             }
+            let audition = bank
+                .iter()
+                .find(|layer| layer.id == context.layer)
+                .ok_or("Layer changed. Reopen the editor.")?
+                .sample
+                .clone();
             self.audio.send(Command::LayerBank(channel, bank))?;
             let e = l.editor.as_mut().unwrap();
+            e.cropped = audition;
             e.settings = settings;
             e.enabled = enabled;
             e.sequence = sequence;
@@ -213,7 +220,8 @@ impl AppState {
         if let Some(context) = &e.managed {
             let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
             context.check(&store, e.channel)?;
-            self.audio.send(Command::Audition(e.channel))
+            self.audio
+                .send(Command::AuditionSample(e.channel, e.cropped.clone()))
         } else {
             self.audio
                 .send(Command::AuditionSample(e.channel, e.source.clone()))
@@ -493,7 +501,9 @@ impl AppState {
             channel,
             fingerprint: catalog::fingerprint(Path::new(&source.path)),
             source: source.clone(),
-            cropped: source,
+            // Keep the exact saved occurrence sound for audition, independent of
+            // the Voice mode. Preview updates this to its local prepared draft.
+            cropped: store.prepare_revision(&sample.id, &saved.id)?,
             settings: saved.settings,
             sequence: 0,
             enabled: true,
@@ -1184,6 +1194,133 @@ mod tests {
             renderer.render(&mut pcm, 2);
             assert!(pcm.iter().zip(&saved).all(|(a, b)| (a - b).abs() < 0.00003));
         }
+    }
+    #[test]
+    fn managed_editor_auditions_its_occurrence_in_every_mode_without_changing_sequence_modes() {
+        use crate::patches::PatchAction;
+        let (temp, original_state, _) = crate::tests::fixture();
+        let (audio, mut renderer) = AudioHost::offline(44100);
+        let mut state = Arc::try_unwrap(original_state).ok().unwrap();
+        state.audio = audio;
+        let first = temp.path().join("First.wav");
+        let second = temp.path().join("Edited.wav");
+        wav::write_pcm16(&first, &[8192; 4410], 44100).unwrap();
+        wav::write_pcm16(&second, &[-16384; 4410], 44100).unwrap();
+        let imported = state.import_samples(vec![first, second]).unwrap();
+        state
+            .patch_action(PatchAction::CreatePatch { name: "Set".into() })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        for result in &imported.results {
+            state
+                .patch_action(PatchAction::AddLayer {
+                    channel: 0,
+                    sample: result.sample.as_ref().unwrap().id.clone(),
+                })
+                .unwrap();
+        }
+        let view = state.patch_action(PatchAction::Open).unwrap();
+        let selected = view.graph.current().unwrap().kit().unwrap().voices[0].layers[1]
+            .id
+            .clone();
+        state
+            .patch_action(PatchAction::SelectLayer {
+                channel: 0,
+                layer: selected.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut saved = editor.settings;
+        saved.gain_db = -6.;
+        let reply = state.save_managed_editor(editor.id, saved, None).unwrap();
+        state.close_editor(reply.editor.id).unwrap();
+        for mode in [
+            LayerMode::Single,
+            LayerMode::Sequential,
+            LayerMode::Reverse,
+            LayerMode::Velocity,
+            LayerMode::Random,
+        ] {
+            state
+                .patch_action(PatchAction::Musical {
+                    action: Action::SetMode { channel: 0, mode },
+                })
+                .unwrap();
+            let editor = state.open_managed_editor(0).unwrap();
+            assert_eq!(editor.managed.as_ref().unwrap().layer, selected);
+            // Saved B is quieter than its Original. Audition never advances automatic selection.
+            for _ in 0..4 {
+                state.audition_editor(editor.id.clone()).unwrap();
+                let mut pcm = [0.; 2];
+                renderer.render(&mut pcm, 2);
+                assert!(
+                    (pcm[0] + 0.08019).abs() < 0.00003,
+                    "saved {mode:?}: {}",
+                    pcm[0]
+                );
+            }
+            let mut draft = editor.settings.clone();
+            draft.gain_db = -12.;
+            state
+                .preview_editor(editor.id.clone(), 1, draft.clone(), true)
+                .unwrap();
+            for _ in 0..4 {
+                state.audition_editor(editor.id.clone()).unwrap();
+                let mut pcm = [0.; 2];
+                renderer.render(&mut pcm, 2);
+                assert!(
+                    (pcm[0] + 0.04019).abs() < 0.00003,
+                    "draft {mode:?}: {}",
+                    pcm[0]
+                );
+            }
+            state
+                .preview_editor(editor.id.clone(), 2, draft, false)
+                .unwrap();
+            state.audition_editor(editor.id.clone()).unwrap();
+            let mut pcm = [0.; 2];
+            renderer.render(&mut pcm, 2);
+            assert!(
+                (pcm[0] + 0.08019).abs() < 0.00003,
+                "bypass {mode:?}: {}",
+                pcm[0]
+            );
+            state.close_editor(editor.id).unwrap();
+        }
+        state
+            .patch_action(PatchAction::Musical {
+                action: Action::SetMode {
+                    channel: 0,
+                    mode: LayerMode::Sequential,
+                },
+            })
+            .unwrap();
+        for step in [0, 1] {
+            state
+                .patch_action(PatchAction::Musical {
+                    action: Action::ToggleStep { channel: 0, step },
+                })
+                .unwrap();
+        }
+        state
+            .patch_action(PatchAction::Musical {
+                action: Action::TogglePlayback,
+            })
+            .unwrap();
+        let mut sequence = vec![0.; 5514 * 2];
+        renderer.render(&mut sequence, 2);
+        assert!((sequence[0] + 0.08019).abs() < 0.00003);
+        assert!((sequence[5513 * 2] - 0.08).abs() < 0.00003);
+        let view = state.patch_action(PatchAction::Open).unwrap();
+        assert_eq!(
+            view.session.unwrap().voices[0].layer_mode,
+            LayerMode::Sequential
+        );
     }
     #[test]
     fn managed_drafts_are_local_cancel_restores_saved_and_variant_retargets_one_occurrence() {
