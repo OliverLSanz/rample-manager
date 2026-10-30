@@ -1,0 +1,163 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { SdImport } from "./SdImport";
+import * as native from "./native";
+vi.mock("./native", () => ({
+  chooseFolder: vi.fn(),
+  prepareSdImport: vi.fn(),
+  finishSdImport: vi.fn(),
+  restoreSample: vi.fn(),
+}));
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+it("keeps copied audio and draft errors visible while requiring an explicit changed-arrangement choice", async () => {
+  vi.mocked(native.chooseFolder).mockResolvedValue("/SD");
+  vi.mocked(native.prepareSdImport).mockResolvedValue({
+    id: "intake",
+    status: "changed",
+    recognizedPatch: null,
+    nativeVerified: false,
+    candidates: [{ id: "existing", name: "Live set" }],
+    audio: {
+      imported: 1,
+      recognized: 2,
+      failed: 1,
+      complete: false,
+      samples: [],
+      results: [
+        {
+          source: "/SD/A0/1_bad.wav",
+          status: "failed",
+          sample: null,
+          error: "Truncated WAV",
+        },
+      ],
+    },
+    draft: {
+      id: "draft",
+      name: "SD",
+      selectedKit: "",
+      kits: [],
+      bpm: 120,
+      voices: [],
+      importedSd: {
+        intakeId: "intake",
+        copyComplete: false,
+        fingerprint: "hash",
+        files: [
+          {
+            path: "_save/A0.rpl",
+            sha256: "native",
+            kind: "native",
+            sampleId: null,
+          },
+        ],
+        issues: ["Odd folder/1_Kick.wav: Invalid Kit folder"],
+        unassigned: [],
+      },
+    },
+  });
+  vi.mocked(native.finishSdImport).mockRejectedValueOnce(
+    "Storage is unavailable",
+  );
+  render(<SdImport onClose={() => {}} onImported={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose SD folder…" }));
+  await screen.findByText(/1 new Sample.*2 recognized.*1 failed/);
+  expect(screen.getByText(/Invalid Kit folder/)).toBeTruthy();
+  expect(screen.getByText(/Truncated WAV/)).toBeTruthy();
+  expect(
+    screen.getByText(/Native playback settings are unverified/),
+  ).toBeTruthy();
+  expect(native.finishSdImport).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Update existing Patch" }),
+  );
+  await screen.findByRole("alert");
+  expect(native.finishSdImport).toHaveBeenCalledWith("intake", {
+    type: "update",
+    patch: "existing",
+  });
+  expect(screen.getByRole("button", { name: "Create new Patch" })).toBeTruthy();
+});
+it("shows folder-copy failures without losing the retry route", async () => {
+  vi.mocked(native.chooseFolder).mockResolvedValue("/SD");
+  vi.mocked(native.prepareSdImport).mockRejectedValue(
+    "SD is no longer mounted",
+  );
+  render(<SdImport onClose={() => {}} onImported={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose SD folder…" }));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "no longer mounted",
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "Choose SD folder…" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+});
+it("reuses an unchanged Patch and restores a recognized Trash Sample by its original identity", async () => {
+  const sample = {
+    id: "retired",
+    originalId: "original",
+    format: "WAV",
+    name: "User kick",
+    tags: ["kept"],
+    sha256: "hash",
+    duration: 0.1,
+    rate: 44100,
+    channels: 1,
+    bits: 16,
+    readable: true,
+    error: null,
+    retired: true,
+  };
+  vi.mocked(native.chooseFolder).mockResolvedValue("/other mount");
+  vi.mocked(native.prepareSdImport).mockResolvedValue({
+    id: "known",
+    status: "recognized",
+    recognizedPatch: "existing",
+    nativeVerified: false,
+    candidates: [{ id: "existing", name: "Live set" }],
+    audio: {
+      imported: 0,
+      recognized: 1,
+      failed: 0,
+      complete: true,
+      samples: [sample],
+      results: [
+        {
+          source: "/other mount/A0/1_Kick.wav",
+          status: "recognized",
+          sample,
+          error: null,
+        },
+      ],
+    },
+    draft: {
+      id: "draft",
+      name: "Other mount",
+      selectedKit: "",
+      kits: [],
+      bpm: 120,
+      voices: [],
+    },
+  });
+  vi.mocked(native.restoreSample).mockResolvedValue({
+    ...sample,
+    retired: false,
+  });
+  render(<SdImport onClose={() => {}} onImported={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose SD folder…" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Restore Sample: User kick" }),
+  );
+  await screen.findByText("Restored User kick from Trash.");
+  expect(native.restoreSample).toHaveBeenCalledWith("retired");
+  expect(screen.queryByRole("button", { name: "Create new Patch" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open existing Patch" }));
+  expect(native.finishSdImport).toHaveBeenCalledWith("known", {
+    type: "reuse",
+  });
+});

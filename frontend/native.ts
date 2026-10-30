@@ -120,3 +120,11 @@ export const saveManagedEditor = (
     "save_managed_editor",
     { id, settings, variantName },
   );
+
+export const prepareSdImport = (source: string) =>
+  invoke<import("./types").SdImportReview>("prepare_sd_import", { source });
+export const finishSdImport = (
+  id: string,
+  choice: import("./types").SdImportChoice,
+) =>
+  invoke<import("./types").PatchSnapshot>("finish_sd_import", { id, choice });

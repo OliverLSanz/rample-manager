@@ -35,6 +35,7 @@ import {
 import * as native from "./native";
 import { Modal } from "./Modal";
 import { SampleEditor } from "./SampleEditor";
+import { SdImport } from "./SdImport";
 import { LibrarySamples } from "./LibrarySamples";
 import { PatchEditor } from "./PatchEditor";
 import { SequencerRow, TransportBar } from "./Sequencer";
@@ -79,6 +80,7 @@ export default function App() {
   const [reviewing, setReviewing] = useState(false);
   const [librarySamples, setLibrarySamples] = useState(false);
   const [patchEditor, setPatchEditor] = useState(false);
+  const [sdImport, setSdImport] = useState(false);
   const [editor, setEditor] = useState<EditorInfo | null>(null);
   const [velocity, setVelocity] = useState<{
     channel: number;
@@ -192,6 +194,7 @@ export default function App() {
       !reviewing &&
       !librarySamples &&
       !patchEditor &&
+      !sdImport &&
       !editor
     )
       setReviewing(true);
@@ -203,6 +206,7 @@ export default function App() {
     editor,
     librarySamples,
     patchEditor,
+    sdImport,
   ]);
   const convertImports = useCallback(async (files: ReviewedFile[]) => {
     await serial.current;
@@ -242,7 +246,8 @@ export default function App() {
         reviewing ||
         editor ||
         librarySamples ||
-        patchEditor
+        patchEditor ||
+        sdImport
       )
         return;
       const target = e.target;
@@ -284,6 +289,7 @@ export default function App() {
     editor,
     librarySamples,
     patchEditor,
+    sdImport,
   ]);
   const reveal = useCallback((channel?: number) => {
     native.reveal(channel).catch((e) => setError(errorText(e)));
@@ -406,6 +412,9 @@ export default function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
+          <button className="folder-button" onClick={() => setSdImport(true)}>
+            <Layers size={15} /> Import Rample SD…
+          </button>
           <button
             className="folder-button"
             onClick={() => setPatchEditor(true)}
@@ -658,6 +667,15 @@ export default function App() {
             <X size={15} />
           </button>
         </div>
+      )}
+      {sdImport && (
+        <SdImport
+          onClose={() => setSdImport(false)}
+          onImported={() => {
+            setSdImport(false);
+            setPatchEditor(true);
+          }}
+        />
       )}
       {patchEditor && (
         <PatchEditor

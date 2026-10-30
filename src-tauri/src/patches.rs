@@ -12,6 +12,8 @@ pub struct PatchGraph {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
+    #[serde(default)]
+    pub imported_sd: Option<crate::sd_import::ImportedSd>,
     pub id: String,
     pub name: String,
     pub selected_kit: String,
@@ -204,6 +206,7 @@ impl AppState {
                 let id = Uuid::new_v4().to_string();
                 graph.patches.push(Patch {
                     id: id.clone(),
+                    imported_sd: None,
                     name,
                     selected_kit: String::new(),
                     kits: vec![],
@@ -260,10 +263,19 @@ impl AppState {
                 let id = Uuid::new_v4().to_string();
                 voice.layers.push(Layer {
                     id: id.clone(),
-                    sample_id: sample,
+                    sample_id: sample.clone(),
                 });
                 if voice.selected_layer.is_empty() {
                     voice.selected_layer = id;
+                }
+                if let Some(imported) = &mut graph.current_mut()?.imported_sd {
+                    if let Some(index) = imported
+                        .unassigned
+                        .iter()
+                        .position(|file| file.sample_id.as_deref() == Some(&sample))
+                    {
+                        imported.unassigned.remove(index);
+                    }
                 }
             }
             PatchAction::RemoveLayer { channel, layer } => {
@@ -363,6 +375,12 @@ impl AppState {
         }
         let mut validation = vec![];
         for patch in &graph.patches {
+            if let Some(imported) = &patch.imported_sd {
+                if !imported.unassigned.is_empty() {
+                    validation.push(format!("{}: {} unassigned source occurrences need explicit placement with Add Sample. Their audio is kept in the Library.", patch.name, imported.unassigned.len()));
+                }
+                validation.push(format!("{}: Native playback settings are unverified. Modes shown are app preview settings only; Build Patch is unavailable.", patch.name));
+            }
             for kit in &patch.kits {
                 let address = format!("{} · {}{}", patch.name, kit.bank, kit.number);
                 if kit.voices[0].layers.is_empty() {
@@ -434,6 +452,12 @@ impl AppState {
             legacy.playing = false;
         }
         self.patch_active.store(true, Ordering::Relaxed);
+        // Managed playback has no continuing dependency on the folder source.
+        self.watching.store(false, Ordering::Relaxed);
+        self.watcher
+            .lock()
+            .map_err(|_| "File watcher is unavailable")?
+            .take();
         self.audio.send(Command::Settings(
             session
                 .as_ref()
@@ -477,6 +501,8 @@ impl AppState {
         legacy.banks = std::array::from_fn(|_| vec![]);
         legacy.synchronize(&self.audio)?;
         self.patch_active.store(false, Ordering::Relaxed);
+        drop(legacy);
+        self.watch();
         Ok(())
     }
 }

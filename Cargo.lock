@@ -2941,6 +2941,7 @@ version = "2.3.0"
 dependencies = [
  "dirs 6.0.0",
  "dunce",
+ "natord",
  "notify",
  "rample-core",
  "rusqlite",

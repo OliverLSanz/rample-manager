@@ -3,6 +3,7 @@ mod editor;
 mod managed;
 mod patches;
 mod sample_edits;
+mod sd_import;
 use notify::{RecursiveMode, Watcher};
 use rample_core::{
     audio::{native::AudioHost, Command, Status},
@@ -350,6 +351,9 @@ impl AppState {
     }
     fn watch(&self) {
         self.watching.store(false, Ordering::Relaxed);
+        if self.patch_active.load(Ordering::Relaxed) {
+            return;
+        }
         let root = self.library.lock().unwrap().session.root_path.clone();
         let sender = self.events.clone();
         let result = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -832,6 +836,13 @@ fn main() {
                         }
                         let Some(state) = weak.upgrade() else { break };
                         let mut l = state.library.lock().unwrap();
+                        if state.patch_active.load(Ordering::Relaxed) {
+                            drop(l);
+                            paths.clear();
+                            last_event = None;
+                            last_poll = Instant::now();
+                            continue;
+                        }
                         let changed = l.scan(&paths, false);
                         if changed && !state.patch_active.load(Ordering::Relaxed) {
                             if let Err(e) = l.synchronize(&state.audio) {
@@ -859,6 +870,9 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            sd_import::prepare_sd_import,
+            sd_import::sd_native_blob,
+            sd_import::finish_sd_import,
             patches::patch_action,
             patches::close_patch,
             managed::list_samples,

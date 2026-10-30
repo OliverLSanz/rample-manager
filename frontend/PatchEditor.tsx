@@ -1,3 +1,4 @@
+import { SdImport } from "./SdImport";
 import { useEffect, useRef, useState } from "react";
 import { SampleEditor } from "./SampleEditor";
 import { Modal } from "./Modal";
@@ -20,6 +21,7 @@ export function PatchEditor({
   transport: Transport;
   onClose: () => void;
 }) {
+  const [sdImport, setSdImport] = useState(false);
   const [view, setView] = useState<PatchSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -105,7 +107,7 @@ export function PatchEditor({
   }
   useEffect(() => {
     function key(event: KeyboardEvent) {
-      if (busy || picker !== null || velocity || editor) return;
+      if (busy || sdImport || picker !== null || velocity || editor) return;
       if (
         event.target instanceof Element &&
         event.target.closest('input,textarea,select,[contenteditable="true"]')
@@ -138,6 +140,16 @@ export function PatchEditor({
         onPatchSaved={setView}
         onToggle={async () => {
           await musical({ type: "togglePlayback" });
+        }}
+      />
+    );
+  if (sdImport)
+    return (
+      <SdImport
+        onClose={() => setSdImport(false)}
+        onImported={(snapshot) => {
+          setView(snapshot);
+          setSdImport(false);
         }}
       />
     );
@@ -190,6 +202,9 @@ export function PatchEditor({
             <p>Arrange shared Library Samples into ordered Rample Kits.</p>
           </div>
           <div className="patch-heading-actions">
+            <button disabled={busy} onClick={() => setSdImport(true)}>
+              Import Rample SD…
+            </button>
             <button disabled={busy} onClick={() => void act({ type: "open" })}>
               Refresh preview
             </button>
@@ -320,6 +335,31 @@ export function PatchEditor({
               )}
             </form>
           </fieldset>
+        )}
+        {patch?.importedSd && (
+          <details className="patch-validation">
+            <summary>SD Import report</summary>
+            <p>
+              Historical source issues are kept for reference. Current draft
+              validation below updates as you repair the Patch.
+            </p>
+            <ul>
+              {patch.importedSd.issues.map((issue, index) => (
+                <li key={index}>{issue}</li>
+              ))}
+            </ul>
+            {patch.importedSd.unassigned.length > 0 && (
+              <>
+                <strong>Unassigned source occurrences</strong>
+                <p>Use Add Sample in the intended Voice for each occurrence.</p>
+                <ul>
+                  {patch.importedSd.unassigned.map((file, index) => (
+                    <li key={index}>{file.path}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </details>
         )}
         {view && view.validation.length > 0 && (
           <div className="patch-validation" role="status">

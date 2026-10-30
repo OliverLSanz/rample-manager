@@ -63,7 +63,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 6 {
+        if version > 7 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -104,6 +104,7 @@ impl ManagedLibrary {
             db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE sample_revisions(id TEXT PRIMARY KEY, sample_id TEXT NOT NULL REFERENCES samples(id), settings TEXT NOT NULL); CREATE TABLE sample_current(sample_id TEXT PRIMARY KEY REFERENCES samples(id), revision_id TEXT NOT NULL REFERENCES sample_revisions(id)); PRAGMA user_version=6; COMMIT;")
                 .map_err(|e| e.to_string())?;
         }
+        crate::sd_import::migrate(&db, version)?;
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
@@ -533,7 +534,7 @@ fn sample_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibrarySample> {
         error: None,
     })
 }
-fn fingerprint(path: &Path) -> Result<String, String> {
+pub(super) fn fingerprint(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
     let mut chunk = [0; 65536];

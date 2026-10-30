@@ -88,7 +88,29 @@ Incomplete drafts remain editable: missing Voice 1 and more than 12 Layers are
 reported visibly, retaining every Layer. Patches save locally in the private
 Library database, independently of the folder session. **Back to folders** restores
 that workflow. Native settings and complete Build Patch remain pending verified
-device evidence; no `.rpl` files are read or written by these controls.
+device evidence. No typed native settings are imported or written by these controls.
+
+**Import Rample SD…** copies an SD root or local copy into managed storage and
+reconstructs its Bank/Kit addresses, Voice ownership and numerical/alphabetical
+Layer order. Exact Originals reuse existing Samples, preserving their names,
+tags and Trash identity. An unchanged arrangement and native state opens its
+previous Patch, including when imported from a different mount location. A
+changed intake requires **Create new Patch** or **Update existing Patch**; update
+retains the Patch name, tempo, sequencer/mixer memory and matching Layer selection.
+
+Usable audio survives malformed layouts and individual failures. Invalid source
+assignments stay unassigned rather than being guessed; use **Add Sample…** in
+the intended Voice to place them explicitly. Excess Layers are retained. The
+**SD Import report** keeps historical source issues separately from current
+draft validation. A partial copy reports the failures and asks you to retain the
+source for retry. Completed copies, pending reviews, and committed Patches survive
+removing the source and restarting. Managed playback suspends the legacy folder
+watcher; returning to folders resumes that separate workflow.
+
+Native files in `_save` and other non-audio files are retained as exact opaque
+bytes in the Library database. Known operating-system filesystem metadata is
+ignored. Native playback settings remain explicitly unverified; the app modes
+are preview preferences, and this intake does not enable complete Build Patch.
 
 Choose **Open folder…** and select the root containing your kits:
 
@@ -108,13 +130,13 @@ Choose a kit in the sidebar and a layer in each voice's sample menu. The source
 kit menu lets you combine voices from different kits. The four tracks each have
 16 sixteenth-note steps, volume, mute and solo. Set the tempo from 30–300 BPM.
 
-| Shortcut | Action |
-| --- | --- |
-| Space | Play / stop |
-| 1–4 | Audition a voice |
-| Cmd/Ctrl+O | Open library |
-| Cmd/Ctrl+R | Force refresh |
-| Shift+Cmd/Ctrl+E | Export kit |
+| Shortcut                               | Action            |
+| -------------------------------------- | ----------------- |
+| Space                                  | Play / stop       |
+| 1–4                                    | Audition a voice  |
+| Cmd/Ctrl+O                             | Open library      |
+| Cmd/Ctrl+R                             | Force refresh     |
+| Shift+Cmd/Ctrl+E                       | Export kit        |
 | Option/Alt-click or right-click a step | Edit its velocity |
 
 Playback shortcuts leave text fields alone. The **Pattern** menu loads an example
@@ -122,13 +144,13 @@ beat or clears the sequence. A generated demo library is included on first launc
 
 ## Layer playback
 
-| App mode | Rample mode | Behavior |
-| --- | --- | --- |
-| Single sample (default) | MANUAL | Trigger only the selected sample |
-| Random | RANDOM | Choose a layer per trigger, allowing repeats |
-| Sequential | CYCLIC | Advance in natural filename order, then wrap |
-| Reverse sequential | REVERSE CYCLIC | Advance backwards, then wrap |
-| Velocity | VELOCITY | Select a layer using the step's velocity |
+| App mode                | Rample mode    | Behavior                                     |
+| ----------------------- | -------------- | -------------------------------------------- |
+| Single sample (default) | MANUAL         | Trigger only the selected sample             |
+| Random                  | RANDOM         | Choose a layer per trigger, allowing repeats |
+| Sequential              | CYCLIC         | Advance in natural filename order, then wrap |
+| Reverse sequential      | REVERSE CYCLIC | Advance backwards, then wrap                 |
+| Velocity                | VELOCITY       | Select a layer using the step's velocity     |
 
 Automatic modes use up to 12 readable layers. Cyclic modes start at the selected
 layer when transport starts, advancing on triggers rather than empty steps.

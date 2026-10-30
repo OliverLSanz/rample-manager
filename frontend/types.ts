@@ -288,6 +288,7 @@ export interface PatchKit {
   voices: PatchVoice[];
 }
 export interface Patch {
+  importedSd?: ImportedSd | null;
   id: string;
   name: string;
   selectedKit: string;
@@ -312,3 +313,31 @@ export type PatchAction =
   | { type: "removeLayer" | "selectLayer"; channel: number; layer: string }
   | { type: "moveLayer"; channel: number; layer: string; to: number }
   | { type: "musical"; action: Action };
+
+export interface SdFile {
+  path: string;
+  sha256: string;
+  kind: string;
+  sampleId: string | null;
+}
+export interface ImportedSd {
+  intakeId: string;
+  copyComplete: boolean;
+  fingerprint: string;
+  files: SdFile[];
+  issues: string[];
+  unassigned: SdFile[];
+}
+export interface SdImportReview {
+  id: string;
+  status: "new" | "changed" | "recognized";
+  recognizedPatch: string | null;
+  candidates: { id: string; name: string }[];
+  audio: LibraryImportReply;
+  draft: Patch;
+  nativeVerified: boolean;
+}
+export type SdImportChoice =
+  | { type: "new"; name: string }
+  | { type: "update"; patch: string }
+  | { type: "reuse" };
