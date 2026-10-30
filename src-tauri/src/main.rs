@@ -889,6 +889,7 @@ fn main() {
             get_transport,
             act,
             export_kit,
+            managed::export_sample,
             convert_imports,
             show_backups,
             sample_edits::sample_revisions,

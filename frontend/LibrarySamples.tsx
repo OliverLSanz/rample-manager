@@ -19,6 +19,7 @@ export function LibrarySamples({
   const [revision, setRevision] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [exported, setExported] = useState(false);
   const [report, setReport] = useState<LibraryImportReply | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -152,6 +153,22 @@ export function LibrarySamples({
         setSamples(reply.samples);
         setReport(reply);
         setRevision((value) => value + 1);
+      }
+    } catch (e) {
+      if (mounted.current) setError(String(e));
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
+  async function exportAudio(sample: LibrarySample) {
+    setBusy(true);
+    setError(null);
+    setExported(false);
+    try {
+      const destination = await native.chooseSampleExport(sample.name);
+      if (destination) {
+        await native.exportSample(sample.id, destination);
+        if (mounted.current) setExported(true);
       }
     } catch (e) {
       if (mounted.current) setError(String(e));
@@ -329,6 +346,13 @@ export function LibrarySamples({
               </button>
               <button
                 disabled={busy || !sample.readable}
+                aria-label={`Export ${sample.name}`}
+                onClick={() => void exportAudio(sample)}
+              >
+                Export WAV…
+              </button>
+              <button
+                disabled={busy || !sample.readable}
                 aria-label={`Audition Original ${sample.name}`}
                 onClick={() => void audition(sample.id)}
               >
@@ -354,6 +378,7 @@ export function LibrarySamples({
         />
       )}
       {saved && <p role="status">Metadata saved.</p>}
+      {exported && <p role="status">Sample exported.</p>}
       {error && <p role="alert">{error}</p>}
       <div className="modal-buttons">
         <button disabled={!auditioning} onClick={() => void audition(null)}>

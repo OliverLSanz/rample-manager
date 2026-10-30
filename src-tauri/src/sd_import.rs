@@ -106,6 +106,31 @@ impl ManagedLibrary {
         self.db.query_row("SELECT patch_id FROM sd_intakes WHERE fingerprint=?1 AND patch_id IS NOT NULL ORDER BY rowid DESC LIMIT 1", [fingerprint], |row| row.get(0))
             .optional().map_err(|e| e.to_string())
     }
+    fn matching_sd(
+        &self,
+        fingerprint: &str,
+        draft: &Patch,
+        graph: &crate::patches::PatchGraph,
+    ) -> Result<Option<String>, String> {
+        let Some(id) = self.recognize_sd(fingerprint)? else {
+            return Ok(None);
+        };
+        let Some(existing) = graph.patches.iter().find(|p| p.id == id) else {
+            return Ok(None);
+        };
+        let (Some(before), Some(now)) = (&existing.imported_sd, &draft.imported_sd) else {
+            return Ok(None);
+        };
+        let same = now.files.iter().all(|file| {
+            before
+                .files
+                .iter()
+                .find(|old| old.path == file.path && old.kind == file.kind)
+                .map(|old| old.sample_id == file.sample_id)
+                .unwrap_or(false)
+        });
+        Ok(same.then_some(id))
+    }
     fn prepare_sd(&mut self, source: &Path) -> Result<SdImportReview, String> {
         if !source.is_dir() {
             return Err("Choose the root folder of a Rample SD or its copy.".into());
@@ -257,9 +282,8 @@ impl ManagedLibrary {
             let file = SdFile {
                 path: path.clone(),
                 sha256: result
-                    .sample
-                    .as_ref()
-                    .map(|sample| sample.sha256.clone())
+                    .copied_hash
+                    .clone()
                     .unwrap_or_else(|| managed::fingerprint(source).unwrap_or_default()),
                 kind: "audio".into(),
                 sample_id: result.sample.as_ref().map(|s| s.id.clone()),
@@ -323,9 +347,7 @@ impl ManagedLibrary {
         let fingerprint = state.fingerprint.clone();
         patch.imported_sd = Some(state);
         let graph = self.load_patches()?;
-        let recognized_patch = self
-            .recognize_sd(&fingerprint)?
-            .filter(|id| graph.patches.iter().any(|p| &p.id == id));
+        let recognized_patch = self.matching_sd(&fingerprint, &patch, &graph)?;
         let status = if recognized_patch.is_some() {
             "recognized"
         } else if graph.patches.iter().any(|p| p.imported_sd.is_some()) {
@@ -371,11 +393,19 @@ impl ManagedLibrary {
             )
             .map_err(|_| "Import review no longer exists. Import the SD again.".to_string())?;
         let mut patch: Patch = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
+        if let Some(imported) = &patch.imported_sd {
+            for file in &imported.files {
+                if let Some(id) = &file.sample_id {
+                    if !self.export_matches_sample(&file.sha256, id)? {
+                        return Err(
+                            "A Sample changed since this SD review. Import the SD again.".into(),
+                        );
+                    }
+                }
+            }
+        }
         let mut graph = self.load_patches()?;
-        if let Some(existing) = self
-            .recognize_sd(&fingerprint)?
-            .filter(|id| graph.patches.iter().any(|p| &p.id == id))
-        {
+        if let Some(existing) = self.matching_sd(&fingerprint, &patch, &graph)? {
             // Exact recognition always reuses its existing Patch, preserving any
             // subsequent work performed there by the user.
             graph.selected_patch = existing;

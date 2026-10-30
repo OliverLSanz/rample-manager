@@ -32,6 +32,8 @@ pub struct ImportResult {
     pub status: String,
     pub sample: Option<LibrarySample>,
     pub error: Option<String>,
+    #[serde(skip)]
+    pub(super) copied_hash: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +65,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 7 {
+        if version > 8 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -105,6 +107,9 @@ impl ManagedLibrary {
                 .map_err(|e| e.to_string())?;
         }
         crate::sd_import::migrate(&db, version)?;
+        if version < 8 {
+            db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE exported_audio (sha256 TEXT NOT NULL, sample_id TEXT NOT NULL REFERENCES samples(id), revision_id TEXT NOT NULL REFERENCES sample_revisions(id), render TEXT NOT NULL DEFAULT 'rample-v1', recovered_id TEXT REFERENCES samples(id), PRIMARY KEY (sha256, sample_id, revision_id)); PRAGMA user_version=8; COMMIT;").map_err(|e| e.to_string())?;
+        }
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
@@ -302,7 +307,133 @@ impl ManagedLibrary {
         }
         PreparedSample::load(&path, &format!("{}-{kind}", sample.sha256))
     }
-    fn import_file(&mut self, source: &Path) -> Result<(LibrarySample, bool), String> {
+    fn recognize_export(&mut self, sha256: &str) -> Result<Option<LibrarySample>, String> {
+        let record: Option<(String, String, Option<String>, String)> = self.db.query_row(
+            "SELECT e.sample_id,e.revision_id,e.recovered_id,r.settings FROM exported_audio e JOIN sample_revisions r ON r.id=e.revision_id WHERE e.sha256=?1 ORDER BY CASE WHEN EXISTS (SELECT 1 FROM sample_current c WHERE c.sample_id=e.sample_id AND c.revision_id=e.revision_id) THEN 0 ELSE 1 END,e.rowid LIMIT 1",
+            [sha256], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))) .optional().map_err(|e| e.to_string())?;
+        let Some((source, revision, recovered, settings)) = record else {
+            return Ok(None);
+        };
+        let current = self.sample_edits(&source)?;
+        if current.id == revision {
+            self.prepare(&source)?;
+            return self.find_sample("s.id=?1", &source);
+        }
+        if let Some(id) = recovered {
+            let saved = self.sample_edits(&id)?;
+            if serde_json::to_string(&saved.settings).map_err(|e| e.to_string())? == settings {
+                self.prepare(&id)?;
+                return self.find_sample("s.id=?1", &id);
+            }
+        }
+        let sample = self
+            .find_sample("s.id=?1", &source)?
+            .ok_or("Sample no longer exists.")?;
+        self.prepare(&source)?;
+        let id = Uuid::new_v4().to_string();
+        let new_revision = if revision.starts_with("original-") {
+            format!("original-{id}")
+        } else {
+            Uuid::new_v4().to_string()
+        };
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO samples(id,original_id,name,tags) VALUES (?1,?2,?3,?4)",
+            params![
+                id,
+                sample.original_id,
+                format!("{} (recovered)", sample.name),
+                serde_json::to_string(&sample.tags).map_err(|e| e.to_string())?
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO sample_revisions(id,sample_id,settings) VALUES (?1,?2,?3)",
+            params![new_revision, id, settings],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO sample_current(sample_id,revision_id) VALUES (?1,?2)",
+            params![id, new_revision],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute("UPDATE exported_audio SET recovered_id=?1 WHERE sha256=?2 AND sample_id=?3 AND revision_id=?4", params![id,sha256,source,revision]).map_err(|e|e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        self.find_sample("s.id=?1", &id)
+    }
+    pub(super) fn export_matches_sample(&self, sha256: &str, id: &str) -> Result<bool, String> {
+        let mut records = self.db.prepare("SELECT e.sample_id,e.revision_id,e.recovered_id,r.settings FROM exported_audio e JOIN sample_revisions r ON r.id=e.revision_id WHERE e.sha256=?1").map_err(|e|e.to_string())?;
+        let rows = records
+            .query_map([sha256], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        if rows.is_empty() {
+            return Ok(true);
+        }
+        let current = self.sample_edits(id)?;
+        let settings = serde_json::to_string(&current.settings).map_err(|e| e.to_string())?;
+        Ok(rows.iter().any(|(source, revision, recovered, saved)| {
+            (source == id && revision == &current.id)
+                || (recovered.as_deref() == Some(id) && saved == &settings)
+        }))
+    }
+    pub fn export_sample(&self, id: &str, destination: &Path) -> Result<(), String> {
+        let revision = self.sample_edits(id)?;
+        let prepared = self.prepare_revision(id, &revision.id)?;
+        let render = if Path::new(&prepared.path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.starts_with("edit-v1-"))
+        {
+            "edit-v1"
+        } else {
+            "rample-v1"
+        };
+        let parent = destination
+            .parent()
+            .ok_or("Choose an export destination.")?;
+        let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        let mut input = File::open(&prepared.path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut input, staged.as_file_mut()).map_err(|e| e.to_string())?;
+        // Tag the emitted RIFF container without changing PCM. This distinguishes a
+        // byte-identical Original from its historical prepared export on reimport.
+        let file = staged.as_file_mut();
+        let length = file.metadata().map_err(|e| e.to_string())?.len();
+        let riff_size = u32::try_from(length.checked_add(36).ok_or("Export is too large.")?)
+            .map_err(|_| "Export is too large.")?;
+        file.seek(SeekFrom::Start(4)).map_err(|e| e.to_string())?;
+        file.write_all(&riff_size.to_le_bytes())
+            .map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
+        file.write_all(b"JUNK\x24\x00\x00\x00")
+            .and_then(|_| file.write_all(Uuid::new_v4().to_string().as_bytes()))
+            .map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        validate_wav(staged.path())?;
+        let sha256 = fingerprint(staged.path())?;
+        let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR IGNORE INTO exported_audio(sha256,sample_id,revision_id,render) VALUES (?1,?2,?3,?4)",
+            params![sha256, id, revision.id, render],
+        )
+        .map_err(|e| e.to_string())?;
+        staged
+            .persist_noclobber(destination)
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| {
+            format!("Sample was exported, but its recognition record could not be saved: {e}")
+        })?;
+        Ok(())
+    }
+    fn import_file(&mut self, source: &Path) -> Result<(LibrarySample, bool, String), String> {
         if !fs::metadata(source).map_err(|e| e.to_string())?.is_file() {
             return Err("Choose a regular supported audio file".into());
         }
@@ -350,9 +481,12 @@ impl ManagedLibrary {
         if fingerprint(source)? != sha256 {
             return Err("Source changed during import. Import the file again.".into());
         }
+        if let Some(sample) = self.recognize_export(&sha256)? {
+            return Ok((sample, false, sha256));
+        }
         if let Some(sample) = self.find_sample("o.sha256=?1", &sha256)? {
             self.prepare(&sample.id)?;
-            return Ok((sample, false));
+            return Ok((sample, false, sha256));
         }
         let original_id = Uuid::new_v4().to_string();
         let sample_id = Uuid::new_v4().to_string();
@@ -407,7 +541,7 @@ impl ManagedLibrary {
                 name,
                 tags: vec![],
                 retired: false,
-                sha256,
+                sha256: sha256.clone(),
                 duration: info.frames as f64 / f64::from(info.rate),
                 rate: info.rate,
                 channels: info.channels,
@@ -417,6 +551,7 @@ impl ManagedLibrary {
                 error: None,
             },
             true,
+            sha256,
         ))
     }
     pub fn import(&mut self, paths: Vec<PathBuf>) -> Result<ImportReply, String> {
@@ -454,19 +589,21 @@ impl ManagedLibrary {
                 Some(error) => Err(error),
                 None => self.import_file(&source),
             };
-            let (sample, status, error) = match outcome {
-                Ok((sample, added)) => (
+            let (sample, status, error, copied_hash) = match outcome {
+                Ok((sample, added, hash)) => (
                     Some(sample),
                     if added { "imported" } else { "recognized" },
                     None,
+                    Some(hash),
                 ),
-                Err(error) => (None, "failed", Some(error)),
+                Err(error) => (None, "failed", Some(error), None),
             };
             results.push(ImportResult {
                 source: source.to_string_lossy().into_owned(),
                 status: status.into(),
                 sample,
                 error,
+                copied_hash,
             });
         }
         let imported = results.iter().filter(|r| r.status == "imported").count();
@@ -599,6 +736,12 @@ impl AppState {
             .map_err(|_| "Library is unavailable")?
             .set_retired(&id, false)
     }
+    pub fn export_sample(&self, id: String, destination: PathBuf) -> Result<(), String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .export_sample(&id, &destination)
+    }
     pub fn import_samples(&self, paths: Vec<PathBuf>) -> Result<ImportReply, String> {
         self.managed
             .lock()
@@ -718,6 +861,17 @@ pub(super) async fn restore_sample(
         .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub(super) async fn export_sample(
+    id: String,
+    destination: PathBuf,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.export_sample(id, destination))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub(super) async fn import_samples(
     paths: Vec<PathBuf>,
     state: tauri::State<'_, Arc<AppState>>,
@@ -787,6 +941,42 @@ mod tests {
     use crate::{tests::fixture, Action, Library};
     use rample_core::wav;
     use std::path::Path;
+
+    #[test]
+    fn exported_sample_is_recognized_after_restart_without_changing_original() {
+        use std::fs;
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let original = fs::read(&source).unwrap();
+        let sample = state.import_samples(vec![source.clone()]).unwrap().samples[0].clone();
+        let exported = temp.path().join("export.wav");
+        state
+            .export_sample(sample.id.clone(), exported.clone())
+            .unwrap();
+        assert_ne!(fs::read(&exported).unwrap(), original);
+        let prepared = state.prepare_library_sample(&sample.id, true).unwrap();
+        let emitted = crate::PreparedSample::load(&exported, "export").unwrap();
+        assert_eq!(prepared.head, emitted.head);
+        assert_eq!(fs::read(&source).unwrap(), original);
+        drop(state);
+        let (state, _) = crate::tests::fixture_state(temp.path().join("support"));
+        let reply = state.import_samples(vec![exported]).unwrap();
+        assert_eq!((reply.imported, reply.recognized), (0, 1));
+        assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
+    }
+
+    #[test]
+    fn sample_export_never_overwrites_an_existing_destination() {
+        use std::fs;
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source.clone()]).unwrap().samples[0].clone();
+        let before = fs::read(&source).unwrap();
+        assert!(state.export_sample(sample.id, source.clone()).is_err());
+        assert_eq!(fs::read(source).unwrap(), before);
+    }
 
     #[test]
     fn retired_samples_keep_layer_identity_pcm_and_recognition_across_restart() {

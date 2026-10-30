@@ -668,6 +668,217 @@ mod tests {
         assert!(state.open_managed_editor(0).is_ok());
     }
     #[test]
+    fn historical_export_recovers_a_variant_without_reverting_current_sample() {
+        use crate::patches::PatchAction;
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0].clone();
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Patch".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -3.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let exported = temp.path().join("export.wav");
+        state
+            .export_sample(sample.id.clone(), exported.clone())
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let reply = state.import_samples(vec![exported.clone()]).unwrap();
+        let variant = reply.results[0].sample.as_ref().unwrap();
+        assert_eq!((reply.imported, reply.recognized), (0, 1));
+        assert_ne!(variant.id, sample.id);
+        assert_eq!(variant.original_id, sample.original_id);
+        assert_eq!(
+            state
+                .import_samples(vec![exported.clone()])
+                .unwrap()
+                .results[0]
+                .sample
+                .as_ref()
+                .unwrap()
+                .id,
+            variant.id
+        );
+        let recovered_id = variant.id.clone();
+        let emitted = PreparedSample::load(&exported, "export").unwrap();
+        let recovered = state.prepare_library_sample(&recovered_id, true).unwrap();
+        assert_eq!(recovered.head.len(), emitted.head.len());
+        assert!(recovered
+            .head
+            .iter()
+            .zip(&emitted.head)
+            .all(|(a, b)| (a[0] - b[0]).abs() <= 2.0 / 32768.0));
+        drop(state);
+        std::fs::remove_dir_all(temp.path().join("support/Library/Derived")).unwrap();
+        let (state, _) = crate::tests::fixture_state(temp.path().join("support"));
+        assert_eq!(
+            state.import_samples(vec![exported]).unwrap().results[0]
+                .sample
+                .as_ref()
+                .unwrap()
+                .id,
+            recovered_id
+        );
+        let recovered = state.prepare_library_sample(&recovered_id, true).unwrap();
+        assert_eq!(recovered.head.len(), emitted.head.len());
+        assert!(recovered
+            .head
+            .iter()
+            .zip(&emitted.head)
+            .all(|(a, b)| (a[0] - b[0]).abs() <= 2.0 / 32768.0));
+        assert_eq!(
+            state
+                .sample_revisions(sample.id)
+                .unwrap()
+                .last()
+                .unwrap()
+                .settings
+                .gain_db,
+            -6.
+        );
+    }
+
+    #[test]
+    fn reimporting_original_after_export_and_edit_preserves_current_sample() {
+        use crate::patches::PatchAction;
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source.clone()]).unwrap().samples[0].clone();
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Patch".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        state
+            .export_sample(sample.id.clone(), temp.path().join("export.wav"))
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let reply = state.import_samples(vec![source]).unwrap();
+        assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
+        assert_eq!(reply.samples.len(), 1);
+    }
+
+    #[test]
+    fn sd_review_cannot_finish_after_its_exported_sample_changes() {
+        use crate::{patches::PatchAction, sd_import::SdImportChoice};
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0].clone();
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Patch".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let sd = temp.path().join("SD");
+        std::fs::create_dir_all(sd.join("A0")).unwrap();
+        state
+            .export_sample(sample.id, sd.join("A0/1_Kick.wav"))
+            .unwrap();
+        let review = state.prepare_sd_import(sd).unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        assert!(state
+            .finish_sd_import(&review.id, SdImportChoice::New { name: "SD".into() })
+            .is_err());
+    }
+
+    #[test]
+    fn sd_reimport_of_historical_export_does_not_reuse_patch_with_new_sound() {
+        use crate::{patches::PatchAction, sd_import::SdImportChoice};
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0].clone();
+        let sd = temp.path().join("SD");
+        std::fs::create_dir_all(sd.join("A0")).unwrap();
+        state
+            .export_sample(sample.id.clone(), sd.join("A0/1_Kick.wav"))
+            .unwrap();
+        let review = state.prepare_sd_import(sd.clone()).unwrap();
+        state
+            .finish_sd_import(&review.id, SdImportChoice::New { name: "SD".into() })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let review = state.prepare_sd_import(sd).unwrap();
+        assert_eq!(review.status, "changed");
+        let recovered = &review.draft.kits[0].voices[0].layers[0].sample_id;
+        assert_ne!(recovered, &sample.id);
+        assert!(state
+            .finish_sd_import(&review.id, SdImportChoice::Reuse)
+            .is_err());
+        let _ = PatchAction::Open;
+    }
+
+    #[test]
     fn shared_overwrite_updates_other_patches_and_keeps_exportable_revision_pcm() {
         use crate::patches::PatchAction;
         let (temp, original_state, _) = crate::tests::fixture();

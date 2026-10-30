@@ -19,6 +19,8 @@ vi.mock("./native", () => ({
   openSampleAudition: vi.fn(),
   chooseSampleSources: vi.fn(),
   importSamples: vi.fn(),
+  chooseSampleExport: vi.fn(),
+  exportSample: vi.fn(),
   auditionSample: vi.fn(),
   stopSampleAudition: vi.fn(),
 }));
@@ -479,4 +481,33 @@ it("reports recognized retired audio and provides a restore route instead of a d
   await screen.findByRole("button", { name: "Select My retired kick" });
   expect(screen.getByRole("button", { name: "Trash (0)" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Samples (1)" })).toBeTruthy();
+});
+
+it("exports the selected Sample through the destination picker", async () => {
+  const sample = {
+    id: "kick",
+    originalId: "original",
+    name: "Kick",
+    tags: [],
+    sha256: "abc",
+    duration: 0.1,
+    rate: 44100,
+    bits: 16,
+    channels: 1,
+    format: "WAV",
+    retired: false,
+    readable: true,
+    error: null,
+  };
+  vi.mocked(native.openSampleAudition).mockResolvedValue("owner");
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.chooseSampleExport).mockResolvedValue("/tmp/Kick.wav");
+  vi.mocked(native.exportSample).mockResolvedValue();
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  render(<LibrarySamples onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Export Kick" }));
+  await waitFor(() =>
+    expect(native.exportSample).toHaveBeenCalledWith("kick", "/tmp/Kick.wav"),
+  );
+  expect(await screen.findByText("Sample exported.")).toBeTruthy();
 });

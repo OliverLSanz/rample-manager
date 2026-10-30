@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
   Snapshot,
@@ -29,6 +29,14 @@ export const updateSampleMetadata = (
 ) => invoke<LibrarySample>("update_sample_metadata", { id, name, tags });
 export const importSamples = (paths: string[]) =>
   invoke<LibraryImportReply>("import_samples", { paths });
+export const chooseSampleExport = (name: string) =>
+  save({
+    title: "Export Sample audio",
+    defaultPath: `${name}.wav`,
+    filters: [{ name: "WAV", extensions: ["wav"] }],
+  });
+export const exportSample = (id: string, destination: string) =>
+  invoke<void>("export_sample", { id, destination });
 export const openSampleAudition = () => invoke<string>("open_sample_audition");
 export const auditionSample = (id: string, session: string, rample = false) =>
   invoke<void>("audition_sample", { id, session, rample });
