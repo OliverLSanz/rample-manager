@@ -697,6 +697,8 @@ pub mod native {
 
     pub struct AudioHost {
         sender: Sender<Command>,
+        #[cfg(feature = "test-support")]
+        offline: Option<Control>,
         pub meters: Arc<Meters>,
         pub error: Arc<std::sync::Mutex<Option<String>>>,
     }
@@ -714,6 +716,22 @@ pub mod native {
         #[cfg(feature = "test-support")]
         pub fn headless() -> Self {
             Self::spawn(false)
+        }
+        /// Drive real application commands and PCM deterministically without an OS device.
+        #[cfg(feature = "test-support")]
+        pub fn offline(rate: u32) -> (Self, Renderer) {
+            let meters = Meters::new();
+            let (renderer, control) = Renderer::new(rate, meters.clone());
+            let (sender, _) = bounded(1);
+            (
+                Self {
+                    sender,
+                    meters,
+                    error: Arc::new(std::sync::Mutex::new(None)),
+                    offline: Some(control),
+                },
+                renderer,
+            )
         }
         fn spawn(enable_device: bool) -> Self {
             let (sender, rx) = bounded::<Command>(128);
@@ -800,9 +818,15 @@ pub mod native {
                 sender,
                 meters,
                 error,
+                #[cfg(feature = "test-support")]
+                offline: None,
             }
         }
         pub fn send(&self, c: Command) -> Result<(), String> {
+            #[cfg(feature = "test-support")]
+            if let Some(control) = &self.offline {
+                return control.send(c);
+            }
             self.sender
                 .try_send(c)
                 .map_err(|_| "Audio engine is busy. Please try again.".into())

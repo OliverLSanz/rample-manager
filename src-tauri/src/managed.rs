@@ -51,8 +51,8 @@ pub(super) struct AuditionSession {
 }
 
 pub struct ManagedLibrary {
-    root: PathBuf,
-    db: Connection,
+    pub(super) root: PathBuf,
+    pub(super) db: Connection,
 }
 impl ManagedLibrary {
     pub fn open(support: &Path) -> Result<Self, String> {
@@ -63,7 +63,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 5 {
+        if version > 6 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -100,12 +100,27 @@ impl ManagedLibrary {
             db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE samples ADD COLUMN retired INTEGER NOT NULL DEFAULT 0; PRAGMA user_version=5; COMMIT;")
                 .map_err(|e| e.to_string())?;
         }
+        if version < 6 {
+            db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE sample_revisions(id TEXT PRIMARY KEY, sample_id TEXT NOT NULL REFERENCES samples(id), settings TEXT NOT NULL); CREATE TABLE sample_current(sample_id TEXT PRIMARY KEY REFERENCES samples(id), revision_id TEXT NOT NULL REFERENCES sample_revisions(id)); PRAGMA user_version=6; COMMIT;")
+                .map_err(|e| e.to_string())?;
+        }
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
         for entry in fs::read_dir(root.join("Incoming")).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             if entry.file_name().to_string_lossy().starts_with(".tmp")
+                && entry.file_type().map_err(|e| e.to_string())?.is_file()
+            {
+                fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+            }
+        }
+        for entry in fs::read_dir(root.join("Derived")).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("edit-v1-draft-")
                 && entry.file_type().map_err(|e| e.to_string())?.is_file()
             {
                 fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
@@ -232,9 +247,18 @@ impl ManagedLibrary {
         self.prepare_target(id, false)
     }
     pub fn prepare_rample(&self, id: &str) -> Result<Arc<PreparedSample>, String> {
-        self.prepare_target(id, true)
+        let revision = self.sample_edits(id)?;
+        if revision.id.starts_with("original-") {
+            self.prepare_target(id, true)
+        } else {
+            self.render_edits(id, &revision.id, &revision.settings)
+        }
     }
-    fn prepare_target(&self, id: &str, rample: bool) -> Result<Arc<PreparedSample>, String> {
+    pub(super) fn prepare_target(
+        &self,
+        id: &str,
+        rample: bool,
+    ) -> Result<Arc<PreparedSample>, String> {
         let sample = self
             .find_sample("s.id=?1", id)?
             .ok_or("Sample no longer exists")?;
@@ -457,7 +481,7 @@ impl ManagedLibrary {
         })
     }
 }
-fn validate_wav(path: &Path) -> Result<wav::WavSpec, String> {
+pub(super) fn validate_wav(path: &Path) -> Result<wav::WavSpec, String> {
     let spec = wav::inspect(path)?;
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let mut header = [0; 12];
@@ -542,7 +566,9 @@ impl AppState {
     ) -> Result<Arc<PreparedSample>, String> {
         let library = self.managed.lock().map_err(|_| "Library is unavailable")?;
         if rample {
-            library.prepare_rample(id)
+            let revision = library.sample_edits(id)?.id;
+            drop(library);
+            self.prepare_sample_revision(id.to_owned(), revision)
         } else {
             library.prepare(id)
         }

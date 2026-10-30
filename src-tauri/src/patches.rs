@@ -90,7 +90,7 @@ pub(super) struct PatchPreview {
     key: String,
     samples: Vec<managed::LibrarySample>,
     errors: Vec<String>,
-    ready: [Vec<LayerSample>; 4],
+    pub(super) ready: [Vec<LayerSample>; 4],
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,6 +177,14 @@ impl AppState {
         // Same lock order as legacy application commands, including workspace handoff.
         let mut legacy = self.library.lock().map_err(|_| "Library is unavailable")?;
         let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
+        self.patch_action_locked(action, &mut legacy, &store)
+    }
+    pub(super) fn patch_action_locked(
+        &self,
+        action: PatchAction,
+        legacy: &mut Library,
+        store: &managed::ManagedLibrary,
+    ) -> Result<PatchSnapshot, String> {
         let mut graph = store.load_patches()?;
         let refresh = matches!(&action, PatchAction::Open);
         let persist = !matches!(

@@ -2,6 +2,7 @@
 mod editor;
 mod managed;
 mod patches;
+mod sample_edits;
 use notify::{RecursiveMode, Watcher};
 use rample_core::{
     audio::{native::AudioHost, Command, Status},
@@ -876,7 +877,10 @@ fn main() {
             export_kit,
             convert_imports,
             show_backups,
+            sample_edits::sample_revisions,
             editor::open_editor,
+            editor::open_managed_editor,
+            editor::save_managed_editor,
             editor::preview_editor,
             editor::save_editor,
             editor::close_editor,

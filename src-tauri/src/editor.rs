@@ -16,6 +16,7 @@ pub(super) struct EditorState {
     pub sequence: u64,
     pub enabled: bool,
     pub invalidated: bool,
+    pub managed: Option<ManagedEdit>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +28,8 @@ pub(super) struct EditorInfo {
     duration: f64,
     waveform: Vec<f32>,
     settings: Settings,
+    output_duration: f64,
+    managed: Option<ManagedEdit>,
 }
 impl EditorState {
     fn info(&self) -> EditorInfo {
@@ -38,6 +41,8 @@ impl EditorState {
             duration: self.source.spec.frames as f64 / self.source.spec.rate as f64,
             waveform: self.source.waveform.clone(),
             settings: self.settings.clone(),
+            output_duration: self.settings.output_seconds(),
+            managed: self.managed.clone(),
         }
     }
     fn check(&self, id: &str) -> Result<(), String> {
@@ -95,6 +100,7 @@ impl AppState {
             sequence: 0,
             enabled: true,
             invalidated: false,
+            managed: None,
         };
         self.audio.send(Command::Edit(Some(EditPreview {
             channel,
@@ -113,6 +119,42 @@ impl AppState {
         enabled: bool,
     ) -> Result<PreviewReply, String> {
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
+        if l.editor.as_ref().is_some_and(|e| e.managed.is_some()) {
+            let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
+            let context = self.checked_managed_editor(&mut l, &store, &id)?;
+            let e = l.editor.as_ref().unwrap();
+            if sequence <= e.sequence {
+                return Ok(PreviewReply {
+                    sequence: e.sequence,
+                    duration: e.settings.output_seconds(),
+                });
+            }
+            settings.validate(&e.source.spec)?;
+            let channel = e.channel;
+            let mut bank =
+                l.patch_preview.as_ref().ok_or("Reopen the Patch.")?.ready[channel].clone();
+            if enabled {
+                let prepared = store.render_edits(
+                    &context.sample,
+                    &format!("draft-{}-{sequence}", e.id),
+                    &settings,
+                )?;
+                let target = bank
+                    .iter_mut()
+                    .find(|l| l.id == context.layer)
+                    .ok_or("Layer changed. Reopen the editor.")?;
+                target.sample = prepared;
+            }
+            self.audio.send(Command::LayerBank(channel, bank))?;
+            let e = l.editor.as_mut().unwrap();
+            e.settings = settings;
+            e.enabled = enabled;
+            e.sequence = sequence;
+            return Ok(PreviewReply {
+                sequence,
+                duration: e.settings.output_seconds(),
+            });
+        }
         let e = l.editor.as_mut().ok_or("Open a sample editor first.")?;
         e.check(&id)?;
         if sequence <= e.sequence {
@@ -147,6 +189,13 @@ impl AppState {
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         if l.editor.as_ref().is_some_and(|e| e.id == id) {
             self.audio.send(Command::Edit(None))?;
+            if l.editor.as_ref().is_some_and(|e| e.managed.is_some()) {
+                if let Some(preview) = &l.patch_preview {
+                    for (i, bank) in preview.ready.iter().enumerate() {
+                        self.audio.send(Command::LayerBank(i, bank.clone()))?;
+                    }
+                }
+            }
             l.editor = None;
         }
         Ok(())
@@ -155,8 +204,14 @@ impl AppState {
         let l = self.library.lock().map_err(|_| "Library is unavailable")?;
         let e = l.editor.as_ref().ok_or("Open a sample editor first.")?;
         e.check(&id)?;
-        self.audio
-            .send(Command::AuditionSample(e.channel, e.source.clone()))
+        if let Some(context) = &e.managed {
+            let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
+            context.check(&store, e.channel)?;
+            self.audio.send(Command::Audition(e.channel))
+        } else {
+            self.audio
+                .send(Command::AuditionSample(e.channel, e.source.clone()))
+        }
     }
     fn save_editor(&self, id: String, settings: Settings) -> Result<SaveReply, String> {
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
@@ -208,6 +263,8 @@ impl AppState {
                 .map(|s| s.waveform.clone())
                 .unwrap_or_default(),
             settings: new_settings.clone(),
+            output_duration: duration,
+            managed: None,
         };
         match source {
             Ok(source) => {
@@ -221,6 +278,7 @@ impl AppState {
                     sequence: 0,
                     enabled: false,
                     invalidated: false,
+                    managed: None,
                 })
             }
             Err(error) => warnings.push(format!(
@@ -298,9 +356,612 @@ pub(super) fn show_edit_backups(state: tauri::State<'_, Arc<AppState>>) -> Resul
     super::open_backup_folder(&state, "Sample edit backups")
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ManagedEdit {
+    pub sample: String,
+    pub revision: String,
+    pub layer: String,
+    pub patch: String,
+    pub kit: String,
+    pub name: String,
+    pub references: Vec<String>,
+}
+fn sample_references(graph: &patches::PatchGraph, sample: &str) -> Vec<String> {
+    let mut references = vec![];
+    for p in &graph.patches {
+        for k in &p.kits {
+            for (ch, v) in k.voices.iter().enumerate() {
+                for (i, l) in v.layers.iter().enumerate() {
+                    if l.sample_id == sample {
+                        references.push(format!(
+                            "{} · {}{} · Voice {} · Layer {}",
+                            p.name,
+                            k.bank,
+                            k.number,
+                            ch + 1,
+                            i + 1
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    references
+}
+impl ManagedEdit {
+    fn check(&self, store: &managed::ManagedLibrary, channel: usize) -> Result<(), String> {
+        let graph = store.load_patches()?;
+        let valid = graph
+            .current()
+            .filter(|p| p.id == self.patch)
+            .and_then(|p| p.kit())
+            .filter(|k| k.id == self.kit)
+            .and_then(|k| k.voices.get(channel))
+            .is_some_and(|v| {
+                v.selected_layer == self.layer
+                    && v.layers
+                        .iter()
+                        .any(|l| l.id == self.layer && l.sample_id == self.sample)
+            });
+        if sample_references(&graph, &self.sample) != self.references {
+            return Err("Shared Sample references changed. Reopen the editor to review the affected Layers.".into());
+        }
+        if !valid || store.sample_edits(&self.sample)?.id != self.revision {
+            return Err("This Layer or Sample changed. Reopen the editor.".into());
+        }
+        Ok(())
+    }
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ManagedSaveReply {
+    editor: EditorInfo,
+    patch: patches::PatchSnapshot,
+}
+impl AppState {
+    fn checked_managed_editor(
+        &self,
+        l: &mut Library,
+        store: &managed::ManagedLibrary,
+        id: &str,
+    ) -> Result<ManagedEdit, String> {
+        let e = l.editor.as_mut().ok_or("Open a sample editor first.")?;
+        if e.id != id {
+            return Err("This editor session has closed. Reopen the sample.".into());
+        }
+        let context = e.managed.clone().ok_or("Open a managed Sample first.")?;
+        if let Err(error) = e.check(id).and_then(|_| context.check(store, e.channel)) {
+            e.invalidated = true;
+            e.enabled = false;
+            if let Some(preview) = &l.patch_preview {
+                for (i, bank) in preview.ready.iter().enumerate() {
+                    let _ = self.audio.send(Command::LayerBank(i, bank.clone()));
+                }
+            }
+            return Err(error);
+        }
+        Ok(context)
+    }
+    pub(super) fn open_managed_editor(&self, channel: usize) -> Result<EditorInfo, String> {
+        let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
+        let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
+        self.open_managed_editor_locked(channel, &mut l, &store)
+    }
+    fn open_managed_editor_locked(
+        &self,
+        channel: usize,
+        l: &mut Library,
+        store: &managed::ManagedLibrary,
+    ) -> Result<EditorInfo, String> {
+        if !self.patch_active.load(Ordering::Relaxed) {
+            return Err("Open a Patch first.".into());
+        }
+        let graph = store.load_patches()?;
+        let patch = graph.current().ok_or("Select a Patch first.")?;
+        let kit = patch.kit().ok_or("Select a Kit first.")?;
+        let voice = kit.voices.get(channel).ok_or("Invalid Voice.")?;
+        let layer = voice
+            .layers
+            .iter()
+            .find(|l| l.id == voice.selected_layer)
+            .ok_or("Select a Layer first.")?;
+        let sample = store
+            .list()?
+            .into_iter()
+            .find(|s| s.id == layer.sample_id)
+            .ok_or("Sample no longer exists.")?;
+        let saved = store.sample_edits(&sample.id)?;
+        let source = store.prepare(&sample.id)?;
+        let references = sample_references(&graph, &sample.id);
+
+        self.audio.send(Command::Edit(None))?;
+        // Reopening replaces any previous local draft with the saved ready bank.
+        if let Some(preview) = &l.patch_preview {
+            for (i, bank) in preview.ready.iter().enumerate() {
+                self.audio.send(Command::LayerBank(i, bank.clone()))?;
+            }
+        }
+        let editor = EditorState {
+            id: format!("editor-{}", uuid::Uuid::new_v4()),
+            channel,
+            fingerprint: catalog::fingerprint(Path::new(&source.path)),
+            source: source.clone(),
+            cropped: source,
+            settings: saved.settings,
+            sequence: 0,
+            enabled: true,
+            invalidated: false,
+            managed: Some(ManagedEdit {
+                sample: sample.id,
+                revision: saved.id,
+                layer: layer.id.clone(),
+                patch: patch.id.clone(),
+                kit: kit.id.clone(),
+                name: sample.name,
+                references,
+            }),
+        };
+        let info = editor.info();
+        l.editor = Some(editor);
+        Ok(info)
+    }
+    pub(super) fn save_managed_editor(
+        &self,
+        id: String,
+        settings: Settings,
+        variant_name: Option<String>,
+    ) -> Result<ManagedSaveReply, String> {
+        let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
+        let mut store = self.managed.lock().map_err(|_| "Library is unavailable")?;
+        let context = self.checked_managed_editor(&mut l, &store, &id)?;
+        let e = l.editor.as_ref().unwrap();
+        settings.validate(&e.source.spec)?;
+        let channel = e.channel;
+        let graph = store.load_patches()?;
+        store.publish_edits(
+            &context.sample,
+            &context.revision,
+            &settings,
+            variant_name.as_deref(),
+            graph,
+            &context.layer,
+        )?;
+        l.editor = None;
+        l.patch_preview = None;
+        let saved_warning = |error| {
+            format!("Sample Edits saved and Original preserved, but preview could not be refreshed: {error}. Reopen the Patch.")
+        };
+        self.audio
+            .send(Command::Edit(None))
+            .map_err(saved_warning)?;
+        let patch = self
+            .patch_action_locked(patches::PatchAction::Open, &mut l, &store)
+            .map_err(saved_warning)?;
+        let editor = self
+            .open_managed_editor_locked(channel, &mut l, &store)
+            .map_err(saved_warning)?;
+        Ok(ManagedSaveReply { editor, patch })
+    }
+}
+#[tauri::command]
+pub(super) async fn open_managed_editor(
+    channel: usize,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<EditorInfo, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.open_managed_editor(channel))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(super) async fn save_managed_editor(
+    id: String,
+    settings: Settings,
+    variant_name: Option<String>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<ManagedSaveReply, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.save_managed_editor(id, settings, variant_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn overwrite_rejects_a_shared_scope_changed_after_the_editor_opened() {
+        use crate::patches::PatchAction;
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("Shared scope.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state
+            .import_samples(vec![source])
+            .unwrap()
+            .samples
+            .remove(0);
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Scope".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 1,
+                sample: sample.id,
+            })
+            .unwrap();
+        let mut settings = editor.settings;
+        settings.gain_db = -6.;
+        assert!(state
+            .save_managed_editor(editor.id, settings, None)
+            .err()
+            .unwrap()
+            .contains("references changed"));
+    }
+    #[test]
+    fn changed_managed_original_disables_the_editor_even_if_bytes_are_restored() {
+        use crate::patches::PatchAction;
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("Owned.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state
+            .import_samples(vec![source])
+            .unwrap()
+            .samples
+            .remove(0);
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Source guards".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let original = PathBuf::from(
+            state
+                .prepare_library_sample(&sample.id, false)
+                .unwrap()
+                .path
+                .clone(),
+        );
+        let saved = original.with_extension("safe");
+        std::fs::rename(&original, &saved).unwrap();
+        wav::write_pcm16(&original, &[4096; 4410], 44100).unwrap();
+        assert!(state
+            .preview_editor(editor.id.clone(), 1, editor.settings.clone(), true)
+            .is_err());
+        std::fs::remove_file(&original).unwrap();
+        std::fs::rename(saved, original).unwrap();
+        assert!(state
+            .save_managed_editor(editor.id.clone(), editor.settings.clone(), None)
+            .is_err());
+        assert!(state
+            .preview_editor(editor.id, 2, editor.settings, true)
+            .is_err());
+        assert!(state.open_managed_editor(0).is_ok());
+    }
+    #[test]
+    fn shared_overwrite_updates_other_patches_and_keeps_exportable_revision_pcm() {
+        use crate::patches::PatchAction;
+        let (temp, original_state, _) = crate::tests::fixture();
+        let (audio, mut renderer) = AudioHost::offline(44100);
+        let mut state = Arc::try_unwrap(original_state).ok().unwrap();
+        state.audio = audio;
+        let source = temp.path().join("Stereo48000.wav");
+        wav::write_pcm16(&source, &[8192, -4096].repeat(4800), 48000).unwrap();
+        let mut bytes = std::fs::read(&source).unwrap();
+        bytes[22..24].copy_from_slice(&2u16.to_le_bytes());
+        bytes[28..32].copy_from_slice(&192000u32.to_le_bytes());
+        bytes[32..34].copy_from_slice(&4u16.to_le_bytes());
+        std::fs::write(&source, &bytes).unwrap();
+        let sample = state
+            .import_samples(vec![source])
+            .unwrap()
+            .samples
+            .remove(0);
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "First".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        let view = state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let first = view.graph.selected_patch;
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Second".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "B".into(),
+                number: 2,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        assert_eq!(editor.managed.as_ref().unwrap().references.len(), 2);
+        let original_revision = editor.managed.as_ref().unwrap().revision.clone();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        settings.pitch = 3.;
+        settings.echo_mix = 0.25;
+        settings.echo_ms = 50.;
+        settings.reverb_mix = 0.2;
+        settings.reverb_seconds = 0.2;
+        state
+            .preview_editor(editor.id.clone(), 1, settings.clone(), true)
+            .unwrap();
+        state.audition_editor(editor.id.clone()).unwrap();
+        let mut draft = vec![0.; 22050 * 2];
+        renderer.render(&mut draft, 2);
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.audition_editor(saved.editor.id.clone()).unwrap();
+        let mut pcm = vec![0.; draft.len()];
+        renderer.render(&mut pcm, 2);
+        assert!(pcm.iter().zip(&draft).all(|(a, b)| (a - b).abs() < 0.00003));
+        state.close_editor(saved.editor.id).unwrap();
+        state
+            .patch_action(PatchAction::SelectPatch { patch: first })
+            .unwrap();
+        state
+            .patch_action(PatchAction::Musical {
+                action: Action::Audition { channel: 0 },
+            })
+            .unwrap();
+        let mut shared = vec![0.; pcm.len()];
+        renderer.render(&mut shared, 2);
+        assert_eq!(shared, pcm);
+        let current = state.open_managed_editor(0).unwrap();
+        let revision = current.managed.as_ref().unwrap().revision.clone();
+        let prepared = state
+            .prepare_sample_revision(sample.id.clone(), revision.clone())
+            .unwrap();
+        let old = state
+            .prepare_sample_revision(sample.id.clone(), original_revision)
+            .unwrap();
+        assert_eq!(old.spec.frames, 4410);
+        assert!(prepared.spec.frames > 4410);
+        assert!(prepared.head[5000..].iter().any(|v| v[0].abs() > 0.00001));
+        for (audio, encoded) in pcm.chunks_exact(2).zip(&prepared.head) {
+            assert!((audio[0] - encoded[0] * 0.32).abs() < 0.00001);
+        }
+        assert_eq!(
+            std::fs::read(
+                state
+                    .prepare_library_sample(&sample.id, false)
+                    .unwrap()
+                    .path
+                    .clone()
+            )
+            .unwrap(),
+            bytes
+        );
+        assert!(state
+            .prepare_sample_revision(sample.id, "unrelated".into())
+            .is_err());
+    }
+    #[test]
+    fn managed_drafts_are_local_cancel_restores_saved_and_variant_retargets_one_occurrence() {
+        use crate::patches::PatchAction;
+        let (temp, original_state, _) = crate::tests::fixture();
+        let (audio, mut renderer) = AudioHost::offline(44100);
+        let mut state = Arc::try_unwrap(original_state).ok().unwrap();
+        state.audio = audio;
+        let source = temp.path().join("Shared.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state
+            .import_samples(vec![source])
+            .unwrap()
+            .samples
+            .remove(0);
+        state
+            .update_sample_metadata(sample.id.clone(), "Shared".into(), vec!["warm".into()])
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreatePatch { name: "One".into() })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let view = state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let layers = &view.graph.current().unwrap().kit().unwrap().voices[0].layers;
+        let first = layers[0].id.clone();
+        let second = layers[1].id.clone();
+        state
+            .patch_action(PatchAction::SelectLayer {
+                channel: 0,
+                layer: second.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -12.;
+        state
+            .preview_editor(editor.id.clone(), 2, settings.clone(), true)
+            .unwrap();
+        state
+            .preview_editor(editor.id.clone(), 1, editor.settings.clone(), false)
+            .unwrap();
+        state.audition_editor(editor.id.clone()).unwrap();
+        let mut pcm = [0.; 2];
+        renderer.render(&mut pcm, 2);
+        let quiet = pcm[0];
+        assert!((quiet - 0.0201).abs() < 0.001, "{quiet}");
+        // Switching a selected occurrence invalidates the editor without losing its peer's saved sound.
+        state
+            .patch_action(PatchAction::SelectLayer {
+                channel: 0,
+                layer: first.clone(),
+            })
+            .unwrap();
+        assert!(state
+            .preview_editor(editor.id.clone(), 3, settings.clone(), true)
+            .is_err());
+        state
+            .patch_action(PatchAction::Musical {
+                action: Action::Audition { channel: 0 },
+            })
+            .unwrap();
+        renderer.render(&mut pcm, 2);
+        assert!((pcm[0] - 0.08).abs() < 0.001);
+        state.close_editor(editor.id).unwrap();
+        state
+            .patch_action(PatchAction::SelectLayer {
+                channel: 0,
+                layer: second.clone(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::Musical {
+                action: Action::Audition { channel: 0 },
+            })
+            .unwrap();
+        renderer.render(&mut pcm, 2);
+        assert!((pcm[0] - 0.08).abs() < 0.001);
+        let editor = state.open_managed_editor(0).unwrap();
+        let saved = state
+            .save_managed_editor(editor.id.clone(), settings, Some("Quiet variant".into()))
+            .unwrap();
+        let voice = &saved.patch.graph.current().unwrap().kit().unwrap().voices[0];
+        assert_eq!(voice.layers[0].sample_id, sample.id);
+        assert_ne!(voice.layers[1].sample_id, sample.id);
+        assert_eq!(voice.layers[1].id, second);
+        let variants = state.list_samples().unwrap();
+        assert_eq!(variants[0].original_id, variants[1].original_id);
+        assert_eq!(variants[1].tags, ["warm"]);
+        assert_eq!(variants[1].name, "Quiet variant");
+        assert!(state
+            .save_managed_editor(editor.id, editor.settings, None)
+            .is_err());
+        state.audition_editor(saved.editor.id).unwrap();
+        renderer.render(&mut pcm, 2);
+        assert!((pcm[0] - quiet).abs() < 0.001); // saved sound is processed once
+    }
+    #[test]
+    fn managed_edits_reopen_complete_original_and_preserve_saved_revisions() {
+        use crate::patches::PatchAction;
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("Reversible.wav");
+        wav::write_pcm16(&source, &[8192; 44100], 44100).unwrap();
+        let bytes = std::fs::read(&source).unwrap();
+        let sample = state
+            .import_samples(vec![source])
+            .unwrap()
+            .samples
+            .remove(0);
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Edits".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.end = 0.2;
+        settings.gain_db = -12.;
+        settings.reverb_mix = 0.5;
+        state
+            .save_managed_editor(editor.id, settings.clone(), None)
+            .unwrap();
+        let reopened = state.open_managed_editor(0).unwrap();
+        assert_eq!(reopened.duration, 1.);
+        assert_eq!(reopened.settings, settings);
+        let first_revision = reopened.managed.as_ref().unwrap().revision.clone();
+        settings.end = 0.8;
+        settings.gain_db = -3.;
+        settings.reverb_mix = 0.;
+        state
+            .save_managed_editor(reopened.id, settings.clone(), None)
+            .unwrap();
+        let prepared = state.prepare_library_sample(&sample.id, true).unwrap();
+        assert_eq!(prepared.spec.frames, 35280);
+        let revisions = state.sample_revisions(sample.id.clone()).unwrap();
+        assert!(revisions.iter().any(|r| r.id == first_revision));
+        drop(state);
+        let (restarted, _) = crate::tests::fixture_state(temp.path().join("support"));
+        restarted.patch_action(PatchAction::Open).unwrap();
+        assert_eq!(restarted.open_managed_editor(0).unwrap().settings, settings);
+        assert_eq!(
+            std::fs::read(
+                &restarted
+                    .prepare_library_sample(&sample.id, false)
+                    .unwrap()
+                    .path
+            )
+            .unwrap(),
+            bytes
+        );
+    }
     #[test]
     fn editor_preview_and_cancel_preserve_original_audio_and_session() {
         let (_temp, state, _) = crate::tests::fixture();

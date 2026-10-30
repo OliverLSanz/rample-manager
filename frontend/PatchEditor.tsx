@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SampleEditor } from "./SampleEditor";
 import { Modal } from "./Modal";
 import { LibrarySamples } from "./LibrarySamples";
 import { SequencerRow, TransportBar } from "./Sequencer";
@@ -6,6 +7,7 @@ import * as native from "./native";
 import {
   modes,
   type Action,
+  type EditorInfo,
   type PatchAction,
   type PatchSnapshot,
   type Transport,
@@ -25,6 +27,7 @@ export function PatchEditor({
   const [name, setName] = useState("");
   const [bank, setBank] = useState("A");
   const [number, setNumber] = useState(0);
+  const [editor, setEditor] = useState<EditorInfo | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [velocity, setVelocity] = useState<{
     channel: number;
@@ -102,7 +105,7 @@ export function PatchEditor({
   }
   useEffect(() => {
     function key(event: KeyboardEvent) {
-      if (busy || picker !== null || velocity) return;
+      if (busy || picker !== null || velocity || editor) return;
       if (
         event.target instanceof Element &&
         event.target.closest('input,textarea,select,[contenteditable="true"]')
@@ -121,6 +124,23 @@ export function PatchEditor({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
+  if (editor)
+    return (
+      <SampleEditor
+        initial={editor}
+        transport={transport}
+        invalidated={false}
+        onClose={() => {
+          setEditor(null);
+          void act({ type: "open" });
+        }}
+        onSaved={() => {}}
+        onPatchSaved={setView}
+        onToggle={async () => {
+          await musical({ type: "togglePlayback" });
+        }}
+      />
+    );
   if (picker !== null)
     return (
       <LibrarySamples
@@ -434,6 +454,21 @@ export function PatchEditor({
                     onClick={() => setPicker(channel)}
                   >
                     Add Sample…
+                  </button>
+                  <button
+                    aria-label={`Edit selected Sample in Voice ${channel + 1}`}
+                    disabled={!voice.layers.length}
+                    onClick={() => {
+                      setBusy(true);
+                      setError(null);
+                      void native
+                        .openManagedEditor(channel)
+                        .then(setEditor)
+                        .catch((e) => setError(String(e)))
+                        .finally(() => setBusy(false));
+                    }}
+                  >
+                    Edit Sample…
                   </button>
                   <button
                     aria-label={`Audition Voice ${channel + 1}`}

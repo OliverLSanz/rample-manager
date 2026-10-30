@@ -13,6 +13,7 @@ import { idleTransport, type EditorInfo, type Snapshot } from "./types";
 vi.mock("./native", () => ({
   previewEditor: vi.fn(),
   saveEditor: vi.fn(),
+  saveManagedEditor: vi.fn(),
   closeEditor: vi.fn(),
   auditionEditor: vi.fn(),
   showEditBackups: vi.fn(),
@@ -67,6 +68,117 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("sample editor", () => {
+  it("disables a managed draft after its source changes until reopened", async () => {
+    const initial = {
+      ...original,
+      managed: {
+        sample: "sample",
+        revision: "revision",
+        layer: "layer",
+        patch: "patch",
+        kit: "kit",
+        name: "Warm kick",
+        references: [],
+      },
+    };
+    vi.mocked(native.previewEditor).mockRejectedValue(
+      new Error(
+        "Original changed in managed storage. Restore the Library from a backup.",
+      ),
+    );
+    render(
+      <SampleEditor
+        initial={initial}
+        transport={idleTransport}
+        invalidated={false}
+        onClose={onClose}
+        onSaved={onSaved}
+        onToggle={onToggle}
+      />,
+    );
+    fireEvent.change(screen.getByRole("slider", { name: "Gain" }), {
+      target: { value: "-6" },
+    });
+    await screen.findByRole("alert");
+    expect(
+      screen.getByRole("button", { name: "Overwrite shared Sample" }),
+    ).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Save as new" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Preview edits" }),
+    ).toHaveProperty("disabled", true);
+  });
+  it("shows shared Overwrite scope and saves an independent Variant for this occurrence", async () => {
+    const initial = {
+      ...structuredClone(original),
+      managed: {
+        sample: "sample",
+        revision: "revision",
+        layer: "second",
+        patch: "patch",
+        kit: "kit",
+        name: "Warm kick",
+        references: [
+          "Set one · A0 · Voice 1 · Layer 1",
+          "Set two · B2 · Voice 4 · Layer 2",
+        ],
+      },
+    };
+    render(
+      <SampleEditor
+        initial={initial}
+        transport={idleTransport}
+        invalidated={false}
+        onClose={onClose}
+        onSaved={onSaved}
+        onToggle={onToggle}
+        onPatchSaved={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByRole("slider", { name: "Gain" }), {
+      target: { value: "-6" },
+    });
+    expect(screen.getByText("Set two · B2 · Voice 4 · Layer 2")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Overwrite shared Sample" }),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Variant name" }), {
+      target: { value: "Quiet kick" },
+    });
+    vi.mocked(native.saveManagedEditor).mockResolvedValue({
+      editor: {
+        ...initial,
+        id: "new-editor",
+        settings: { ...initial.settings, gainDb: -6, pitch: 12 },
+        outputDuration: 0.5,
+      },
+      patch: {
+        graph: { selectedPatch: "", patches: [] },
+        session: null,
+        samples: [],
+        validation: [],
+        playing: false,
+      },
+    });
+    fireEvent.change(screen.getByRole("slider", { name: "Pitch" }), {
+      target: { value: "12" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save as new" }));
+    await screen.findByText("Sample Edits saved. Original preserved.");
+    expect(screen.getByText("0.500 s")).toBeTruthy();
+    expect(native.saveManagedEditor).toHaveBeenCalledWith(
+      "edit-1",
+      expect.objectContaining({ gainDb: -6 }),
+      "Quiet kick",
+    );
+    expect(screen.getByRole("slider", { name: "Gain" })).toHaveProperty(
+      "value",
+      "-6",
+    );
+  });
   it("previews edits without saving and discards them on close", async () => {
     boot();
     fireEvent.change(screen.getByRole("slider", { name: "Gain" }), {

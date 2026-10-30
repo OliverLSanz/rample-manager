@@ -56,7 +56,7 @@ Decode and preparation use the bundled Rust codecs, work in bounded chunks off
 the audio callback, and need no FFmpeg installation. Playback artifacts currently
 support mono/stereo audio up to 384 kHz and standard RIFF size limits; files that
 cannot be completely decoded are reported individually. This coexists with the folder workflow
-below; reversible managed Sample editing follows in later work. Legacy conversion and **Save to sample** cannot modify managed
+below. Legacy conversion and **Save to sample** cannot modify managed
 Originals, and managed storage cannot be opened as a legacy folder.
 
 Open **Patches…** to create multiple named Patches that share Library Samples.
@@ -67,6 +67,17 @@ Select a Layer, reorder it with the arrows or remove just that occurrence.
 Selection follows the occurrence when its position changes, even for duplicates.
 All five Layer modes use this saved order; new Voices default to Single sample
 (MANUAL). Kit preview uses the Library's mono Rample preparation.
+
+Select a Layer and choose **Edit Sample…** to edit its complete Original. Trim,
+gain, varispeed pitch, EQ, echo and reverb are saved as reversible Sample Edits;
+reopening retains the controls and full waveform, so trims can expand and effects
+can be reduced. Drafts affect only that Layer occurrence, including repeated uses
+of the same Sample. Bypass compares against its saved sound; closing discards the
+draft. **Overwrite shared Sample** lists every affected Layer across Patches and
+updates their shared sound. **Save as new** names an independent Variant, retains
+tags and the shared Original, and retargets only the selected occurrence. Saved
+Revisions remain available for reproducible future exports. See
+[reversible Sample Edits](docs/reversible-sample-edits.md) for the rendering contract.
 
 The Patch workspace reuses the four-channel, 16-step sequencer, tempo, velocities,
 volume, mute and solo controls. Modes and selected Layers are remembered per Kit;

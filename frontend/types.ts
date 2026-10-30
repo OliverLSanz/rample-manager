@@ -249,6 +249,16 @@ export interface EditorInfo {
   duration: number;
   waveform: number[];
   settings: EditSettings;
+  outputDuration?: number;
+  managed?: {
+    sample: string;
+    revision: string;
+    layer: string;
+    patch: string;
+    kit: string;
+    name: string;
+    references: string[];
+  } | null;
 }
 export interface EditorSaveReply {
   snapshot: Snapshot;
