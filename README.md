@@ -354,8 +354,10 @@ operating systems. Actual-device smoke testing is separate:
 cargo run -p rample-core --example audio_smoke --features native-audio
 ```
 
-The Windows CI build verifies compilation, tests, packaging, native app startup
-and a reinstall that preserves preferences (`scripts/smoke-windows.ps1`). This
+The Windows CI build verifies compilation, tests, packaging, native app startup,
+graceful close saving the first session, and a reinstall that preserves preferences
+(`scripts/smoke-windows.ps1`). Startup readiness uses the native window and Library
+store because opening the app does not rewrite an existing session. This
 cannot replace a listening test on physical Windows audio hardware. The original Swift sources
 are archived under `legacy/swift` for reference and rollback.
 

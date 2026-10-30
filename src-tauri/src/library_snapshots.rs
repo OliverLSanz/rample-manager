@@ -1776,7 +1776,12 @@ mod tests {
             permissions.set_mode(permissions.mode() | 0o200);
         }
         #[cfg(windows)]
-        permissions.set_readonly(false);
+        {
+            // This owned corruption fixture must clear the Windows read-only file
+            // attribute. Unix above adds only owner-write, never world-write.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+        }
         fs::set_permissions(&original, permissions).unwrap();
         fs::OpenOptions::new()
             .write(true)
