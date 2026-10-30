@@ -12,6 +12,7 @@ export function LibrarySamples({
   onSelect?: (sampleId: string) => void | Promise<void>;
 }) {
   const [samples, setSamples] = useState<LibrarySample[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<LibrarySample[]>([]);
   const [searching, setSearching] = useState(false);
@@ -55,7 +56,7 @@ export function LibrarySamples({
     };
   }, []);
   useEffect(() => {
-    if (!query.trim()) {
+    if (!query.trim() || showTrash) {
       setSearching(false);
       return;
     }
@@ -76,9 +77,50 @@ export function LibrarySamples({
     return () => {
       cancelled = true;
     };
-  }, [query, revision]);
-  const visibleSamples = query.trim() ? matches : samples;
+  }, [query, revision, showTrash]);
+  const collection = samples.filter(
+    (sample) => Boolean(sample.retired) === showTrash,
+  );
+  const visibleSamples = showTrash
+    ? collection.filter((sample) =>
+        [sample.name, ...sample.tags].some((text) =>
+          text.toLowerCase().includes(query.trim().toLowerCase()),
+        ),
+      )
+    : (query.trim() ? matches : collection).filter((sample) => !sample.retired);
   const selected = samples.find((sample) => sample.id === selectedId);
+  async function setRetired(id: string, retired: boolean) {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const sample = await (retired
+        ? native.retireSample(id)
+        : native.restoreSample(id));
+      if (mounted.current) {
+        setSamples((rows) =>
+          rows.map((row) => (row.id === sample.id ? sample : row)),
+        );
+        setReport(
+          (current) =>
+            current && {
+              ...current,
+              results: current.results.map((result) =>
+                result.sample?.id === sample.id
+                  ? { ...result, sample }
+                  : result,
+              ),
+            },
+        );
+        setSelectedId(null);
+        setRevision((value) => value + 1);
+      }
+    } catch (e) {
+      if (mounted.current) setError(String(e));
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
   async function saveMetadata(name: string, tags: string[]) {
     if (!selectedId) return;
     setBusy(true);
@@ -170,6 +212,36 @@ export function LibrarySamples({
           Import folder…
         </button>
       </div>
+      <div className="modal-buttons" aria-label="Library collections">
+        <button
+          disabled={busy}
+          aria-pressed={!showTrash}
+          onClick={() => {
+            setShowTrash(false);
+            setQuery("");
+            setSelectedId(null);
+          }}
+        >
+          Samples ({samples.filter((sample) => !sample.retired).length})
+        </button>
+        <button
+          disabled={busy}
+          aria-pressed={showTrash}
+          onClick={() => {
+            setShowTrash(true);
+            setQuery("");
+            setSelectedId(null);
+          }}
+        >
+          Trash ({samples.filter((sample) => sample.retired).length})
+        </button>
+      </div>
+      {showTrash && (
+        <p>
+          Retired Samples stay available to existing Layers. Restore them to add
+          them to another Voice.
+        </p>
+      )}
       {busy && <p role="status">Loading Samples…</p>}
       {report && (
         <>
@@ -183,8 +255,19 @@ export function LibrarySamples({
                 {basename(result.source)}:{" "}
                 {result.error ??
                   (result.status === "recognized"
-                    ? "Already in Library"
+                    ? result.sample?.retired
+                      ? `Already in Trash: ${result.sample.name}`
+                      : "Already in Library"
                     : "Imported")}
+                {result.sample?.retired && (
+                  <button
+                    disabled={busy}
+                    aria-label={`Restore ${result.sample.name}`}
+                    onClick={() => void setRetired(result.sample!.id, false)}
+                  >
+                    Restore Sample
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -199,13 +282,18 @@ export function LibrarySamples({
         />
       </label>
       {searching && <p role="status">Searching Samples…</p>}
-      {!busy && !searching && samples.length === 0 && <p>No Samples yet.</p>}
+      {!busy && !searching && collection.length === 0 && (
+        <p>{showTrash ? "Trash is empty." : "No Samples yet."}</p>
+      )}
       {!busy &&
         !searching &&
-        samples.length > 0 &&
+        collection.length > 0 &&
         visibleSamples.length === 0 && <p>No matching Samples.</p>}
       {visibleSamples.length > 0 && (
-        <ul className="library-samples" aria-label="Library Samples">
+        <ul
+          className="library-samples"
+          aria-label={showTrash ? "Trash Samples" : "Library Samples"}
+        >
           {visibleSamples.map((sample) => (
             <li key={sample.id}>
               <div>
@@ -232,6 +320,13 @@ export function LibrarySamples({
                 </small>
                 {sample.error && <span role="alert">{sample.error}</span>}
               </div>
+              <button
+                disabled={busy}
+                aria-label={`${sample.retired ? "Restore" : "Retire"} ${sample.name}`}
+                onClick={() => void setRetired(sample.id, !sample.retired)}
+              >
+                {sample.retired ? "Restore" : "Move to Trash"}
+              </button>
               <button
                 disabled={busy || !sample.readable}
                 aria-label={`Audition Original ${sample.name}`}
@@ -266,7 +361,7 @@ export function LibrarySamples({
         </button>
         {onSelect && (
           <button
-            disabled={busy || !selected?.readable}
+            disabled={busy || !selected?.readable || selected.retired}
             onClick={async () => {
               if (!selectedId) return;
               setBusy(true);

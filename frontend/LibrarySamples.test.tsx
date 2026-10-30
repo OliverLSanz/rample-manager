@@ -12,6 +12,8 @@ import * as native from "./native";
 
 vi.mock("./native", () => ({
   listSamples: vi.fn(),
+  retireSample: vi.fn(),
+  restoreSample: vi.fn(),
   querySamples: vi.fn(),
   updateSampleMetadata: vi.fn(),
   openSampleAudition: vi.fn(),
@@ -37,6 +39,7 @@ it("imports files, reports failures, lists private Samples and auditions by iden
     bits: 16,
     channels: 1,
     format: "WAV",
+    retired: false,
     readable: true,
     error: null,
   };
@@ -131,6 +134,7 @@ it("closing an old panel cannot stop audition in a newly opened Library", async 
     bits: 16,
     channels: 1,
     format: "WAV",
+    retired: false,
     readable: true,
     error: null,
   };
@@ -187,6 +191,7 @@ it("edits the selected Sample and searches tags while duplicate names audition b
     bits: 16,
     channels: 1,
     format: "WAV",
+    retired: false,
     readable: true,
     error: null,
   };
@@ -281,6 +286,7 @@ it("shows source format and stereo channels with separate Original and mono Ramp
       channels: 2,
       bits: 24,
       format: "FLAC",
+      retired: false,
       readable: true,
       error: null,
     },
@@ -333,6 +339,7 @@ it("stops while audio is preparing and ignores its later completion", async () =
       channels: 2,
       bits: 24,
       format: "FLAC",
+      retired: false,
       readable: true,
       error: null,
     },
@@ -363,4 +370,113 @@ it("stops while audio is preparing and ignores its later completion", async () =
   finish();
   await Promise.resolve();
   await waitFor(() => expect(stop.disabled).toBe(true));
+});
+
+it("retires a Sample into visible Trash and restores its picker identity", async () => {
+  const sample = {
+    id: "keep-identity",
+    originalId: "original",
+    name: "Warm kick",
+    tags: ["warm"],
+    sha256: "hash",
+    duration: 0.1,
+    rate: 44100,
+    bits: 16,
+    channels: 1,
+    format: "WAV",
+    readable: true,
+    error: null,
+    retired: false,
+  };
+  vi.mocked(native.openSampleAudition).mockResolvedValue("trash-owner");
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.retireSample).mockResolvedValue({
+    ...sample,
+    retired: true,
+  });
+  vi.mocked(native.restoreSample).mockResolvedValue(sample);
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  const choose = vi.fn();
+  render(<LibrarySamples onClose={() => {}} onSelect={choose} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Retire Warm kick" }),
+  );
+  await screen.findByText("No Samples yet.");
+  expect(screen.queryByRole("button", { name: "Select Warm kick" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Trash (1)" }));
+  const trash = await screen.findByRole("list", { name: "Trash Samples" });
+  expect(within(trash).getByText("Warm kick")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Use Sample" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(
+    within(trash).getByRole("button", { name: "Restore Warm kick" }),
+  );
+  await screen.findByText("Trash is empty.");
+  fireEvent.click(screen.getByRole("button", { name: "Samples (1)" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Select Warm kick" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use Sample" }));
+  expect(choose).toHaveBeenCalledWith("keep-identity");
+});
+
+it("reports recognized retired audio and provides a restore route instead of a duplicate", async () => {
+  const sample = {
+    id: "retired-known",
+    originalId: "original",
+    name: "My retired kick",
+    tags: ["warm"],
+    sha256: "hash",
+    duration: 0.1,
+    rate: 44100,
+    bits: 16,
+    channels: 1,
+    format: "WAV",
+    readable: true,
+    error: null,
+    retired: true,
+  };
+  vi.mocked(native.openSampleAudition).mockResolvedValue("known-owner");
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.chooseSampleSources).mockResolvedValue([
+    "/renamed/Again.wav",
+  ]);
+  vi.mocked(native.importSamples).mockResolvedValue({
+    imported: 0,
+    recognized: 1,
+    failed: 0,
+    complete: true,
+    samples: [sample],
+    results: [
+      {
+        source: "/renamed/Again.wav",
+        status: "recognized",
+        sample,
+        error: null,
+      },
+    ],
+  });
+  vi.mocked(native.restoreSample).mockResolvedValue({
+    ...sample,
+    retired: false,
+  });
+  render(<LibrarySamples onClose={() => {}} />);
+  await screen.findByText("No Samples yet.");
+  fireEvent.click(screen.getByRole("button", { name: "Import audio files…" }));
+  const results = await screen.findByRole("list", { name: "Import results" });
+  expect(
+    within(results).getByText(/Already in Trash: My retired kick/),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Select My retired kick" }),
+  ).toBeNull();
+  fireEvent.click(
+    within(results).getByRole("button", { name: "Restore My retired kick" }),
+  );
+  await screen.findByRole("button", { name: "Select My retired kick" });
+  expect(screen.getByRole("button", { name: "Trash (0)" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Samples (1)" })).toBeTruthy();
 });

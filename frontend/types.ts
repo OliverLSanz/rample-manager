@@ -6,6 +6,7 @@ export interface LibrarySample {
   format: string;
   name: string;
   tags: string[];
+  retired: boolean;
   sha256: string;
   duration: number;
   rate: number;

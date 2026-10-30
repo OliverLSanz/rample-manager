@@ -864,6 +864,9 @@ fn main() {
             managed::query_samples,
             managed::update_sample_metadata,
             managed::import_samples,
+            managed::list_trashed_samples,
+            managed::retire_sample,
+            managed::restore_sample,
             managed::audition_sample,
             managed::stop_sample_audition,
             managed::open_sample_audition,
@@ -894,7 +897,12 @@ mod tests {
         std::sync::mpsc::Receiver<Vec<PathBuf>>,
     ) {
         let temp = tempfile::tempdir().unwrap();
-        let support = temp.path().join("support");
+        let (state, rx) = fixture_state(temp.path().join("support"));
+        (temp, state, rx)
+    }
+    pub(super) fn fixture_state(
+        support: PathBuf,
+    ) -> (Arc<AppState>, std::sync::mpsc::Receiver<Vec<PathBuf>>) {
         let managed = managed::ManagedLibrary::open(&support).unwrap();
         let mut library = Library::new(support).unwrap();
         library.scan(&HashSet::new(), false);
@@ -911,7 +919,7 @@ mod tests {
             watching: AtomicBool::new(false),
             events: tx,
         });
-        (temp, state, rx)
+        (state, rx)
     }
     #[test]
     fn commands_remember_modes_and_keep_pattern_between_kits() {

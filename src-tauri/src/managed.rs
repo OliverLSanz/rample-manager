@@ -15,6 +15,7 @@ pub struct LibrarySample {
     pub original_id: String,
     pub name: String,
     pub tags: Vec<String>,
+    pub retired: bool,
     pub sha256: String,
     pub duration: f64,
     pub rate: u32,
@@ -62,7 +63,7 @@ impl ManagedLibrary {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if version > 4 {
+        if version > 5 {
             return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
@@ -93,6 +94,10 @@ impl ManagedLibrary {
         }
         if version < 4 {
             db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE patch_state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); PRAGMA user_version=4; COMMIT;")
+                .map_err(|e| e.to_string())?;
+        }
+        if version < 5 {
+            db.execute_batch("BEGIN IMMEDIATE; ALTER TABLE samples ADD COLUMN retired INTEGER NOT NULL DEFAULT 0; PRAGMA user_version=5; COMMIT;")
                 .map_err(|e| e.to_string())?;
         }
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
@@ -135,7 +140,7 @@ impl ManagedLibrary {
             .db
             .prepare(
                 "SELECT s.id, s.original_id, s.name, o.sha256,
-            o.rate, o.channels, o.bits, o.frames, s.tags, o.format FROM samples s JOIN originals o
+            o.rate, o.channels, o.bits, o.frames, s.tags, o.format, s.retired FROM samples s JOIN originals o
             ON s.original_id=o.id ORDER BY s.rowid",
             )
             .map_err(|e| e.to_string())?;
@@ -152,18 +157,19 @@ impl ManagedLibrary {
         Ok(samples)
     }
     /// Literal Unicode-lowercase substring across the name or an individual tag.
-    /// Empty/whitespace query returns all Samples in stable import order.
+    /// Empty/whitespace query returns active Samples in stable import order.
     pub fn query(&self, query: &str) -> Result<Vec<LibrarySample>, String> {
         let query = query.trim().to_lowercase();
         Ok(self
             .list()?
             .into_iter()
             .filter(|sample| {
-                sample.name.to_lowercase().contains(&query)
-                    || sample
-                        .tags
-                        .iter()
-                        .any(|tag| tag.to_lowercase().contains(&query))
+                !sample.retired
+                    && (sample.name.to_lowercase().contains(&query)
+                        || sample
+                            .tags
+                            .iter()
+                            .any(|tag| tag.to_lowercase().contains(&query)))
             })
             .collect())
     }
@@ -173,7 +179,7 @@ impl ManagedLibrary {
             .query_row(
                 &format!(
                     "SELECT s.id, s.original_id, s.name, o.sha256,
-            o.rate, o.channels, o.bits, o.frames, s.tags, o.format FROM originals o JOIN samples s
+            o.rate, o.channels, o.bits, o.frames, s.tags, o.format, s.retired FROM originals o JOIN samples s
             ON s.original_id=o.id WHERE {predicate} ORDER BY s.rowid LIMIT 1"
                 ),
                 [value],
@@ -181,6 +187,20 @@ impl ManagedLibrary {
             )
             .optional()
             .map_err(|e| e.to_string())
+    }
+    pub fn set_retired(&self, id: &str, retired: bool) -> Result<LibrarySample, String> {
+        let changed = self
+            .db
+            .execute(
+                "UPDATE samples SET retired=?2 WHERE id=?1",
+                params![id, retired],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err("Sample no longer exists.".into());
+        }
+        self.find_sample("s.id=?1", id)?
+            .ok_or_else(|| "Sample no longer exists.".into())
     }
     pub fn update_metadata(
         &self,
@@ -361,6 +381,7 @@ impl ManagedLibrary {
                 original_id,
                 name,
                 tags: vec![],
+                retired: false,
                 sha256,
                 duration: info.frames as f64 / f64::from(info.rate),
                 rate: info.rate,
@@ -482,6 +503,7 @@ fn sample_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibrarySample> {
         channels: row.get(5)?,
         bits: row.get(6)?,
         format: row.get(9)?,
+        retired: row.get(10)?,
         duration: row.get::<_, i64>(7)? as f64 / f64::from(rate),
         readable: true,
         error: None,
@@ -530,6 +552,25 @@ impl AppState {
             .lock()
             .map_err(|_| "Library is unavailable")?
             .list()
+    }
+    pub fn list_trashed_samples(&self) -> Result<Vec<LibrarySample>, String> {
+        Ok(self
+            .list_samples()?
+            .into_iter()
+            .filter(|sample| sample.retired)
+            .collect())
+    }
+    pub fn retire_sample(&self, id: String) -> Result<LibrarySample, String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .set_retired(&id, true)
+    }
+    pub fn restore_sample(&self, id: String) -> Result<LibrarySample, String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .set_retired(&id, false)
     }
     pub fn import_samples(&self, paths: Vec<PathBuf>) -> Result<ImportReply, String> {
         self.managed
@@ -621,6 +662,35 @@ pub(super) async fn list_samples(
         .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub(super) async fn list_trashed_samples(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<LibrarySample>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.list_trashed_samples())
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(super) async fn retire_sample(
+    id: String,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<LibrarySample, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.retire_sample(id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(super) async fn restore_sample(
+    id: String,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<LibrarySample, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.restore_sample(id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub(super) async fn import_samples(
     paths: Vec<PathBuf>,
     state: tauri::State<'_, Arc<AppState>>,
@@ -690,6 +760,99 @@ mod tests {
     use crate::{tests::fixture, Action, Library};
     use rample_core::wav;
     use std::path::Path;
+
+    #[test]
+    fn retired_samples_keep_layer_identity_pcm_and_recognition_across_restart() {
+        use crate::patches::PatchAction;
+        use rample_core::audio::{Command, Meters, Renderer};
+        use std::{fs, sync::Arc};
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source.clone()]).unwrap().samples[0].clone();
+        state
+            .update_sample_metadata(sample.id.clone(), "低音 kick".into(), vec!["warm".into()])
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Live".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        let before = state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let layer = before.graph.current().unwrap().kit().unwrap().voices[0].layers[0]
+            .id
+            .clone();
+        let original = state.prepare_library_sample(&sample.id, false).unwrap();
+        let original_bytes = fs::read(&original.path).unwrap();
+        assert!(state.retire_sample(sample.id.clone()).unwrap().retired);
+        assert!(state.query_samples("warm".into()).unwrap().is_empty());
+        assert_eq!(state.list_trashed_samples().unwrap()[0].id, sample.id);
+        assert!(state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone()
+            })
+            .is_err());
+        let reply = state.import_samples(vec![source.clone()]).unwrap();
+        assert_eq!((reply.imported, reply.recognized), (0, 1));
+        assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
+        assert!(reply.results[0].sample.as_ref().unwrap().retired);
+        assert_eq!(reply.samples.len(), 1);
+        fs::remove_file(source).unwrap();
+        drop(state);
+        let (state, _) = crate::tests::fixture_state(temp.path().join("support"));
+        let reopened = state.patch_action(PatchAction::Open).unwrap();
+        let voice = &reopened.graph.current().unwrap().kit().unwrap().voices[0];
+        assert_eq!(voice.selected_layer, layer);
+        assert_eq!(voice.layers[0].sample_id, sample.id);
+        assert!(reopened.validation.is_empty());
+        assert_eq!(state.list_trashed_samples().unwrap()[0].tags, ["warm"]);
+        let prepared = state.prepare_library_sample(&sample.id, true).unwrap();
+        let (mut renderer, control) = Renderer::new(44100, Arc::new(Meters::default()));
+        control
+            .send(Command::Settings(reopened.session.unwrap().voices, 120.))
+            .unwrap();
+        control
+            .send(Command::LayerBank(
+                0,
+                vec![rample_core::audio::LayerSample {
+                    id: layer,
+                    sample: prepared,
+                }],
+            ))
+            .unwrap();
+        control.send(Command::Audition(0)).unwrap();
+        let mut pcm = vec![0.; 1024];
+        renderer.render(&mut pcm, 2);
+        assert!(pcm[200..400]
+            .iter()
+            .all(|value| (*value - 0.08).abs() < 0.001));
+        let restored = state.restore_sample(sample.id.clone()).unwrap();
+        assert!(!restored.retired);
+        assert_eq!(restored.original_id, sample.original_id);
+        assert_eq!(restored.name, "低音 kick");
+        assert_eq!(state.query_samples("warm".into()).unwrap()[0].id, sample.id);
+        assert!(state.list_trashed_samples().unwrap().is_empty());
+        assert_eq!(
+            state
+                .prepare_library_sample(&sample.id, false)
+                .unwrap()
+                .path,
+            original.path
+        );
+        assert_eq!(fs::read(&original.path).unwrap(), original_bytes);
+    }
 
     #[test]
     fn stereo_original_and_rample_preparation_remain_independent_after_restart() {

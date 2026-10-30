@@ -32,6 +32,7 @@ const sample = {
   bits: 16,
   channels: 1,
   format: "WAV",
+  retired: false,
   readable: true,
   error: null,
 };

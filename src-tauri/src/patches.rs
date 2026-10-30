@@ -243,8 +243,10 @@ impl AppState {
                 patch.selected_kit = kit;
             }
             PatchAction::AddLayer { channel, sample } => {
-                if !store.list()?.iter().any(|s| s.id == sample) {
-                    return Err("Sample no longer exists.".into());
+                if !store.list()?.iter().any(|s| s.id == sample && !s.retired) {
+                    return Err(
+                        "Sample is unavailable. Restore retired Samples from Trash first.".into(),
+                    );
                 }
                 let voice = graph.current_mut()?.voice_mut(channel)?;
                 let id = Uuid::new_v4().to_string();

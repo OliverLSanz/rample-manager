@@ -40,6 +40,14 @@ Original files or change Sample identity. Reimporting known audio retains this
 metadata, including after restarting the app. Samples with the same name remain
 separate entries; selecting or auditioning a row always uses its Sample ID.
 
+**Move to Trash** retires a Sample from ordinary Library searches and the add-Sample
+picker. Open **Trash** to audition or **Restore** it. Existing Layers keep their
+Sample identity and saved sound, including after restarting. Restore makes the
+same Sample available again without copying audio or changing its Kit references.
+Reimporting known retired audio reports the existing Trash entry and offers
+**Restore Sample**. Retirement retains Originals and saved history; permanent
+purge is not available.
+
 Completed imports preserve all Original bytes privately and work after removing
 the source. WAV playback reads its Original directly. Other supported formats
 use a disposable source-rate, channel-preserving float64 WAV playback artifact,

@@ -14,6 +14,12 @@ import type {
   LibraryImportReply,
 } from "./types";
 export const listSamples = () => invoke<LibrarySample[]>("list_samples");
+export const listTrashedSamples = () =>
+  invoke<LibrarySample[]>("list_trashed_samples");
+export const retireSample = (id: string) =>
+  invoke<LibrarySample>("retire_sample", { id });
+export const restoreSample = (id: string) =>
+  invoke<LibrarySample>("restore_sample", { id });
 export const querySamples = (query: string) =>
   invoke<LibrarySample[]>("query_samples", { query });
 export const updateSampleMetadata = (
