@@ -319,7 +319,16 @@ export default function App() {
       </div>
     );
   if (snapshot.managed)
-    return <PatchEditor managed transport={transport} onClose={() => {}} />;
+    return (
+      <PatchEditor
+        managed
+        transport={transport}
+        onClose={() => {}}
+        onSnapshot={(next) =>
+          setSnapshot((previous) => acceptSnapshot(previous, next))
+        }
+      />
+    );
   const { session, catalog } = snapshot;
   const banks = [...new Set(catalog.kits.map((k) => k.bank))];
   const filtered = catalog.kits.filter(

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
 mod legacy_migration;
+mod library_snapshots;
 mod managed;
 mod patches;
 mod sample_edits;
@@ -935,6 +936,9 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            library_snapshots::library_recovery_snapshots,
+            library_snapshots::backup_library,
+            library_snapshots::restore_library,
             legacy_migration::migration_status,
             legacy_migration::migrate_legacy,
             sd_import::prepare_sd_import,

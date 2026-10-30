@@ -352,3 +352,12 @@ export interface MigrationStatus {
   errors: string[];
   backup: string | null;
 }
+
+export interface LibrarySnapshotReply {
+  complete: boolean;
+  activated: boolean;
+  location: string | null;
+  recovery: string | null;
+  error: string | null;
+  snapshot: Snapshot | null;
+}

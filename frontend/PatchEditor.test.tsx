@@ -10,6 +10,9 @@ import { PatchEditor } from "./PatchEditor";
 import * as native from "./native";
 import { idleTransport } from "./types";
 vi.mock("./native", () => ({
+  libraryRecoverySnapshots: vi.fn(),
+  chooseFolder: vi.fn(),
+  restoreLibrary: vi.fn(),
   patchAction: vi.fn(),
   closePatch: vi.fn(),
   listSamples: vi.fn(),
@@ -227,4 +230,36 @@ it("keeps migrated users in the managed workspace and shows each Voice's source 
       .getByRole("button", { name: "Select Layer 1: Warm kick" })
       .getAttribute("aria-pressed"),
   ).toBe("true");
+});
+
+it("opens Library restore controls and refreshes Patch state after activation", async () => {
+  vi.mocked(native.libraryRecoverySnapshots).mockResolvedValue([]);
+  const before = view();
+  const restored = view();
+  restored.graph.patches[0].name = "Restored set";
+  vi.mocked(native.patchAction)
+    .mockResolvedValueOnce(before)
+    .mockResolvedValue(restored);
+  vi.mocked(native.chooseFolder).mockResolvedValue("/backup/Library");
+  vi.mocked(native.restoreLibrary).mockResolvedValue({
+    complete: true,
+    activated: true,
+    location: "/backup/Library",
+    recovery: "/recovery/previous",
+    error: null,
+    snapshot: null,
+  });
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  await screen.findByDisplayValue("Live set");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Library backup and restore…" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Restore Library…" }));
+  await screen.findByRole("button", { name: "Replace Library" });
+  fireEvent.click(screen.getByRole("button", { name: "Replace Library" }));
+  await screen.findByText("Library restored.");
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(
+    await screen.findByRole("option", { name: "Restored set" }),
+  ).toBeTruthy();
 });

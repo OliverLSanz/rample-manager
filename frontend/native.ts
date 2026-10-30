@@ -141,3 +141,17 @@ export const migrationStatus = () =>
   invoke<import("./types").MigrationStatus>("migration_status");
 export const migrateLegacy = () =>
   invoke<import("./types").MigrationStatus>("migrate_legacy");
+
+export const chooseLibraryBackup = () =>
+  save({
+    title: "Back up Library: choose a new snapshot folder name",
+    defaultPath: `Rample Library ${new Date().toISOString().slice(0, 10)}`,
+  });
+export const backupLibrary = (destination: string) =>
+  invoke<import("./types").LibrarySnapshotReply>("backup_library", {
+    destination,
+  });
+export const restoreLibrary = (source: string) =>
+  invoke<import("./types").LibrarySnapshotReply>("restore_library", { source });
+export const libraryRecoverySnapshots = () =>
+  invoke<string[]>("library_recovery_snapshots");

@@ -117,7 +117,7 @@ impl AppState {
         l.editor = Some(editor);
         Ok(info)
     }
-    fn preview_editor(
+    pub(super) fn preview_editor(
         &self,
         id: String,
         sequence: u64,

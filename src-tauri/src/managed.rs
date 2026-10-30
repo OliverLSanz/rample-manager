@@ -48,8 +48,8 @@ pub struct ImportReply {
 
 #[derive(Default)]
 pub(super) struct AuditionSession {
-    owner: String,
-    generation: u64,
+    pub(super) owner: String,
+    pub(super) generation: u64,
 }
 
 pub struct ManagedLibrary {
@@ -58,7 +58,10 @@ pub struct ManagedLibrary {
 }
 impl ManagedLibrary {
     pub fn open(support: &Path) -> Result<Self, String> {
-        let root = support.join("Library");
+        let root = crate::library_snapshots::active_root(support)?;
+        Self::open_root(root)
+    }
+    pub(super) fn open_root(root: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(root.join("Originals")).map_err(|e| e.to_string())?;
         fs::create_dir_all(root.join("Incoming")).map_err(|e| e.to_string())?;
         let db = Connection::open(root.join("library.sqlite3")).map_err(|e| e.to_string())?;

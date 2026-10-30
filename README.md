@@ -126,6 +126,14 @@ migration never silently chooses another Layer. After success, the managed works
 and reversible editor replace the folder conversion controls. Restart uses private
 audio without scanning or watching the source, which can be disconnected.
 
+Use **Library backup and restore…** in the managed workspace to create a complete
+portable snapshot, or replace the Library with a verified snapshot from another
+machine. Restore first creates a recoverable snapshot of the current Library and
+shows its location, including on later failures. **Restore recovery snapshot…**
+returns to that saved state. Complete folder migration first so its musical state
+is included. See [portable Library snapshots](docs/library-snapshots.md) for the
+format, validation and interruption/recovery behavior.
+
 The following controls describe compatibility with folder sessions before migration.
 
 Choose **Open folder…** and select the root containing your kits:
@@ -266,7 +274,8 @@ configuration import/write. See the [capture guide in Spanish](docs/rample-sd-ca
 ## Session preservation
 
 The private Library lives in `Library/` under the same app support folder as the
-legacy session. `library.sqlite3` stores stable Sample/Original identities, names,
+legacy session. After restore, its active store is selected from protected
+`Library/Generations/` by immutable activation records. `library.sqlite3` stores stable Sample/Original identities, names,
 audio metadata and SHA-256 recognition; Original locators are relative to this
 store, with no dependency on external source paths. SQLite is bundled on both
 platforms. Complete verified Originals are published before their database

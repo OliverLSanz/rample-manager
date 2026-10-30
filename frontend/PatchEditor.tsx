@@ -1,3 +1,4 @@
+import { LibrarySnapshots } from "./LibrarySnapshots";
 import { SdImport } from "./SdImport";
 import { useEffect, useRef, useState } from "react";
 import { SampleEditor } from "./SampleEditor";
@@ -18,11 +19,15 @@ export function PatchEditor({
   transport,
   onClose,
   managed = false,
+  onSnapshot,
 }: {
   transport: Transport;
   onClose: () => void;
   managed?: boolean;
+  onSnapshot?: (snapshot: import("./types").Snapshot) => void;
 }) {
+  const [snapshots, setSnapshots] = useState(false);
+  const requestVersion = useRef(0);
   const [sdImport, setSdImport] = useState(false);
   const [library, setLibrary] = useState(false);
   const [view, setView] = useState<PatchSnapshot | null>(null);
@@ -55,16 +60,19 @@ export function PatchEditor({
   }, [kit?.id, kit?.bank, kit?.number]);
   useEffect(() => {
     alive.current = true;
+    const version = requestVersion.current;
     void native
       .patchAction({ type: "open" })
       .then((result) => {
-        if (alive.current) setView(result);
+        if (alive.current && version === requestVersion.current)
+          setView(result);
       })
       .catch((e) => {
-        if (alive.current) setError(String(e));
+        if (alive.current && version === requestVersion.current)
+          setError(String(e));
       })
       .finally(() => {
-        if (alive.current) setBusy(false);
+        if (alive.current && version === requestVersion.current) setBusy(false);
       });
     return () => {
       alive.current = false;
@@ -73,12 +81,14 @@ export function PatchEditor({
   async function act(action: PatchAction): Promise<boolean> {
     setBusy(true);
     setError(null);
+    const version = requestVersion.current;
     let success = false;
     const task = queue.current
       .catch(() => {})
       .then(async () => {
+        if (version !== requestVersion.current) return;
         const result = await native.patchAction(action);
-        if (alive.current) {
+        if (alive.current && version === requestVersion.current) {
           setView(result);
           success = true;
         }
@@ -87,9 +97,10 @@ export function PatchEditor({
     try {
       await task;
     } catch (e) {
-      if (alive.current) setError(String(e));
+      if (alive.current && version === requestVersion.current)
+        setError(String(e));
     } finally {
-      if (alive.current) setBusy(false);
+      if (alive.current && version === requestVersion.current) setBusy(false);
     }
     return success;
   }
@@ -129,6 +140,24 @@ export function PatchEditor({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   });
+  if (snapshots)
+    return (
+      <LibrarySnapshots
+        managed={managed}
+        onClose={() => setSnapshots(false)}
+        onRestored={(result) => {
+          requestVersion.current++;
+          setView(null);
+          setEditor(null);
+          setPicker(null);
+          setLibrary(false);
+          setSdImport(false);
+          setVelocity(null);
+          if (result.snapshot) onSnapshot?.(result.snapshot);
+          void act({ type: "open" });
+        }}
+      />
+    );
   if (editor)
     return (
       <SampleEditor
@@ -222,6 +251,15 @@ export function PatchEditor({
             </button>
             <button disabled={busy} onClick={() => setLibrary(true)}>
               Library samples…
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => {
+                requestVersion.current++;
+                setSnapshots(true);
+              }}
+            >
+              Library backup and restore…
             </button>
             {!managed && (
               <button disabled={busy} onClick={() => void close()}>
