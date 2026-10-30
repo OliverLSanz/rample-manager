@@ -36,6 +36,7 @@ it("imports files, reports failures, lists private Samples and auditions by iden
     rate: 44100,
     bits: 16,
     channels: 1,
+    format: "WAV",
     readable: true,
     error: null,
   };
@@ -70,7 +71,7 @@ it("imports files, reports failures, lists private Samples and auditions by iden
   vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
   render(<LibrarySamples onClose={() => {}} />);
   await screen.findByText("No Samples yet.");
-  fireEvent.click(screen.getByRole("button", { name: "Import WAV files…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Import audio files…" }));
   const samples = await screen.findByRole("list", { name: "Library Samples" });
   expect(within(samples).getByText("My kick")).toBeTruthy();
   expect(screen.getByRole("status").textContent).toContain(
@@ -78,7 +79,7 @@ it("imports files, reports failures, lists private Samples and auditions by iden
   );
   expect(screen.getByText(/Broken.wav: Truncated WAV chunk/)).toBeTruthy();
   fireEvent.click(
-    within(samples).getByRole("button", { name: "Audition My kick" }),
+    within(samples).getByRole("button", { name: "Audition Original My kick" }),
   );
   await waitFor(() =>
     expect(native.auditionSample).toHaveBeenCalledWith(
@@ -129,6 +130,7 @@ it("closing an old panel cannot stop audition in a newly opened Library", async 
     rate: 44100,
     bits: 16,
     channels: 1,
+    format: "WAV",
     readable: true,
     error: null,
   };
@@ -147,7 +149,9 @@ it("closing an old panel cannot stop audition in a newly opened Library", async 
     .mockResolvedValue();
   vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
   const old = render(<LibrarySamples onClose={() => {}} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Audition Kick" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Audition Original Kick" }),
+  );
   await waitFor(() =>
     expect(native.auditionSample).toHaveBeenCalledWith(
       "sample-kick",
@@ -157,7 +161,9 @@ it("closing an old panel cannot stop audition in a newly opened Library", async 
   old.unmount();
   expect(native.stopSampleAudition).toHaveBeenCalledWith("owner-a", true);
   render(<LibrarySamples onClose={() => {}} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Audition Kick" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Audition Original Kick" }),
+  );
   await waitFor(() =>
     expect(native.auditionSample).toHaveBeenCalledWith(
       "sample-kick",
@@ -180,6 +186,7 @@ it("edits the selected Sample and searches tags while duplicate names audition b
     rate: 44100,
     bits: 16,
     channels: 1,
+    format: "WAV",
     readable: true,
     error: null,
   };
@@ -206,7 +213,9 @@ it("edits the selected Sample and searches tags while duplicate names audition b
     await screen.findByRole("list", { name: "Library Samples" }),
   ).getAllByRole("listitem");
   fireEvent.click(
-    within(rows[1]).getByRole("button", { name: "Audition Same name" }),
+    within(rows[1]).getByRole("button", {
+      name: "Audition Original Same name",
+    }),
   );
   await waitFor(() =>
     expect(native.auditionSample).toHaveBeenCalledWith("second", "owner"),
@@ -247,11 +256,111 @@ it("edits the selected Sample and searches tags while duplicate names audition b
     ).toBeNull(),
   );
   vi.mocked(native.auditionSample).mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "Audition Warm kick" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Audition Original Warm kick" }),
+  );
   await waitFor(() =>
     expect(native.auditionSample).toHaveBeenCalledWith("second", "owner"),
   );
   expect(native.querySamples).toHaveBeenCalledWith("低音");
   fireEvent.click(screen.getByRole("button", { name: "Use Sample" }));
   expect(choose).toHaveBeenCalledWith("second");
+});
+
+it("shows source format and stereo channels with separate Original and mono Rample audition", async () => {
+  vi.mocked(native.openSampleAudition).mockResolvedValue("format-owner");
+  vi.mocked(native.listSamples).mockResolvedValue([
+    {
+      id: "stereo",
+      originalId: "original",
+      name: "Stereo room",
+      tags: [],
+      sha256: "hash",
+      duration: 1.2,
+      rate: 48000,
+      channels: 2,
+      bits: 24,
+      format: "FLAC",
+      readable: true,
+      error: null,
+    },
+  ]);
+  vi.mocked(native.auditionSample).mockResolvedValue();
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  render(<LibrarySamples onClose={() => {}} />);
+  expect(
+    await screen.findByText(/FLAC.*48000 Hz.*24-bit.*stereo/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/Rample audio averages channels to mono/),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Audition Original Stereo room",
+    }),
+  );
+  await waitFor(() =>
+    expect(native.auditionSample).toHaveBeenCalledWith(
+      "stereo",
+      "format-owner",
+    ),
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Audition Rample Stereo room",
+    }),
+  );
+  await waitFor(() =>
+    expect(native.auditionSample).toHaveBeenCalledWith(
+      "stereo",
+      "format-owner",
+      true,
+    ),
+  );
+});
+
+it("stops while audio is preparing and ignores its later completion", async () => {
+  vi.mocked(native.openSampleAudition).mockResolvedValue("preparing-owner");
+  vi.mocked(native.listSamples).mockResolvedValue([
+    {
+      id: "long",
+      originalId: "original",
+      name: "Long stereo",
+      tags: [],
+      sha256: "hash",
+      duration: 600,
+      rate: 48000,
+      channels: 2,
+      bits: 24,
+      format: "FLAC",
+      readable: true,
+      error: null,
+    },
+  ]);
+  let finish!: () => void;
+  vi.mocked(native.auditionSample).mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  render(<LibrarySamples onClose={() => {}} />);
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Audition Rample Long stereo",
+    }),
+  );
+  await waitFor(() => expect(native.auditionSample).toHaveBeenCalled());
+  const stop = screen.getByRole("button", {
+    name: "Stop audition",
+  }) as HTMLButtonElement;
+  expect(stop.disabled).toBe(false);
+  fireEvent.click(stop);
+  await waitFor(() =>
+    expect(native.stopSampleAudition).toHaveBeenCalledWith("preparing-owner"),
+  );
+  finish();
+  await Promise.resolve();
+  await waitFor(() => expect(stop.disabled).toBe(true));
 });

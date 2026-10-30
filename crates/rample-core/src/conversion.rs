@@ -50,6 +50,8 @@ fn open(path: &Path) -> Result<Box<dyn FormatReader>, String> {
 }
 #[derive(Default)]
 pub struct AudioInfo {
+    pub format: String,
+    pub frames: u64,
     pub rate: u32,
     pub channels: u16,
     pub bits: u16,
@@ -73,6 +75,8 @@ pub fn inspect(path: &Path) -> Result<AudioInfo, String> {
     }
     let rate = p.sample_rate.unwrap_or(0);
     Ok(AudioInfo {
+        format: format.format_info().short_name.to_ascii_uppercase(),
+        frames: track.num_frames.unwrap_or(0),
         rate,
         channels: p.channels.as_ref().map_or(0, |c| c.count() as u16),
         bits: p.bits_per_sample.unwrap_or(0) as u16,
@@ -409,6 +413,12 @@ impl Resampler {
         Ok(())
     }
 }
+/// Render a separate Rample derivative using the established conversion policy.
+/// The caller owns a distinct staging file and validates/publishes it atomically.
+pub fn prepare_rample(source: &Path, target: &mut File) -> Result<(), String> {
+    transcode(source, target)
+}
+
 fn transcode(source: &Path, target: &mut File) -> Result<(), String> {
     let mut format = open(source)?;
     let track = format
@@ -483,4 +493,102 @@ fn transcode(source: &Path, target: &mut File) -> Result<(), String> {
         }
     }
     output.finish()
+}
+
+/// Decode a complete Original to a separate, channel-preserving playback artifact.
+/// No resampling, mono mixing, truncation, padding or PCM16 quantization is applied.
+/// Decoding is packet bounded; the artifact is disposable and is never a master.
+pub fn decode_original(source: &Path, target: &mut File) -> Result<AudioInfo, String> {
+    let mut format = open(source)?;
+    let container = format.format_info().short_name.to_ascii_uppercase();
+    let track = format
+        .default_track(TrackType::Audio)
+        .ok_or("No audio track")?;
+    let track_id = track.id;
+    let expected_frames = track.num_frames;
+    let params = track
+        .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .ok_or("Missing audio format")?;
+    let bits = params.bits_per_sample.unwrap_or(0) as u16;
+    let mut decoder = symphonia::default::get_codecs()
+        .make_audio_decoder(params, &AudioDecoderOptions::default().verify(true))
+        .map_err(|e| e.to_string())?;
+    let mut output = BufWriter::new(target);
+    output.write_all(&[0; 44]).map_err(|e| e.to_string())?;
+    let mut spec = None;
+    let mut frames = 0u64;
+    while let Some(packet) = format
+        .next_packet()
+        .map_err(|e| format!("Could not decode the Original: {e}"))?
+    {
+        if packet.track_id != track_id {
+            continue;
+        }
+        let audio = decoder
+            .decode(&packet)
+            .map_err(|e| format!("Could not decode the Original: {e}"))?;
+        let current = audio.spec().clone();
+        if spec.as_ref().is_some_and(|old| old != &current) {
+            return Err("Audio format changes inside the file.".into());
+        }
+        let channels = current.channels().count();
+        if current.rate() == 0 || current.rate() > 384000 || !(1..=2).contains(&channels) {
+            return Err(
+                "Original audition supports mono or stereo audio at up to 384000 Hz.".into(),
+            );
+        }
+        spec = Some(current);
+        let mut buffer = vec![0f64; audio.samples_interleaved()];
+        audio.copy_to_slice_interleaved(&mut buffer);
+        frames += (buffer.len() / channels) as u64;
+        if frames > (u32::MAX as u64 - 36) / (channels as u64 * 8) {
+            return Err(
+                "Decoded Original exceeds the standard WAV playback artifact size limit.".into(),
+            );
+        }
+        for value in buffer {
+            let value = if value.is_finite() { value } else { 0. };
+            output
+                .write_all(&value.to_le_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    if frames == 0 || expected_frames.is_some_and(|n| frames < n) {
+        return Err("The audio is empty or incomplete; the Original is preserved.".into());
+    }
+    if decoder.finalize().verify_ok == Some(false) {
+        return Err("The audio checksum failed; the Original is preserved.".into());
+    }
+    let spec = spec.ok_or("No decoded audio")?;
+    let channels = spec.channels().count() as u16;
+    let rate = spec.rate();
+    let bytes = (frames * u64::from(channels) * 8) as u32;
+    output.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    for data in [
+        b"RIFF".to_vec(),
+        (bytes + 36).to_le_bytes().to_vec(),
+        b"WAVEfmt ".to_vec(),
+        16u32.to_le_bytes().to_vec(),
+        3u16.to_le_bytes().to_vec(),
+        channels.to_le_bytes().to_vec(),
+        rate.to_le_bytes().to_vec(),
+        (rate * u32::from(channels) * 8).to_le_bytes().to_vec(),
+        (channels * 8).to_le_bytes().to_vec(),
+        64u16.to_le_bytes().to_vec(),
+        b"data".to_vec(),
+        bytes.to_le_bytes().to_vec(),
+    ] {
+        output.write_all(&data).map_err(|e| e.to_string())?;
+    }
+    output.flush().map_err(|e| e.to_string())?;
+    Ok(AudioInfo {
+        format: container,
+        frames,
+        rate,
+        channels,
+        bits,
+        duration: frames as f64 / f64::from(rate),
+    })
 }

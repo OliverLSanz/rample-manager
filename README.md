@@ -21,14 +21,17 @@ installation while keeping preferences and sample libraries.
 
 ## Use
 
-Open **Library samples…** to import loose mono PCM WAV files or a folder of WAVs
+Open **Library samples…** to import mono or stereo WAV, AIFF, FLAC and MP3 files
 into the app's private Library. Folder import includes nested folders and does
 not require Rample kit names or voice prefixes. Each Sample gets a stable identity
 and an initial name from its source filename. Identical file bytes are recognized
 across filenames, locations and restarts, retaining the existing Sample name.
 The results show each imported, recognized or failed file; an incomplete import
-is reported explicitly. **Audition** plays the unchanged Original independently
-of the kit mixer and sample editor, and **Stop audition** stops it.
+is reported explicitly. **Original** auditions the unchanged source channels
+independently of the kit mixer and sample editor. **Rample mono** auditions a
+separate target preparation: channel-average mono PCM16 WAV at 44.1 kHz, with
+band-limited resampling and dither where needed. Only audio shorter than 50 ms
+is padded. **Stop audition** stops either audition.
 
 Select a Sample in the Library to edit its descriptive name and tags (one tag per
 line). Tags can contain spaces, punctuation and Unicode text. Search matches a
@@ -38,8 +41,13 @@ metadata, including after restarting the app. Samples with the same name remain
 separate entries; selecting or auditioning a row always uses its Sample ID.
 
 Completed imports preserve all Original bytes privately and work after removing
-the source. This first managed path supports nonempty mono integer PCM WAVs;
-other formats are reported as unsupported. It coexists with the folder workflow
+the source. WAV playback reads its Original directly. Other supported formats
+use a disposable source-rate, channel-preserving float64 WAV playback artifact,
+without making that artifact or the mono Rample preparation the Library master.
+Decode and preparation use the bundled Rust codecs, work in bounded chunks off
+the audio callback, and need no FFmpeg installation. Playback artifacts currently
+support mono/stereo audio up to 384 kHz and standard RIFF size limits; files that
+cannot be completely decoded are reported individually. This coexists with the folder workflow
 below; adding managed Samples to Kits and reversible managed editing follow in
 later work. Legacy conversion and **Save to sample** cannot modify managed
 Originals, and managed storage cannot be opened as a legacy folder.
@@ -190,6 +198,10 @@ references are committed. Interrupted temporary copies are discarded on restart;
 a complete file interrupted before its database commit stays unreferenced and
 is never presented as a completed import. Missing/damaged assets are reported,
 and audition checks their fingerprint rather than substituting another file.
+`Derived/` holds regenerable Rample preparations and decoded Original playback
+files. Removing these cache files does not remove Samples or Originals; the next
+preparation rebuilds them from the managed Original. The cache version and target
+are part of its key; it is never used for Import identity.
 
 The legacy session remains separate:
 

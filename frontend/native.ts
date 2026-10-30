@@ -24,20 +24,37 @@ export const updateSampleMetadata = (
 export const importSamples = (paths: string[]) =>
   invoke<LibraryImportReply>("import_samples", { paths });
 export const openSampleAudition = () => invoke<string>("open_sample_audition");
-export const auditionSample = (id: string, session: string) =>
-  invoke<void>("audition_sample", { id, session });
+export const auditionSample = (id: string, session: string, rample = false) =>
+  invoke<void>("audition_sample", { id, session, rample });
 export const stopSampleAudition = (session: string, closing = false) =>
   invoke<boolean>("stop_sample_audition", { session, closing });
 export async function chooseSampleSources(folder: boolean) {
   const result = await open({
-    title: folder
-      ? "Import a folder of mono WAV Samples"
-      : "Import mono WAV Samples",
+    title: folder ? "Import a folder of audio Samples" : "Import audio Samples",
     directory: folder,
     multiple: !folder,
     ...(folder
       ? {}
-      : { filters: [{ name: "WAV audio", extensions: ["wav"] }] }),
+      : {
+          filters: [
+            {
+              name: "Audio",
+              extensions: [
+                "wav",
+                "wave",
+                "aif",
+                "aiff",
+                "aifc",
+                "flac",
+                "mp3",
+                "ogg",
+                "oga",
+                "m4a",
+                "aac",
+              ],
+            },
+          ],
+        }),
   });
   return result === null ? [] : typeof result === "string" ? [result] : result;
 }
