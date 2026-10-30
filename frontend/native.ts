@@ -98,3 +98,7 @@ export const closeEditor = (id: string) => invoke<void>("close_editor", { id });
 export const auditionEditor = (id: string) =>
   invoke<void>("audition_editor", { id });
 export const showEditBackups = () => invoke<void>("show_edit_backups");
+
+export const patchAction = (action: import("./types").PatchAction) =>
+  invoke<import("./types").PatchSnapshot>("patch_action", { action });
+export const closePatch = () => invoke<void>("close_patch");

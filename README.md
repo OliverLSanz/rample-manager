@@ -48,9 +48,28 @@ Decode and preparation use the bundled Rust codecs, work in bounded chunks off
 the audio callback, and need no FFmpeg installation. Playback artifacts currently
 support mono/stereo audio up to 384 kHz and standard RIFF size limits; files that
 cannot be completely decoded are reported individually. This coexists with the folder workflow
-below; adding managed Samples to Kits and reversible managed editing follow in
-later work. Legacy conversion and **Save to sample** cannot modify managed
+below; reversible managed Sample editing follows in later work. Legacy conversion and **Save to sample** cannot modify managed
 Originals, and managed storage cannot be opened as a legacy folder.
+
+Open **Patches…** to create multiple named Patches that share Library Samples.
+Create Kits at addresses A0–Z99, select a Kit, or move its address without copying
+any audio. Each Kit has four Voice columns. **Add Sample…** opens name/tag search
+and audition; **Repeat** intentionally adds another occurrence of a Sample.
+Select a Layer, reorder it with the arrows or remove just that occurrence.
+Selection follows the occurrence when its position changes, even for duplicates.
+All five Layer modes use this saved order; new Voices default to Single sample
+(MANUAL). Kit preview uses the Library's mono Rample preparation.
+
+The Patch workspace reuses the four-channel, 16-step sequencer, tempo, velocities,
+volume, mute and solo controls. Modes and selected Layers are remembered per Kit;
+patterns, mixer and tempo persist within each Patch when changing Kits. Musical
+controls reuse prepared audio, so changing a step or stopping playback does not
+reread/decode long Originals. **Refresh preview** explicitly revalidates assets.
+Incomplete drafts remain editable: missing Voice 1 and more than 12 Layers are
+reported visibly, retaining every Layer. Patches save locally in the private
+Library database, independently of the folder session. **Back to folders** restores
+that workflow. Native settings and complete Build Patch remain pending verified
+device evidence; no `.rpl` files are read or written by these controls.
 
 Choose **Open folder…** and select the root containing your kits:
 

@@ -260,3 +260,44 @@ export interface EditorSaveReply {
     clippedFrames: number;
   };
 }
+
+export interface PatchLayer {
+  id: string;
+  sampleId: string;
+}
+export interface PatchVoice {
+  layers: PatchLayer[];
+  selectedLayer: string;
+  mode: LayerMode;
+}
+export interface PatchKit {
+  id: string;
+  bank: string;
+  number: number;
+  voices: PatchVoice[];
+}
+export interface Patch {
+  id: string;
+  name: string;
+  selectedKit: string;
+  kits: PatchKit[];
+  bpm: number;
+  voices: Voice[];
+}
+export interface PatchSnapshot {
+  graph: { selectedPatch: string; patches: Patch[] };
+  session: Session | null;
+  samples: LibrarySample[];
+  validation: string[];
+  playing: boolean;
+}
+export type PatchAction =
+  | { type: "open" }
+  | { type: "createPatch" | "renamePatch"; name: string }
+  | { type: "selectPatch"; patch: string }
+  | { type: "createKit" | "addressKit"; bank: string; number: number }
+  | { type: "selectKit"; kit: string }
+  | { type: "addLayer"; channel: number; sample: string }
+  | { type: "removeLayer" | "selectLayer"; channel: number; layer: string }
+  | { type: "moveLayer"; channel: number; layer: string; to: number }
+  | { type: "musical"; action: Action };

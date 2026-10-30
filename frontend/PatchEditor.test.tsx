@@ -1,0 +1,167 @@
+import { afterEach, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { PatchEditor } from "./PatchEditor";
+import * as native from "./native";
+import { idleTransport } from "./types";
+vi.mock("./native", () => ({
+  patchAction: vi.fn(),
+  closePatch: vi.fn(),
+  listSamples: vi.fn(),
+  querySamples: vi.fn(),
+  openSampleAudition: vi.fn(),
+  stopSampleAudition: vi.fn(),
+}));
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+const sample = {
+  id: "sample",
+  originalId: "original",
+  name: "Warm kick",
+  tags: ["round"],
+  sha256: "hash",
+  duration: 0.1,
+  rate: 44100,
+  bits: 16,
+  channels: 1,
+  format: "WAV",
+  readable: true,
+  error: null,
+};
+function view() {
+  const kitVoices = Array.from({ length: 4 }, () => ({
+    layers: [] as { id: string; sampleId: string }[],
+    selectedLayer: "",
+    mode: "manual" as const,
+  }));
+  kitVoices[0] = {
+    layers: [
+      { id: "occ-first", sampleId: "sample" },
+      { id: "occ-second", sampleId: "sample" },
+    ],
+    selectedLayer: "occ-second",
+    mode: "manual",
+  };
+  const voices = kitVoices.map((v) => ({
+    kitID: "kit",
+    samplePath: v.selectedLayer,
+    steps: Array(16).fill(false) as boolean[],
+    volume: 0.8,
+    muted: false,
+    solo: false,
+    layerMode: v.mode,
+    velocities: Array(16).fill(100) as number[],
+  }));
+  return {
+    graph: {
+      selectedPatch: "patch",
+      patches: [
+        {
+          id: "patch",
+          name: "Live set",
+          selectedKit: "kit",
+          kits: [{ id: "kit", bank: "A", number: 0, voices: kitVoices }],
+          bpm: 120,
+          voices,
+        },
+      ],
+    },
+    session: {
+      schemaVersion: 2,
+      rootPath: "",
+      selectedKit: "kit",
+      bpm: 120,
+      voices,
+      kitConfigurations: { libraries: {} },
+    },
+    samples: [sample],
+    validation: ["Live set · B12: Voice 1 needs a Sample."],
+    playing: false,
+  };
+}
+it("shows distinct repeated Layers, selected identity, modes, validation and ordered native commands", async () => {
+  const initial = view();
+  const reordered = structuredClone(initial);
+  reordered.graph.patches[0].kits[0].voices[0].layers.reverse();
+  vi.mocked(native.patchAction)
+    .mockResolvedValueOnce(initial)
+    .mockResolvedValueOnce(reordered)
+    .mockResolvedValue(reordered);
+  render(<PatchEditor transport={idleTransport} onClose={() => {}} />);
+  const voice = await screen.findByRole("region", { name: "Patch Voice 1" });
+  expect(
+    within(voice)
+      .getByRole("button", { name: "Select Layer 2: Warm kick" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  fireEvent.click(
+    within(voice).getByRole("button", { name: "Move Layer 2 up" }),
+  );
+  await screen.findByRole("button", {
+    name: "Select Layer 1: Warm kick",
+    pressed: true,
+  });
+  expect(native.patchAction).toHaveBeenLastCalledWith({
+    type: "moveLayer",
+    channel: 0,
+    layer: "occ-second",
+    to: 0,
+  });
+  expect(
+    screen.getByText("Live set · B12: Voice 1 needs a Sample."),
+  ).toBeTruthy();
+  expect(
+    within(voice).getByRole("combobox", { name: "Layer mode for Voice 1" })
+      .children.length,
+  ).toBe(5);
+  fireEvent.change(
+    within(voice).getByRole("combobox", { name: "Layer mode for Voice 1" }),
+    { target: { value: "cyclic" } },
+  );
+  await vi.waitFor(() =>
+    expect(native.patchAction).toHaveBeenLastCalledWith({
+      type: "musical",
+      action: { type: "setMode", channel: 0, mode: "cyclic" },
+    }),
+  );
+  expect(
+    screen.getAllByRole("button", { name: /Voice \d, step / }),
+  ).toHaveLength(64);
+});
+it("adds another occurrence from the searchable Library picker and restores the folder workspace on close", async () => {
+  const initial = view();
+  vi.mocked(native.patchAction).mockResolvedValue(initial);
+  vi.mocked(native.openSampleAudition).mockResolvedValue("picker");
+  vi.mocked(native.listSamples).mockResolvedValue([sample]);
+  vi.mocked(native.querySamples).mockResolvedValue([sample]);
+  vi.mocked(native.closePatch).mockResolvedValue(undefined);
+  vi.mocked(native.stopSampleAudition).mockResolvedValue(true);
+  const close = vi.fn();
+  render(<PatchEditor transport={idleTransport} onClose={close} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add Sample to Voice 1" }),
+  );
+  fireEvent.change(await screen.findByRole("searchbox"), {
+    target: { value: "round" },
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Select Warm kick" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use Sample" }));
+  await screen.findByRole("region", { name: "Patch Voice 1" });
+  expect(native.patchAction).toHaveBeenLastCalledWith({
+    type: "addLayer",
+    channel: 0,
+    sample: "sample",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Back to folders" }));
+  await vi.waitFor(() => expect(close).toHaveBeenCalled());
+  expect(native.closePatch).toHaveBeenCalled();
+});
