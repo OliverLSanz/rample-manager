@@ -765,6 +765,51 @@ mod tests {
     }
 
     #[test]
+    fn exports_of_independent_variants_keep_their_sample_identities() {
+        use crate::patches::PatchAction;
+        let (temp, state, _) = crate::tests::fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0].clone();
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Patch".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::CreateKit {
+                bank: "A".into(),
+                number: 0,
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::AddLayer {
+                channel: 0,
+                sample: sample.id.clone(),
+            })
+            .unwrap();
+        let editor = state.open_managed_editor(0).unwrap();
+        let saved = state
+            .save_managed_editor(editor.id, editor.settings, Some("Variant".into()))
+            .unwrap();
+        let variant = saved.patch.graph.current().unwrap().kit().unwrap().voices[0].layers[0]
+            .sample_id
+            .clone();
+        state.close_editor(saved.editor.id).unwrap();
+        assert_ne!(variant, sample.id);
+        let a = temp.path().join("a.wav");
+        let b = temp.path().join("b.wav");
+        state.export_sample(sample.id.clone(), a.clone()).unwrap();
+        state.export_sample(variant.clone(), b.clone()).unwrap();
+        let a_pcm = PreparedSample::load(&a, "a").unwrap();
+        let b_pcm = PreparedSample::load(&b, "b").unwrap();
+        assert_eq!(a_pcm.head, b_pcm.head);
+        let reply = state.import_samples(vec![a, b]).unwrap();
+        assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
+        assert_eq!(reply.results[1].sample.as_ref().unwrap().id, variant);
+    }
+
+    #[test]
     fn reimporting_original_after_export_and_edit_preserves_current_sample() {
         use crate::patches::PatchAction;
         let (temp, state, _) = crate::tests::fixture();
