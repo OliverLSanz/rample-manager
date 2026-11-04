@@ -5,6 +5,7 @@ use crate::{
     patches::{Layer, Patch, PatchKit, PatchSnapshot, PatchVoice},
     *,
 };
+use rample_core::{model::LayerMode, native};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -29,6 +30,48 @@ pub struct ImportedSd {
     /// Usable Samples whose source does not specify a valid Kit and Voice.
     /// Keep the path as evidence; never assign a guessed Voice.
     pub unassigned: Vec<SdFile>,
+    /// Interpretation of verified native fields. Absent for Imports made
+    /// before native reading existed. Not part of the recognition fingerprint:
+    /// the preserved native bytes already are.
+    #[serde(default)]
+    pub native: Option<NativeReading>,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeReading {
+    pub verified_firmware: String,
+    pub global_layer_mode: Option<LayerMode>,
+    /// Problems with global settings, shown instead of a silent default.
+    pub issues: Vec<String>,
+    pub kits: Vec<NativeKitReading>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeKitReading {
+    pub bank: String,
+    pub number: u8,
+    /// `store`: the Kit's own STOREd file; `globalDefault`: never STOREd, so
+    /// the verified global LAYER default applies; `appDefault`: nothing
+    /// verified is available; `unreadable`: its file has an unsupported shape.
+    pub source: String,
+    pub voices: Vec<NativeVoiceReading>,
+    pub issues: Vec<String>,
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeVoiceReading {
+    pub mode_restored: bool,
+    pub selection_restored: bool,
+}
+impl NativeReading {
+    pub fn complete(&self) -> bool {
+        self.issues.is_empty() && self.kits.iter().all(|kit| kit.issues.is_empty())
+    }
+    fn kit(&self, bank: &str, number: u8) -> Option<&NativeKitReading> {
+        self.kits
+            .iter()
+            .find(|kit| kit.bank == bank && kit.number == number)
+    }
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +145,116 @@ fn draft(name: String) -> Patch {
         voice_kits: vec![],
     }
 }
+/// Sorted device WAV files per (Kit ID, Voice), with the Layer each became
+/// (`None` when its audio could not be imported).
+type VoiceFiles = HashMap<(String, usize), Vec<(String, Option<String>)>>;
+
+/// Restores verified native Layer modes and selections into the draft Kits.
+/// Unverified or unreadable settings keep app defaults and say so.
+fn read_native(
+    patch: &mut Patch,
+    kit_paths: &HashMap<String, String>,
+    files: &HashMap<String, Vec<u8>>,
+    voice_files: &VoiceFiles,
+) -> NativeReading {
+    let mut reading = NativeReading {
+        verified_firmware: native::VERIFIED_FIRMWARE.into(),
+        ..NativeReading::default()
+    };
+    let has_native = files.keys().any(|path| path.ends_with(".rpl"));
+    let global = match files.get("_save/settings.rpl") {
+        None if has_native => {
+            reading.issues.push(
+                "_save/settings.rpl is missing, so the global LAYER default is unknown.".into(),
+            );
+            None
+        }
+        None => None,
+        Some(bytes) => match native::read_settings(bytes) {
+            Ok(settings) => {
+                if settings.layer_mode.is_none() {
+                    reading.issues.push(format!("_save/settings.rpl: Global LAYER default value {} is not verified on firmware {} yet. Kits never saved with STORE show MANUAL.", settings.raw_layer_mode, native::VERIFIED_FIRMWARE));
+                }
+                settings.layer_mode
+            }
+            Err(error) => {
+                reading.issues.push(format!("_save/settings.rpl could not be interpreted ({error}). The file is preserved; Kits never saved with STORE show MANUAL."));
+                None
+            }
+        },
+    };
+    reading.global_layer_mode = global;
+    let mut folders: Vec<_> = kit_paths.iter().collect();
+    folders.sort_by(|a, b| a.0.cmp(b.0));
+    for (folder, kit_id) in folders {
+        let kit = patch.kits.iter_mut().find(|k| &k.id == kit_id).unwrap();
+        let mut entry = NativeKitReading {
+            bank: kit.bank.clone(),
+            number: kit.number,
+            source: "appDefault".into(),
+            voices: vec![NativeVoiceReading::default(); 4],
+            issues: vec![],
+        };
+        let file = format!("_save/{folder}.rpl");
+        match files.get(&file).map(|bytes| native::read_kit(bytes)) {
+            Some(Ok(settings)) => {
+                entry.source = "store".into();
+                for (channel, stored) in settings.voices.iter().enumerate() {
+                    let voice = &mut kit.voices[channel];
+                    let restored = &mut entry.voices[channel];
+                    match stored.mode {
+                        Some(mode) => {
+                            voice.mode = mode;
+                            restored.mode_restored = true;
+                        }
+                        None => entry.issues.push(format!("{folder} Voice {}: Stored Layer mode value {} is not a verified mode. The app shows MANUAL.", channel + 1, stored.raw_mode)),
+                    }
+                    let layers = voice_files
+                        .get(&(kit_id.clone(), channel))
+                        .map(Vec::as_slice)
+                        .unwrap_or_default();
+                    if layers.is_empty() {
+                        continue;
+                    }
+                    let position = stored.selected_layer;
+                    match usize::try_from(position).ok().and_then(|i| layers.get(i)) {
+                        Some((_, Some(layer))) => {
+                            voice.selected_layer = layer.clone();
+                            restored.selection_restored = true;
+                        }
+                        Some((path, None)) => entry.issues.push(format!("{folder} Voice {}: Stored selected Layer {} ({path}) could not be imported. The first Layer is selected.", channel + 1, position + 1)),
+                        None => entry.issues.push(format!("{folder} Voice {}: Stored selected Layer {} does not exist among its {} Layer file(s). The first Layer is selected.", channel + 1, position.saturating_add(1), layers.len())),
+                    }
+                }
+            }
+            Some(Err(error)) => {
+                entry.source = "unreadable".into();
+                entry.issues.push(format!("{file} could not be interpreted ({error}). The file is preserved; app defaults are shown."));
+            }
+            None => match global {
+                Some(mode) => {
+                    // Never saved with STORE: the device applies the global
+                    // LAYER default to every Voice when loading the Kit.
+                    entry.source = "globalDefault".into();
+                    for (voice, restored) in kit.voices.iter_mut().zip(&mut entry.voices) {
+                        voice.mode = mode;
+                        restored.mode_restored = true;
+                    }
+                }
+                None if has_native => entry.issues.push(format!("{folder}: Never saved with STORE and the global LAYER default is not verified. The app shows MANUAL.")),
+                None => {}
+            },
+        }
+        reading.kits.push(entry);
+    }
+    if !has_native && !kit_paths.is_empty() {
+        reading.issues.push(
+            "No native settings were found in _save. The app shows MANUAL for every Voice.".into(),
+        );
+    }
+    reading
+}
+
 impl ManagedLibrary {
     fn recognize_sd(&self, fingerprint: &str) -> Result<Option<String>, String> {
         self.db.query_row("SELECT patch_id FROM sd_intakes WHERE fingerprint=?1 AND patch_id IS NOT NULL ORDER BY rowid DESC LIMIT 1", [fingerprint], |row| row.get(0))
@@ -158,8 +311,10 @@ impl ManagedLibrary {
             files: vec![],
             issues: vec![],
             unassigned: vec![],
+            native: None,
         };
         let mut audio_paths = vec![];
+        let mut native_files = HashMap::new();
         let mut kit_paths = HashMap::new();
         for entry in walkdir::WalkDir::new(source)
             .min_depth(1)
@@ -259,6 +414,7 @@ impl ManagedLibrary {
                         state.issues.push(format!("{path}: Native file is too large or cannot be inspected; it was not preserved."));
                         continue;
                     }
+                    let path_key = path.clone();
                     match fs::read(entry.path()) {
                         Ok(bytes) => {
                             let sha256 = hash(&bytes);
@@ -272,7 +428,8 @@ impl ManagedLibrary {
                                 kind: "native".into(),
                                 sample_id: None,
                             });
-                            self.db.execute("INSERT OR IGNORE INTO sd_native_blobs(sha256,content) VALUES (?1,?2)", params![sha256, bytes]).map_err(|e| e.to_string())?;
+                            self.db.execute("INSERT OR IGNORE INTO sd_native_blobs(sha256,content) VALUES (?1,?2)", params![sha256, &bytes]).map_err(|e| e.to_string())?;
+                            native_files.insert(path_key, bytes);
                         }
                         Err(error) => {
                             state.copy_complete = false;
@@ -295,6 +452,7 @@ impl ManagedLibrary {
             progress,
         )?;
         state.copy_complete &= audio.complete;
+        let mut voice_files = VoiceFiles::new();
         for ((path, source), result) in audio_paths.iter().zip(&audio.results) {
             let file = SdFile {
                 path: path.clone(),
@@ -305,21 +463,28 @@ impl ManagedLibrary {
                 kind: "audio".into(),
                 sample_id: result.sample.as_ref().map(|s| s.id.clone()),
             };
+            let parts: Vec<_> = path.split('/').collect();
+            let assignment = (parts.len() == 2)
+                .then(|| {
+                    let kit = kit_paths.get(parts[0])?;
+                    let voice = parts[1].as_bytes().first().copied()?;
+                    (b'1'..=b'4')
+                        .contains(&voice)
+                        .then(|| (kit.clone(), usize::from(voice - b'1')))
+                })
+                .flatten();
+            // The device numbers only WAV files; keep failed ones so a stored
+            // Layer position never silently shifts onto a different file.
+            let device_layer = assignment.clone().filter(|_| {
+                Path::new(path)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+            });
             if let Some(sample_id) = &file.sample_id {
                 if managed::fingerprint(source).ok().as_deref() != Some(&file.sha256) {
                     state.copy_complete = false;
                     state.issues.push(format!("{path}: Source changed during intake. The copied Sample is kept; import again to capture the changed source."));
                 }
-                let parts: Vec<_> = path.split('/').collect();
-                let assignment = (parts.len() == 2)
-                    .then(|| {
-                        let kit = kit_paths.get(parts[0])?;
-                        let voice = parts[1].as_bytes().first().copied()?;
-                        (b'1'..=b'4')
-                            .contains(&voice)
-                            .then(|| (kit.clone(), usize::from(voice - b'1')))
-                    })
-                    .flatten();
                 if let Some((kit, channel)) = assignment {
                     let voice =
                         &mut patch.kits.iter_mut().find(|k| k.id == kit).unwrap().voices[channel];
@@ -329,13 +494,25 @@ impl ManagedLibrary {
                         sample_id: sample_id.clone(),
                     });
                     if voice.selected_layer.is_empty() {
-                        voice.selected_layer = id;
+                        voice.selected_layer = id.clone();
+                    }
+                    if let Some(key) = device_layer {
+                        voice_files
+                            .entry(key)
+                            .or_default()
+                            .push((path.clone(), Some(id)));
                     }
                 } else {
                     state.issues.push(format!("{path}: Invalid Kit folder or Voice prefix. Sample is kept in the Library without a guessed assignment."));
                     state.unassigned.push(file.clone());
                 }
             } else {
+                if let Some(key) = device_layer {
+                    voice_files
+                        .entry(key)
+                        .or_default()
+                        .push((path.clone(), None));
+                }
                 state.issues.push(format!(
                     "{path}: {}",
                     result.error.as_deref().unwrap_or("Audio import failed.")
@@ -353,6 +530,12 @@ impl ManagedLibrary {
             .collect();
         state.fingerprint =
             hash(&serde_json::to_vec(&(content, &state.issues)).map_err(|e| e.to_string())?);
+        state.native = Some(read_native(
+            &mut patch,
+            &kit_paths,
+            &native_files,
+            &voice_files,
+        ));
         if patch.kits.is_empty() {
             state.issues.push("No valid Bank/Kit folders were found. Create a Kit and explicitly assign the imported Samples.".into());
         }
@@ -395,9 +578,13 @@ impl ManagedLibrary {
                     name: p.name.clone(),
                 })
                 .collect(),
+            native_verified: patch
+                .imported_sd
+                .as_ref()
+                .and_then(|sd| sd.native.as_ref())
+                .is_some_and(NativeReading::complete),
             audio,
             draft: patch,
-            native_verified: false,
         })
     }
     fn finish_sd(&self, id: &str, choice: SdImportChoice) -> Result<(), String> {
@@ -441,18 +628,29 @@ impl ManagedLibrary {
                     patch.bpm = old.bpm; patch.voices = old.voices.clone();
                     // Keep musical memory and occurrence identity for unchanged
                     // positions at matching Kit addresses during explicit update.
+                    // Verified native modes/selections come from the SD instead.
+                    let native = patch.imported_sd.as_ref().and_then(|sd| sd.native.clone());
                     for kit in &mut patch.kits {
                         if let Some(previous) = old.kits.iter().find(|k| k.bank == kit.bank && k.number == kit.number) {
+                            let restored = native.as_ref().and_then(|n| n.kit(&kit.bank, kit.number)).map(|k| k.voices.clone()).unwrap_or_default();
                             kit.id = previous.id.clone();
-                            for (voice, previous) in kit.voices.iter_mut().zip(&previous.voices) {
-                                voice.mode = previous.mode;
+                            for (channel, (voice, previous)) in kit.voices.iter_mut().zip(&previous.voices).enumerate() {
+                                let flags = restored.get(channel).cloned().unwrap_or_default();
+                                if !flags.mode_restored {
+                                    voice.mode = previous.mode;
+                                }
+                                let selected = voice.layers.iter().position(|l| l.id == voice.selected_layer);
                                 let mut used = HashSet::new();
                                 for layer in &mut voice.layers {
                                     if let Some(prior) = previous.layers.iter().find(|p| p.sample_id == layer.sample_id && !used.contains(&p.id)) {
                                         layer.id = prior.id.clone(); used.insert(prior.id.clone());
                                     }
                                 }
-                                voice.selected_layer = if voice.layers.iter().any(|l| l.id == previous.selected_layer) { previous.selected_layer.clone() } else {voice.layers.first().map(|l| l.id.clone()).unwrap_or_default()};
+                                voice.selected_layer = match selected.filter(|_| flags.selection_restored) {
+                                    Some(index) => voice.layers[index].id.clone(),
+                                    None if voice.layers.iter().any(|l| l.id == previous.selected_layer) => previous.selected_layer.clone(),
+                                    None => voice.layers.first().map(|l| l.id.clone()).unwrap_or_default(),
+                                };
                             }
                         }
                     }
@@ -863,7 +1061,7 @@ mod tests {
         assert!(patch
             .validation
             .iter()
-            .any(|issue| issue.contains("unverified")));
+            .any(|issue| issue.contains("_save/A0.rpl could not be interpreted")));
         assert_eq!(
             state.sd_native_blob(&review.id, "_save/A0.rpl").unwrap(),
             vec![0, 255, 6, 9]
@@ -885,5 +1083,181 @@ mod tests {
                 .unwrap(),
             b"native"
         );
+    }
+    fn wavs(source: &std::path::Path, kit: &str, names: &[&str]) {
+        std::fs::create_dir_all(source.join(kit)).unwrap();
+        for (i, name) in names.iter().enumerate() {
+            let level = 1000 + 500 * i as i16 + 97 * kit.len() as i16;
+            wav::write_pcm16(&source.join(kit).join(name), &[level; 4410], 44100).unwrap();
+        }
+    }
+    #[test]
+    fn verified_native_modes_and_selected_layers_restore_into_imported_kits() {
+        use rample_core::{model::LayerMode, native::fixtures};
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        wavs(
+            &source,
+            "A0",
+            &[
+                "1_a.wav", "1_b.wav", "1_c.wav", "1_d.wav", "1_e.wav", "2_a.wav", "2_b.wav",
+                "3_a.wav",
+            ],
+        );
+        wavs(&source, "A1", &["1_kick.wav", "2_snare.wav"]);
+        std::fs::create_dir_all(source.join("_save")).unwrap();
+        let kit_file = fixtures::kit([0, 2, 4, 1], [3, 1, 0, 0]);
+        std::fs::write(source.join("_save/A0.rpl"), &kit_file).unwrap();
+        std::fs::write(source.join("_save/settings.rpl"), fixtures::settings(1)).unwrap();
+        std::fs::write(source.join("_save/autosave_A0.rpl"), []).unwrap();
+        let review = state.prepare_sd_import(source.clone()).unwrap();
+        assert!(review.native_verified);
+        let native = review
+            .draft
+            .imported_sd
+            .as_ref()
+            .unwrap()
+            .native
+            .clone()
+            .unwrap();
+        assert_eq!(native.global_layer_mode, Some(LayerMode::Random));
+        let sources: Vec<_> = native.kits.iter().map(|k| k.source.as_str()).collect();
+        assert_eq!(sources, ["store", "globalDefault"]);
+        let saved = state
+            .finish_sd_import(
+                &review.id,
+                super::SdImportChoice::New {
+                    name: "Device".into(),
+                },
+            )
+            .unwrap();
+        let patch = saved.graph.current().unwrap();
+        let (a0, a1) = (&patch.kits[0], &patch.kits[1]);
+        let modes: Vec<_> = a0.voices.iter().map(|v| v.mode).collect();
+        assert_eq!(
+            modes,
+            [
+                LayerMode::Single,
+                LayerMode::Sequential,
+                LayerMode::Velocity,
+                LayerMode::Random
+            ]
+        );
+        // Zero-based positions over the Voice's sorted WAV files.
+        assert_eq!(a0.voices[0].selected_layer, a0.voices[0].layers[3].id);
+        assert_eq!(a0.voices[1].selected_layer, a0.voices[1].layers[1].id);
+        assert!(a1.voices.iter().all(|v| v.mode == LayerMode::Random));
+        assert!(saved
+            .validation
+            .iter()
+            .any(|v| v.contains("read from verified native settings (firmware 2.00)")));
+        assert!(saved
+            .session
+            .as_ref()
+            .is_some_and(|s| s.voices[1].layer_mode == LayerMode::Sequential));
+        assert_eq!(
+            state.sd_native_blob(&review.id, "_save/A0.rpl").unwrap(),
+            kit_file
+        );
+
+        // An explicit update takes verified device values over app memory and
+        // keeps occurrence identity for unchanged positions.
+        let layer_ids: Vec<_> = a0.voices[0].layers.iter().map(|l| l.id.clone()).collect();
+        let patch_id = patch.id.clone();
+        std::fs::write(
+            source.join("_save/A0.rpl"),
+            fixtures::kit([3, 0, 0, 0], [1, 0, 0, 0]),
+        )
+        .unwrap();
+        let changed = state.prepare_sd_import(source).unwrap();
+        assert_eq!(changed.status, "changed");
+        let updated = state
+            .finish_sd_import(
+                &changed.id,
+                super::SdImportChoice::Update { patch: patch_id },
+            )
+            .unwrap();
+        let a0 = &updated.graph.current().unwrap().kits[0];
+        assert_eq!(a0.voices[0].mode, LayerMode::Reverse);
+        assert_eq!(a0.voices[1].mode, LayerMode::Single);
+        assert_eq!(a0.voices[0].selected_layer, layer_ids[1]);
+        let ids: Vec<_> = a0.voices[0].layers.iter().map(|l| l.id.clone()).collect();
+        assert_eq!(ids, layer_ids);
+    }
+    #[test]
+    fn unverified_or_unreadable_native_settings_are_reported_and_preserved() {
+        use rample_core::{model::LayerMode, native::fixtures};
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        wavs(&source, "A0", &["1_a.wav", "1_c.wav", "2_a.wav", "2_c.wav"]);
+        std::fs::write(source.join("A0/2_b.wav"), b"RIFFbroken").unwrap();
+        wavs(&source, "A1", &["1_kick.wav"]);
+        wavs(&source, "A2", &["1_kick.wav"]);
+        std::fs::create_dir_all(source.join("_save")).unwrap();
+        // Voice 1: unknown mode and a position past its two files.
+        // Voice 2: position 2 is the WAV that failed to import.
+        std::fs::write(
+            source.join("_save/A0.rpl"),
+            fixtures::kit([7, 2, 0, 0], [5, 1, 0, 0]),
+        )
+        .unwrap();
+        let mut truncated = fixtures::kit([1; 4], [0; 4]);
+        truncated.truncate(100);
+        std::fs::write(source.join("_save/A1.rpl"), &truncated).unwrap();
+        std::fs::write(source.join("_save/settings.rpl"), fixtures::settings(3)).unwrap();
+        let review = state.prepare_sd_import(source).unwrap();
+        assert!(!review.native_verified);
+        let imported = review.draft.imported_sd.as_ref().unwrap();
+        let native = imported.native.as_ref().unwrap();
+        assert_eq!(native.global_layer_mode, None);
+        assert!(native.issues[0].contains("value 3 is not verified"));
+        let issues: Vec<_> = native.kits.iter().flat_map(|k| k.issues.clone()).collect();
+        assert!(issues
+            .iter()
+            .any(|i| i.contains("A0 Voice 1: Stored Layer mode value 7")));
+        assert!(issues
+            .iter()
+            .any(|i| i.contains("A0 Voice 1: Stored selected Layer 6 does not exist among its 2")));
+        assert!(issues.iter().any(|i| i
+            .contains("A0 Voice 2: Stored selected Layer 2 (A0/2_b.wav) could not be imported")));
+        assert!(issues
+            .iter()
+            .any(|i| i.contains("_save/A1.rpl could not be interpreted (file ends")));
+        assert!(issues
+            .iter()
+            .any(|i| i.contains("A2: Never saved with STORE")));
+        let a0 = &review.draft.kits[0];
+        assert_eq!(a0.voices[0].mode, LayerMode::Single);
+        assert_eq!(a0.voices[0].selected_layer, a0.voices[0].layers[0].id);
+        assert_eq!(a0.voices[1].mode, LayerMode::Sequential);
+        assert_eq!(a0.voices[1].selected_layer, a0.voices[1].layers[0].id);
+        assert_eq!(native.kits[1].source, "unreadable");
+        assert_eq!(
+            state.sd_native_blob(&review.id, "_save/A1.rpl").unwrap(),
+            truncated
+        );
+        let saved = state
+            .finish_sd_import(
+                &review.id,
+                super::SdImportChoice::New {
+                    name: "Partial".into(),
+                },
+            )
+            .unwrap();
+        assert!(saved
+            .validation
+            .iter()
+            .any(|v| v.contains("Partial: A2: Never saved with STORE")));
+    }
+    #[test]
+    fn folders_without_native_settings_say_so_instead_of_claiming_device_modes() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        wavs(&source, "B3", &["1_kick.wav"]);
+        let review = state.prepare_sd_import(source).unwrap();
+        let native = review.draft.imported_sd.unwrap().native.unwrap();
+        assert!(!review.native_verified);
+        assert_eq!(native.kits[0].source, "appDefault");
+        assert!(native.issues[0].contains("No native settings were found"));
     }
 }

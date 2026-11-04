@@ -1,7 +1,13 @@
 import { useRef, useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import * as native from "./native";
-import type { PatchSnapshot, SdImportChoice, SdImportReview } from "./types";
+import {
+  modes,
+  type NativeReading,
+  type PatchSnapshot,
+  type SdImportChoice,
+  type SdImportReview,
+} from "./types";
 
 export function SdImport({
   onClose,
@@ -154,11 +160,10 @@ export function SdImport({
             {review.draft.kits.length} Kits reconstructed. All usable audio is
             kept, including Samples with invalid assignments and excess Layers.
           </p>
-          <p>
-            Native playback settings are unverified. {nativeFiles.length} opaque
-            file(s) preserved exactly. Layer modes shown in the app are preview
-            settings; Build Patch is unavailable.
-          </p>
+          <NativeSummary
+            reading={imported?.native ?? null}
+            preserved={nativeFiles.length}
+          />
           {nativeFiles.length > 0 && (
             <details>
               <summary>Preserved native files</summary>
@@ -266,5 +271,55 @@ export function SdImport({
         Close
       </button>
     </Modal>
+  );
+}
+
+function NativeSummary({
+  reading,
+  preserved,
+}: {
+  reading: NativeReading | null;
+  preserved: number;
+}) {
+  if (!reading)
+    return (
+      <p>
+        Native settings were not read. {preserved} native file(s) preserved
+        exactly; Build Patch is unavailable.
+      </p>
+    );
+  const count = (source: string) =>
+    reading.kits.filter((kit) => kit.source === source).length;
+  const global = modes.find((mode) => mode.id === reading.globalLayerMode);
+  const issues = [
+    ...reading.issues,
+    ...reading.kits.flatMap((kit) => kit.issues),
+  ];
+  return (
+    <div>
+      <p>
+        Native settings: Layer modes and selected Layers restored for{" "}
+        {count("store")} Kit(s) saved with STORE
+        {global
+          ? ` and ${count("globalDefault")} Kit(s) using the global LAYER default (${global.title})`
+          : ""}
+        . Mappings verified on firmware {reading.verifiedFirmware}.
+      </p>
+      <p>
+        {preserved} native file(s) preserved exactly. Other native settings are
+        kept but not interpreted; Build Patch is unavailable until native
+        writing is verified on the device.
+      </p>
+      {issues.length > 0 && (
+        <div role="status">
+          <strong>Native settings shown with app defaults</strong>
+          <ul>
+            {issues.map((issue, i) => (
+              <li key={i}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }

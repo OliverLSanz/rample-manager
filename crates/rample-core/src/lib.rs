@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod conversion;
 pub mod editing;
 pub mod model;
+pub mod native;
 pub mod review;
 pub mod session;
 pub mod wav;

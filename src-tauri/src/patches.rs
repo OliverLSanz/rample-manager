@@ -399,7 +399,15 @@ impl AppState {
                 if !imported.unassigned.is_empty() {
                     validation.push(format!("{}: {} unassigned source occurrences need explicit placement with Add Sample. Their audio is kept in the Library.", patch.name, imported.unassigned.len()));
                 }
-                validation.push(format!("{}: Native playback settings are unverified. Modes shown are app preview settings only; Build Patch is unavailable.", patch.name));
+                match &imported.native {
+                    Some(native) => {
+                        for issue in native.issues.iter().chain(native.kits.iter().flat_map(|kit| &kit.issues)) {
+                            validation.push(format!("{}: {issue}", patch.name));
+                        }
+                        validation.push(format!("{}: Layer modes and selected Layers were read from verified native settings (firmware {}). Other native settings are preserved but not interpreted, and writing them is not available yet, so Build Patch is unavailable.", patch.name, native.verified_firmware));
+                    }
+                    None => validation.push(format!("{}: Native playback settings were not read for this Import. Import the SD again to read verified Layer modes; Build Patch is unavailable.", patch.name)),
+                }
             }
             for kit in &patch.kits {
                 let address = format!("{} · {}{}", patch.name, kit.bank, kit.number);

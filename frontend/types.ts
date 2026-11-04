@@ -329,6 +329,20 @@ export interface ImportedSd {
   files: SdFile[];
   issues: string[];
   unassigned: SdFile[];
+  /** Absent for Imports made before native reading existed. */
+  native?: NativeReading | null;
+}
+export interface NativeReading {
+  verifiedFirmware: string;
+  globalLayerMode: LayerMode | null;
+  issues: string[];
+  kits: {
+    bank: string;
+    number: number;
+    source: "store" | "globalDefault" | "appDefault" | "unreadable";
+    voices: { modeRestored: boolean; selectionRestored: boolean }[];
+    issues: string[];
+  }[];
 }
 export interface SdImportReview {
   id: string;

@@ -108,14 +108,18 @@ selected layers, patterns, velocity, BPM, mixer and per-kit memory compatible.
 ## Native SD configuration
 
 Five modes are supported, defaulting to Single sample (MANUAL). Modes and selected
-layers persist on this computer; `_save/*.rpl` files are not imported or written.
-Oliver will collect controlled STORE/SAVE SETTINGS examples following
-`docs/rample-sd-capture.es.md`. Public research suggests CBOR with `layer_modes`,
-`selected_layer` and global `layerMode`; verify mappings against those device
-saves before implementing native import/write. This is a format dependency, not
-missing user authorization to implement sync. Do not guess offsets or substitute
-MIDI enums. Preserve unknown fields and unrelated native settings, and retain
-recoverable originals. BPM and sequencer steps remain app-only.
+layers persist on this computer. SD Import reads `_save/*.rpl` through the
+bounded reader in `rample_core::native` and restores only mappings verified by
+Oliver's controlled firmware 2.00 captures
+(`docs/research/rample-native-settings-mappings.md`): per-Voice `layer_modes`
+0–4, zero-based `selected_layer` and global `layerMode` 0/1. Unverified values
+keep app defaults and are reported, never guessed. Device captures stay in the
+git-ignored `Rample SD Captures/`; tests use generated fixtures. Native files
+are not written yet: writing needs the device round trip in ADR 0003. Do not guess
+offsets or substitute MIDI enums. Preserve unknown fields and unrelated native
+settings, and retain recoverable originals. BPM and sequencer steps remain
+app-only. Remaining capture batches are listed in
+`docs/research/rample-save-format-study.es.md`.
 
 Official SD-format reference: https://squarp.net/rample/manual/
 

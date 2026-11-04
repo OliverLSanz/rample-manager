@@ -56,6 +56,29 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
         ],
         issues: ["Odd folder/1_Kick.wav: Invalid Kit folder"],
         unassigned: [],
+        native: {
+          verifiedFirmware: "2.00",
+          globalLayerMode: "random",
+          issues: [],
+          kits: [
+            {
+              bank: "A",
+              number: 0,
+              source: "store",
+              voices: [],
+              issues: [
+                "A0 Voice 1: Stored Layer mode value 7 is not a verified mode. The app shows MANUAL.",
+              ],
+            },
+            {
+              bank: "A",
+              number: 1,
+              source: "globalDefault",
+              voices: [],
+              issues: [],
+            },
+          ],
+        },
       },
     },
   });
@@ -68,8 +91,12 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
   expect(screen.getByText(/Invalid Kit folder/)).toBeTruthy();
   expect(screen.getByText(/Truncated WAV/)).toBeTruthy();
   expect(
-    screen.getByText(/Native playback settings are unverified/),
+    screen.getByText(
+      /restored for 1 Kit\(s\) saved with STORE and 1 Kit\(s\) using the global LAYER default \(Random\).*firmware 2\.00/,
+    ),
   ).toBeTruthy();
+  expect(screen.getByText(/1 native file\(s\) preserved exactly/)).toBeTruthy();
+  expect(screen.getByText(/Stored Layer mode value 7/)).toBeTruthy();
   expect(native.finishSdImport).not.toHaveBeenCalled();
   fireEvent.click(
     screen.getByRole("button", { name: "Update existing Patch" }),
