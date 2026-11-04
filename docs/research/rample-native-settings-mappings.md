@@ -1,8 +1,9 @@
 # Verified Rample native settings mappings
 
-Status: verified for **reading** on Rample Turbo firmware **2.00**. Writing is
-not implemented; it needs the hardware round trip described in
-[ADR 0003](../adr/0003-require-native-settings-for-complete-patch-builds.md).
+Status: verified for **reading** on Rample Turbo firmware **2.00**. The app never
+writes `_save`
+([ADR 0007](../adr/0007-read-native-settings-and-never-write-save.md)); these
+mappings only fill initial modes when importing an SD.
 For the full-format gap analysis and the next capture batches, see
 [the format study](rample-save-format-study.es.md).
 
@@ -77,5 +78,5 @@ global value in that case and records the Kit's source as `globalDefault`.
   firmware version, so the reader cannot detect a different firmware.
 - All other Kit and global fields (levels, filter, assignments, mute groups,
   MIDI settings and others) are preserved but not interpreted.
-- Writing, loading a modified file and STORE/re-read survival belong to the
-  Build Patch milestone.
+- Writing is out of scope (ADR 0007). Device settings that no longer match the
+  files are adjusted on the Rample by the user.

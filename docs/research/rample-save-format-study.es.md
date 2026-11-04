@@ -1,6 +1,17 @@
 # Estudio: qué falta para controlar al 100 % el formato `_save` del Rample
 
 Fecha: 2026-11-05. Equipo de referencia: Rample Turbo, firmware 2.00, kit `Z0`.
+
+> **Cambio de alcance (2026-11-05, [ADR 0007](../adr/0007-read-native-settings-and-never-write-save.md)).**
+> La app gestiona solo los ficheros de audio y **nunca escribe `_save`**. Lo que
+> sigue sobre escritura (lote F, plantilla A7–A8, sección 4) queda como
+> referencia histórica y ya no bloquea el #13. Para lectura siguen siendo útiles:
+>
+> - A1–A3: valores globales 2–4.
+> - El resto del lote A: comprobar las voces 2–4.
+> - Lote G: orden de capas, para leer bien `selected_layer`.
+> - Lotes B–E: solo si algún día se quieren mostrar o simular esos parámetros
+>   en la vista previa.
 Este documento continúa la
 [investigación pública previa](rample-kit-tools-and-native-settings.md) (CBOR,
 fixtures de Romper, herramientas), el
@@ -332,6 +343,8 @@ valor.
 | **Total** | **unas 21 para #13; unas 120–135 en total** | | |
 
 ## 4. Mínimo para desbloquear la escritura y control total
+
+> Fuera de alcance desde el ADR 0007; se conserva como referencia.
 
 ### 4.1 Mínimo para #13 (Build Patch escribe solo modos de capa y capa seleccionada)
 

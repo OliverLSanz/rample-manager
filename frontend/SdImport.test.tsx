@@ -97,6 +97,7 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
   ).toBeTruthy();
   expect(screen.getByText(/1 native file\(s\) preserved exactly/)).toBeTruthy();
   expect(screen.getByText(/Stored Layer mode value 7/)).toBeTruthy();
+  expect(screen.getByText(/never writes native settings/)).toBeTruthy();
   expect(native.finishSdImport).not.toHaveBeenCalled();
   fireEvent.click(
     screen.getByRole("button", { name: "Update existing Patch" }),

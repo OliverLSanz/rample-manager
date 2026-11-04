@@ -63,5 +63,6 @@ An intake of sounds into the Library and, for a Rample SD source, its musical
 configuration into a Patch. A completed Import has no continuing dependency on its source.
 
 **Build Patch**:
-The generation of a Rample-compatible directory from a Patch, including its
-ordered audio files and native settings.
+The generation of a Rample-compatible directory from a Patch: its Bank/Kit
+folders and ordered, prepared audio files. It never writes native settings
+(`_save`); those stay on the device.

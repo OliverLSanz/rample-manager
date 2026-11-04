@@ -1147,10 +1147,8 @@ mod tests {
         assert_eq!(a0.voices[0].selected_layer, a0.voices[0].layers[3].id);
         assert_eq!(a0.voices[1].selected_layer, a0.voices[1].layers[1].id);
         assert!(a1.voices.iter().all(|v| v.mode == LayerMode::Random));
-        assert!(saved
-            .validation
-            .iter()
-            .any(|v| v.contains("read from verified native settings (firmware 2.00)")));
+        // Read-only native settings leave nothing pending in validation.
+        assert!(!saved.validation.iter().any(|v| v.starts_with("Device:")));
         assert!(saved
             .session
             .as_ref()

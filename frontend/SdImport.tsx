@@ -285,7 +285,7 @@ function NativeSummary({
     return (
       <p>
         Native settings were not read. {preserved} native file(s) preserved
-        exactly; Build Patch is unavailable.
+        exactly; the app never writes them.
       </p>
     );
   const count = (source: string) =>
@@ -306,9 +306,9 @@ function NativeSummary({
         . Mappings verified on firmware {reading.verifiedFirmware}.
       </p>
       <p>
-        {preserved} native file(s) preserved exactly. Other native settings are
-        kept but not interpreted; Build Patch is unavailable until native
-        writing is verified on the device.
+        {preserved} native file(s) preserved exactly. The app never writes
+        native settings: Build Patch copies audio only, so set modes on the
+        Rample and STORE to keep them there.
       </p>
       {issues.length > 0 && (
         <div role="status">

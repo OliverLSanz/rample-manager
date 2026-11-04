@@ -1,8 +1,10 @@
 # Ejemplos de configuración de una SD de Rample Turbo
 
 Objetivo: confirmar cómo tu firmware codifica el modo de capas y la capa manual
-seleccionada, para leer y actualizar esos ajustes sin alterar el resto del kit.
-La app 1.1 guarda estos ajustes en el Mac; todavía no modifica los `.rpl` nativos.
+seleccionada, para leer esos ajustes al importar una SD. La app nunca escribe
+los `.rpl` nativos ([ADR 0007](adr/0007-read-native-settings-and-never-write-save.md)).
+Estas ocho capturas ya se hicieron el 2026-11-04 con el firmware 2.00. Los lotes
+pendientes están en [el estudio del formato](research/rample-save-format-study.es.md).
 
 ## Preparación
 
@@ -96,9 +98,8 @@ firmware de los ejemplos no están completamente verificadas. Aquí se comparar�
 los bytes y los valores decodificados; no se supondrán offsets fijos ni que la
 numeración de los mensajes MIDI coincide con la guardada en la SD.
 
-Antes de habilitar escritura habrá que comprobar también que un archivo generado
-por la app se carga correctamente en el módulo, conservando todos los ajustes
-ajenos al cambio. El BPM, los pasos y sus velocidades pertenecen al secuenciador
+La app no escribe en `_save`, así que no hace falta probar en el módulo archivos
+generados por ella. El BPM, los pasos y sus velocidades pertenecen al secuenciador
 de la app; no se tratarán como parámetros de secuenciador del Rample.
 
 Cuando termines, basta con indicar la ruta local de `Rample SD captures` y la

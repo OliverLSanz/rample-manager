@@ -86,8 +86,8 @@ reread/decode long Originals. **Refresh preview** explicitly revalidates assets.
 Incomplete drafts remain editable: missing Voice 1 and more than 12 Layers are
 reported visibly, retaining every Layer. Patches save locally in the private
 Library database, independently of the folder session. Before migration, **Back to folders** restores
-that workflow. Native settings and complete Build Patch remain pending verified
-device evidence. No typed native settings are imported or written by these controls.
+that workflow. These controls never write native Rample settings (`_save`).
+To use a mode on the device, set it on the Rample and STORE.
 
 **Import Rample SD…** copies an SD root or local copy into managed storage and
 reconstructs its Bank/Kit addresses, Voice ownership and numerical/alphabetical
@@ -106,10 +106,11 @@ source for retry. Completed copies, pending reviews, and committed Patches survi
 removing the source and restarting. Managed playback suspends the legacy folder
 watcher; before migration, returning to folders resumes that separate workflow.
 
-Native files in `_save` and other non-audio files are retained as exact opaque
-bytes in the Library database. Known operating-system filesystem metadata is
-ignored. Native playback settings remain explicitly unverified; the app modes
-are preview preferences, and this intake does not enable complete Build Patch.
+Native files in `_save` and other non-audio files are retained as exact bytes in
+the Library database. Known operating-system filesystem metadata is ignored.
+Import reads the device-verified fields to set each Kit's initial Layer modes
+and selected Layers. Kits never saved with STORE use the global LAYER default.
+Unverified or unreadable values keep app defaults and are listed in the review.
 
 Existing folder sessions show **Move current folder into Library**. Migration copies
 and validates audio in bounded chunks, backs up the saved session byte for byte as
@@ -265,11 +266,14 @@ untouched until Save. If an external editor changes the file, reopen it before
 saving so those changes are preserved. To undo a saved edit, close playback and
 restore the backup to the original path described in its `restore.json`.
 
-### Native Rample SD settings remain pending
+### Native Rample SD settings are read-only
 
-The app never modifies `_save/*.rpl`. Its JSON preferences are not native Rample
-saves. Controlled hardware examples are still needed before implementing native
-configuration import/write. See the [capture guide in Spanish](docs/rample-sd-capture.es.md).
+The app manages audio files and never creates, modifies or deletes `_save/*.rpl`
+([ADR 0007](docs/adr/0007-read-native-settings-and-never-write-save.md)).
+Import only reads verified fields to fill initial modes. Device settings that
+no longer match the files are adjusted on the Rample. Mappings and remaining
+gaps are in [the mappings note](docs/research/rample-native-settings-mappings.md)
+and [the format study](docs/research/rample-save-format-study.es.md).
 
 ## Session preservation
 
