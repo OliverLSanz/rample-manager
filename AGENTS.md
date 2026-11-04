@@ -107,20 +107,23 @@ selected layers, patterns, velocity, BPM, mixer and per-kit memory compatible.
 
 ## Native SD configuration
 
-Five modes are supported, defaulting to Single sample (MANUAL). Modes and selected
+Five modes are supported. New Kits use the user's Default Layer mode (initially
+Single sample / MANUAL). Modes and selected
 layers persist on this computer. The app manages audio files only and never
 creates, modifies, deletes or restores anything in `_save`
 (`docs/adr/0007-read-native-settings-and-never-write-save.md`). Device settings
 that no longer match the files are the user's concern on the Rample. SD Import
-reads `_save/*.rpl` through the bounded reader in `rample_core::native` to fill
-initial modes. It restores only mappings verified by Oliver's controlled
-firmware 2.00 captures (`docs/research/rample-native-settings-mappings.md`):
-per-Voice `layer_modes` 0–4, zero-based `selected_layer` and global
-`layerMode` 0/1. Unverified values keep app defaults and are reported, never
-guessed. Do not guess offsets or substitute MIDI enums. Preserve the imported
+reads each Kit's `_save/<Kit>.rpl` through the bounded reader in
+`rample_core::native` to fill initial modes. It restores only mappings verified
+by Oliver's controlled firmware 2.00 captures
+(`docs/research/rample-native-settings-mappings.md`): per-Voice `layer_modes`
+0–4 and zero-based `selected_layer`, assuming standard natural filename order.
+The device's global `layerMode` is ignored. The user's Library-wide Default
+Layer mode (`PatchGraph.default_layer_mode`) applies to new Kits, to Kits
+never saved with STORE and to unverified or unreadable values, which are
+reported, never guessed. No further captures are planned. Do not guess offsets or substitute MIDI enums. Preserve the imported
 bytes exactly. Device captures stay in the git-ignored `Rample SD Captures/`;
 tests use generated fixtures. BPM and sequencer steps remain app-only.
-Read-only capture batches are listed in `docs/research/rample-save-format-study.es.md`.
 
 Official SD-format reference: https://squarp.net/rample/manual/
 

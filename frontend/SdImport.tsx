@@ -290,20 +290,17 @@ function NativeSummary({
     );
   const count = (source: string) =>
     reading.kits.filter((kit) => kit.source === source).length;
-  const global = modes.find((mode) => mode.id === reading.globalLayerMode);
-  const issues = [
-    ...reading.issues,
-    ...reading.kits.flatMap((kit) => kit.issues),
-  ];
+  const fallback =
+    modes.find((mode) => mode.id === reading.defaultLayerMode)?.title ??
+    reading.defaultLayerMode;
+  const issues = reading.kits.flatMap((kit) => kit.issues);
   return (
     <div>
       <p>
         Native settings: Layer modes and selected Layers restored for{" "}
-        {count("store")} Kit(s) saved with STORE
-        {global
-          ? ` and ${count("globalDefault")} Kit(s) using the global LAYER default (${global.title})`
-          : ""}
-        . Mappings verified on firmware {reading.verifiedFirmware}.
+        {count("store")} Kit(s) saved with STORE (firmware{" "}
+        {reading.verifiedFirmware}). {count("appDefault")} Kit(s) never saved
+        with STORE use your default Layer mode ({fallback}).
       </p>
       <p>
         {preserved} native file(s) preserved exactly. The app never writes
@@ -312,7 +309,7 @@ function NativeSummary({
       </p>
       {issues.length > 0 && (
         <div role="status">
-          <strong>Native settings shown with app defaults</strong>
+          <strong>Native settings shown with your default Layer mode</strong>
           <ul>
             {issues.map((issue, i) => (
               <li key={i}>{issue}</li>

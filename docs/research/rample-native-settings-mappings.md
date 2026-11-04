@@ -44,12 +44,18 @@ between consecutive captures:
 | --- | --- | --- |
 | `_save/<Kit>.rpl` `layer_modes[voice]` | 0 MANUAL, 1 RANDOM, 2 CYCLIC, 3 REVERSE CYCLIC, 4 VELOCITY | Verified |
 | `_save/<Kit>.rpl` `selected_layer[voice]` | Zero-based position among the Voice's sorted WAV files | Verified |
-| `_save/settings.rpl` `layerMode` | 0 MANUAL, 1 RANDOM | Verified |
-| `_save/settings.rpl` `layerMode` | 2, 3, 4 | **Not verified**; shown as an issue, app shows MANUAL |
 
-For a Kit without its own `.rpl` (never saved with STORE), the official manual
-says every Voice uses the global LAYER default. Import applies the verified
-global value in that case and records the Kit's source as `globalDefault`.
+The global `settings.rpl` `layerMode` is **not read** (Oliver's decision,
+2026-11-05). Captures 07/08 showed 0 = MANUAL and 1 = RANDOM, but the app
+replaces the device's global LAYER with its own **Default Layer mode**,
+configured in the Patches workspace and stored with the Library. That default
+applies to new Kits, to imported Kits without their own `.rpl` (never saved
+with STORE) and to unverified or unreadable stored values. The source of those
+Kits is recorded as `appDefault`.
+
+Layer files are assumed to follow standard natural filename order, as the
+manual describes ("numerically and alphabetically sorted"). No further
+sort-order captures are planned.
 
 ## Import behavior
 
@@ -58,8 +64,8 @@ global value in that case and records the Kit's source as `globalDefault`.
   trailing bytes, indefinite lengths, invalid UTF-8 and duplicate keys, and it
   never guesses a value.
 - Unknown keys and value types are kept in the decoded tree but not interpreted.
-- Unverified values, out-of-range or failed-import Layer positions, and
-  unreadable files keep app defaults (MANUAL, first Layer). They are listed as
+- Unverified values and unreadable files use the user's Default Layer mode.
+  Out-of-range or failed-import Layer positions select the first Layer. They are listed as
   native issues in the Import review and in Patch validation.
 - Positions are counted over the Voice's `.wav` files in natural filename order,
   including files that failed to import. A failure therefore never silently
@@ -69,11 +75,11 @@ global value in that case and records the Kit's source as `globalDefault`.
 - Native interpretation is not part of the SD recognition fingerprint; the
   preserved native bytes already are.
 
-## Remaining gaps
+## Known limits (no further captures planned)
 
-- Global `layerMode` values 2–4 (three more SAVE SETTINGS captures).
-- Layer sort order for case, punctuation, accents and leading zeros has not been
-  compared on the device. The Z0 file names did not exercise those cases.
+- Sort order is assumed, not compared on the device, for case, punctuation,
+  accents and leading zeros. An unusual name could make `selected_layer` point
+  to a neighboring file.
 - Firmware 3.00 and other versions are not verified. The files carry no explicit
   firmware version, so the reader cannot detect a different firmware.
 - All other Kit and global fields (levels, filter, assignments, mute groups,

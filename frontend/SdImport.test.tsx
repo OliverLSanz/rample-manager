@@ -58,8 +58,7 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
         unassigned: [],
         native: {
           verifiedFirmware: "2.00",
-          globalLayerMode: "random",
-          issues: [],
+          defaultLayerMode: "velocity",
           kits: [
             {
               bank: "A",
@@ -73,7 +72,7 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
             {
               bank: "A",
               number: 1,
-              source: "globalDefault",
+              source: "appDefault",
               voices: [],
               issues: [],
             },
@@ -92,7 +91,7 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
   expect(screen.getByText(/Truncated WAV/)).toBeTruthy();
   expect(
     screen.getByText(
-      /restored for 1 Kit\(s\) saved with STORE and 1 Kit\(s\) using the global LAYER default \(Random\).*firmware 2\.00/,
+      /restored for 1 Kit\(s\) saved with STORE \(firmware 2\.00\)\. 1 Kit\(s\) never saved with STORE use your default Layer mode \(Velocity\)/,
     ),
   ).toBeTruthy();
   expect(screen.getByText(/1 native file\(s\) preserved exactly/)).toBeTruthy();

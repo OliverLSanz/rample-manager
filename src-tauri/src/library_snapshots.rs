@@ -713,6 +713,7 @@ fn validate_store(store: &ManagedLibrary, manifest: &Manifest) -> Result<(), Str
             &patches::PatchGraph {
                 selected_patch: patch.id.clone(),
                 patches: vec![patch.clone()],
+                default_layer_mode: graph.default_layer_mode,
             },
             &sample_ids,
         )?;

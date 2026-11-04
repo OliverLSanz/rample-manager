@@ -8,6 +8,10 @@ use uuid::Uuid;
 pub struct PatchGraph {
     pub selected_patch: String,
     pub patches: Vec<Patch>,
+    /// The user's default Layer mode for new Kits and for imported Kits that
+    /// were never saved with STORE. The device's global LAYER setting is not read.
+    #[serde(default)]
+    pub default_layer_mode: LayerMode,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,6 +143,9 @@ pub enum PatchAction {
     SelectPatch {
         patch: String,
     },
+    SetDefaultMode {
+        mode: LayerMode,
+    },
     CreateKit {
         bank: String,
         number: u8,
@@ -245,15 +252,25 @@ impl AppState {
                 graph.selected_patch = patch;
                 reset = true;
             }
+            PatchAction::SetDefaultMode { mode } => {
+                // Applies to Kits created or imported from now on; existing
+                // Kits keep their own modes.
+                graph.default_layer_mode = mode;
+            }
             PatchAction::CreateKit { bank, number } => {
+                let mode = graph.default_layer_mode;
                 let patch = graph.current_mut()?;
                 valid_address(patch, &bank, number, "")?;
                 let id = Uuid::new_v4().to_string();
+                let voice = PatchVoice {
+                    mode,
+                    ..PatchVoice::default()
+                };
                 patch.kits.push(PatchKit {
                     id: id.clone(),
                     bank,
                     number,
-                    voices: vec![PatchVoice::default(); 4],
+                    voices: vec![voice; 4],
                 });
                 patch.selected_kit = id;
                 patch.voice_kits.clear();
@@ -403,7 +420,7 @@ impl AppState {
                     // Native settings are read-only (ADR 0007): only report
                     // what Import could not restore, never a pending write.
                     Some(native) => {
-                        for issue in native.issues.iter().chain(native.kits.iter().flat_map(|kit| &kit.issues)) {
+                        for issue in native.kits.iter().flat_map(|kit| &kit.issues) {
                             validation.push(format!("{}: {issue}", patch.name));
                         }
                     }

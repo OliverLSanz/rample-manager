@@ -5,8 +5,10 @@
 //! anything outside its bounds instead of guessing. Callers must keep the
 //! original bytes: interpretation never replaces the preserved file.
 //!
-//! Verified mappings come from controlled single-change STORE/SAVE SETTINGS
-//! captures on a Rample Turbo running firmware 2.00 (2026-11-04). See
+//! Verified mappings come from controlled single-change STORE captures on a
+//! Rample Turbo running firmware 2.00 (2026-11-04). Only per-Kit Layer modes and
+//! selections are interpreted; global settings are ignored and the app uses
+//! the user's own default Layer mode (ADR 0007). See
 //! `docs/research/rample-native-settings-mappings.md`.
 use crate::model::LayerMode;
 use thiserror::Error;
@@ -295,16 +297,6 @@ pub fn kit_layer_mode(raw: u64) -> Option<LayerMode> {
         _ => return None,
     })
 }
-/// Global `layerMode` written by SAVE SETTINGS. Only MANUAL and RANDOM have
-/// been confirmed by device saves; other values stay unverified.
-pub fn global_layer_mode(raw: u64) -> Option<LayerMode> {
-    match raw {
-        0 => Some(LayerMode::Single),
-        1 => Some(LayerMode::Random),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KitVoiceSettings {
     pub raw_mode: u64,
@@ -347,27 +339,6 @@ pub fn read_kit(bytes: &[u8]) -> Result<KitSettings, String> {
     })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GlobalSettings {
-    pub raw_layer_mode: u64,
-    pub layer_mode: Option<LayerMode>,
-}
-/// Reads `_save/settings.rpl`, interpreting only the global LAYER default.
-pub fn read_settings(bytes: &[u8]) -> Result<GlobalSettings, String> {
-    let root = decode(bytes).map_err(|e| e.to_string())?;
-    if !matches!(root, Value::Map(_)) {
-        return Err("content is not a settings map".into());
-    }
-    let raw = root
-        .get("layerMode")
-        .and_then(Value::as_unsigned)
-        .ok_or("`layerMode` is missing or is not a non-negative number")?;
-    Ok(GlobalSettings {
-        raw_layer_mode: raw,
-        layer_mode: global_layer_mode(raw),
-    })
-}
-
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixtures {
     //! Synthetic files shaped like firmware 2.00 saves. They are generated, not
@@ -403,6 +374,7 @@ pub mod fixtures {
             (text("start"), four([0; 4])),
         ]))
     }
+    /// `settings.rpl` shape. The app preserves it but never interprets it.
     pub fn settings(layer_mode: u64) -> Vec<u8> {
         let entries: Vec<(&str, u64)> = vec![
             ("anti_clic", 1),
@@ -473,16 +445,6 @@ mod tests {
     }
 
     #[test]
-    fn only_confirmed_global_defaults_are_interpreted() {
-        let mode = |raw| read_settings(&fixtures::settings(raw)).unwrap().layer_mode;
-        assert_eq!(mode(0), Some(LayerMode::Single));
-        assert_eq!(mode(1), Some(LayerMode::Random));
-        for raw in 2..=5 {
-            assert_eq!(mode(raw), None);
-        }
-    }
-
-    #[test]
     fn unknown_keys_and_types_are_kept_and_do_not_block_known_fields() {
         let Value::Map(mut entries) = decode(&fixtures::kit([2; 4], [1; 4])).unwrap() else {
             panic!()
@@ -549,10 +511,5 @@ mod tests {
         ]));
         assert!(read_kit(&three).unwrap_err().contains("layer_modes"));
         assert!(read_kit(&encode(&Value::Array(vec![]))).is_err());
-        let no_layer = encode(&Value::Map(vec![(
-            Value::Text("vu_meters".into()),
-            Value::Unsigned(1),
-        )]));
-        assert!(read_settings(&no_layer).unwrap_err().contains("layerMode"));
     }
 }

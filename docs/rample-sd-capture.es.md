@@ -3,8 +3,8 @@
 Objetivo: confirmar cómo tu firmware codifica el modo de capas y la capa manual
 seleccionada, para leer esos ajustes al importar una SD. La app nunca escribe
 los `.rpl` nativos ([ADR 0007](adr/0007-read-native-settings-and-never-write-save.md)).
-Estas ocho capturas ya se hicieron el 2026-11-04 con el firmware 2.00. Los lotes
-pendientes están en [el estudio del formato](research/rample-save-format-study.es.md).
+Estas ocho capturas ya se hicieron el 2026-11-04 con el firmware 2.00 y no hay
+más previstas. El modo global no se lee; la app usa su propio modo por defecto.
 
 ## Preparación
 

@@ -140,6 +140,30 @@ it("shows distinct repeated Layers, selected identity, modes, validation and ord
     screen.getAllByRole("button", { name: /Voice \d, step / }),
   ).toHaveLength(64);
 });
+it("sets the Library default Layer mode used for new and never-stored Kits", async () => {
+  const initial = view();
+  const updated = structuredClone(initial);
+  (updated.graph as { defaultLayerMode?: string }).defaultLayerMode = "random";
+  vi.mocked(native.patchAction)
+    .mockResolvedValueOnce(initial)
+    .mockResolvedValue(updated);
+  render(<PatchEditor transport={idleTransport} onClose={() => {}} />);
+  const select = await screen.findByRole("combobox", {
+    name: /Default Layer mode/,
+  });
+  expect((select as HTMLSelectElement).value).toBe("manual");
+  expect(select.children.length).toBe(5);
+  fireEvent.change(select, { target: { value: "random" } });
+  await vi.waitFor(() =>
+    expect(native.patchAction).toHaveBeenLastCalledWith({
+      type: "setDefaultMode",
+      mode: "random",
+    }),
+  );
+  await vi.waitFor(() =>
+    expect((select as HTMLSelectElement).value).toBe("random"),
+  );
+});
 it("adds another occurrence from the searchable Library picker and restores the folder workspace on close", async () => {
   const initial = view();
   vi.mocked(native.patchAction).mockResolvedValue(initial);

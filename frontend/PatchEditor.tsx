@@ -10,6 +10,7 @@ import {
   modes,
   type Action,
   type EditorInfo,
+  type LayerMode,
   type PatchAction,
   type PatchSnapshot,
   type Transport,
@@ -318,6 +319,28 @@ export function PatchEditor({
             </label>
             <button disabled={!newName.trim()}>Create Patch</button>
           </form>
+          <label>
+            Default Layer mode
+            <select
+              value={view?.graph.defaultLayerMode ?? "manual"}
+              onChange={(e) =>
+                void act({
+                  type: "setDefaultMode",
+                  mode: e.target.value as LayerMode,
+                })
+              }
+            >
+              {modes.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.title}
+                </option>
+              ))}
+            </select>
+            <small>
+              For new Kits and imported Kits never saved with STORE on the
+              Rample.
+            </small>
+          </label>
           {patch && (
             <form
               onSubmit={(e) => {

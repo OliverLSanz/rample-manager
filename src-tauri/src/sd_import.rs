@@ -40,9 +40,8 @@ pub struct ImportedSd {
 #[serde(rename_all = "camelCase")]
 pub struct NativeReading {
     pub verified_firmware: String,
-    pub global_layer_mode: Option<LayerMode>,
-    /// Problems with global settings, shown instead of a silent default.
-    pub issues: Vec<String>,
+    /// The user's default Layer mode applied to Kits without stored modes.
+    pub default_layer_mode: LayerMode,
     pub kits: Vec<NativeKitReading>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,9 +49,9 @@ pub struct NativeReading {
 pub struct NativeKitReading {
     pub bank: String,
     pub number: u8,
-    /// `store`: the Kit's own STOREd file; `globalDefault`: never STOREd, so
-    /// the verified global LAYER default applies; `appDefault`: nothing
-    /// verified is available; `unreadable`: its file has an unsupported shape.
+    /// `store`: the Kit's own STOREd file; `appDefault`: never STOREd, so the
+    /// user's default Layer mode applies; `unreadable`: its file has an
+    /// unsupported shape and the default applies.
     pub source: String,
     pub voices: Vec<NativeVoiceReading>,
     pub issues: Vec<String>,
@@ -65,7 +64,7 @@ pub struct NativeVoiceReading {
 }
 impl NativeReading {
     pub fn complete(&self) -> bool {
-        self.issues.is_empty() && self.kits.iter().all(|kit| kit.issues.is_empty())
+        self.kits.iter().all(|kit| kit.issues.is_empty())
     }
     fn kit(&self, bank: &str, number: u8) -> Option<&NativeKitReading> {
         self.kits
@@ -150,44 +149,27 @@ fn draft(name: String) -> Patch {
 type VoiceFiles = HashMap<(String, usize), Vec<(String, Option<String>)>>;
 
 /// Restores verified native Layer modes and selections into the draft Kits.
-/// Unverified or unreadable settings keep app defaults and say so.
+/// Kits never saved with STORE, unverified values and unreadable files use the
+/// user's default Layer mode; problems are reported, never guessed.
 fn read_native(
     patch: &mut Patch,
+    default_mode: LayerMode,
     kit_paths: &HashMap<String, String>,
     files: &HashMap<String, Vec<u8>>,
     voice_files: &VoiceFiles,
 ) -> NativeReading {
     let mut reading = NativeReading {
         verified_firmware: native::VERIFIED_FIRMWARE.into(),
+        default_layer_mode: default_mode,
         ..NativeReading::default()
     };
-    let has_native = files.keys().any(|path| path.ends_with(".rpl"));
-    let global = match files.get("_save/settings.rpl") {
-        None if has_native => {
-            reading.issues.push(
-                "_save/settings.rpl is missing, so the global LAYER default is unknown.".into(),
-            );
-            None
-        }
-        None => None,
-        Some(bytes) => match native::read_settings(bytes) {
-            Ok(settings) => {
-                if settings.layer_mode.is_none() {
-                    reading.issues.push(format!("_save/settings.rpl: Global LAYER default value {} is not verified on firmware {} yet. Kits never saved with STORE show MANUAL.", settings.raw_layer_mode, native::VERIFIED_FIRMWARE));
-                }
-                settings.layer_mode
-            }
-            Err(error) => {
-                reading.issues.push(format!("_save/settings.rpl could not be interpreted ({error}). The file is preserved; Kits never saved with STORE show MANUAL."));
-                None
-            }
-        },
-    };
-    reading.global_layer_mode = global;
     let mut folders: Vec<_> = kit_paths.iter().collect();
     folders.sort_by(|a, b| a.0.cmp(b.0));
     for (folder, kit_id) in folders {
         let kit = patch.kits.iter_mut().find(|k| &k.id == kit_id).unwrap();
+        for voice in &mut kit.voices {
+            voice.mode = default_mode;
+        }
         let mut entry = NativeKitReading {
             bank: kit.bank.clone(),
             number: kit.number,
@@ -207,7 +189,7 @@ fn read_native(
                             voice.mode = mode;
                             restored.mode_restored = true;
                         }
-                        None => entry.issues.push(format!("{folder} Voice {}: Stored Layer mode value {} is not a verified mode. The app shows MANUAL.", channel + 1, stored.raw_mode)),
+                        None => entry.issues.push(format!("{folder} Voice {}: Stored Layer mode value {} is not a verified mode. Your default Layer mode is used.", channel + 1, stored.raw_mode)),
                     }
                     let layers = voice_files
                         .get(&(kit_id.clone(), channel))
@@ -229,28 +211,12 @@ fn read_native(
             }
             Some(Err(error)) => {
                 entry.source = "unreadable".into();
-                entry.issues.push(format!("{file} could not be interpreted ({error}). The file is preserved; app defaults are shown."));
+                entry.issues.push(format!("{file} could not be interpreted ({error}). The file is preserved; your default Layer mode is used."));
             }
-            None => match global {
-                Some(mode) => {
-                    // Never saved with STORE: the device applies the global
-                    // LAYER default to every Voice when loading the Kit.
-                    entry.source = "globalDefault".into();
-                    for (voice, restored) in kit.voices.iter_mut().zip(&mut entry.voices) {
-                        voice.mode = mode;
-                        restored.mode_restored = true;
-                    }
-                }
-                None if has_native => entry.issues.push(format!("{folder}: Never saved with STORE and the global LAYER default is not verified. The app shows MANUAL.")),
-                None => {}
-            },
+            // Never saved with STORE: the user's default Layer mode applies.
+            None => {}
         }
         reading.kits.push(entry);
-    }
-    if !has_native && !kit_paths.is_empty() {
-        reading.issues.push(
-            "No native settings were found in _save. The app shows MANUAL for every Voice.".into(),
-        );
     }
     reading
 }
@@ -530,8 +496,10 @@ impl ManagedLibrary {
             .collect();
         state.fingerprint =
             hash(&serde_json::to_vec(&(content, &state.issues)).map_err(|e| e.to_string())?);
+        let graph = self.load_patches()?;
         state.native = Some(read_native(
             &mut patch,
+            graph.default_layer_mode,
             &kit_paths,
             &native_files,
             &voice_files,
@@ -546,7 +514,6 @@ impl ManagedLibrary {
             .unwrap_or_default();
         let fingerprint = state.fingerprint.clone();
         patch.imported_sd = Some(state);
-        let graph = self.load_patches()?;
         let recognized_patch = self.matching_sd(&fingerprint, &patch, &graph)?;
         let status = if recognized_patch.is_some() {
             "recognized"
@@ -1110,6 +1077,13 @@ mod tests {
         std::fs::write(source.join("_save/A0.rpl"), &kit_file).unwrap();
         std::fs::write(source.join("_save/settings.rpl"), fixtures::settings(1)).unwrap();
         std::fs::write(source.join("_save/autosave_A0.rpl"), []).unwrap();
+        // The device's global LAYER (RANDOM in settings.rpl) is ignored: Kits
+        // never saved with STORE use the user's own default.
+        state
+            .patch_action(patches::PatchAction::SetDefaultMode {
+                mode: LayerMode::Velocity,
+            })
+            .unwrap();
         let review = state.prepare_sd_import(source.clone()).unwrap();
         assert!(review.native_verified);
         let native = review
@@ -1120,9 +1094,9 @@ mod tests {
             .native
             .clone()
             .unwrap();
-        assert_eq!(native.global_layer_mode, Some(LayerMode::Random));
+        assert_eq!(native.default_layer_mode, LayerMode::Velocity);
         let sources: Vec<_> = native.kits.iter().map(|k| k.source.as_str()).collect();
-        assert_eq!(sources, ["store", "globalDefault"]);
+        assert_eq!(sources, ["store", "appDefault"]);
         let saved = state
             .finish_sd_import(
                 &review.id,
@@ -1146,7 +1120,7 @@ mod tests {
         // Zero-based positions over the Voice's sorted WAV files.
         assert_eq!(a0.voices[0].selected_layer, a0.voices[0].layers[3].id);
         assert_eq!(a0.voices[1].selected_layer, a0.voices[1].layers[1].id);
-        assert!(a1.voices.iter().all(|v| v.mode == LayerMode::Random));
+        assert!(a1.voices.iter().all(|v| v.mode == LayerMode::Velocity));
         // Read-only native settings leave nothing pending in validation.
         assert!(!saved.validation.iter().any(|v| v.starts_with("Device:")));
         assert!(saved
@@ -1181,6 +1155,15 @@ mod tests {
         assert_eq!(a0.voices[0].selected_layer, layer_ids[1]);
         let ids: Vec<_> = a0.voices[0].layers.iter().map(|l| l.id.clone()).collect();
         assert_eq!(ids, layer_ids);
+        // New Kits start in the user's default Layer mode too.
+        let created = state
+            .patch_action(patches::PatchAction::CreateKit {
+                bank: "C".into(),
+                number: 5,
+            })
+            .unwrap();
+        let kit = created.graph.current().unwrap().kit().unwrap();
+        assert!(kit.voices.iter().all(|v| v.mode == LayerMode::Velocity));
     }
     #[test]
     fn unverified_or_unreadable_native_settings_are_reported_and_preserved() {
@@ -1207,8 +1190,6 @@ mod tests {
         assert!(!review.native_verified);
         let imported = review.draft.imported_sd.as_ref().unwrap();
         let native = imported.native.as_ref().unwrap();
-        assert_eq!(native.global_layer_mode, None);
-        assert!(native.issues[0].contains("value 3 is not verified"));
         let issues: Vec<_> = native.kits.iter().flat_map(|k| k.issues.clone()).collect();
         assert!(issues
             .iter()
@@ -1221,10 +1202,9 @@ mod tests {
         assert!(issues
             .iter()
             .any(|i| i.contains("_save/A1.rpl could not be interpreted (file ends")));
-        assert!(issues
-            .iter()
-            .any(|i| i.contains("A2: Never saved with STORE")));
+        assert!(!issues.iter().any(|i| i.contains("A2")));
         let a0 = &review.draft.kits[0];
+        // Unknown stored value: the user's default (MANUAL unless changed).
         assert_eq!(a0.voices[0].mode, LayerMode::Single);
         assert_eq!(a0.voices[0].selected_layer, a0.voices[0].layers[0].id);
         assert_eq!(a0.voices[1].mode, LayerMode::Sequential);
@@ -1245,17 +1225,17 @@ mod tests {
         assert!(saved
             .validation
             .iter()
-            .any(|v| v.contains("Partial: A2: Never saved with STORE")));
+            .any(|v| v.contains("Partial: A0 Voice 1: Stored Layer mode value 7")));
     }
     #[test]
-    fn folders_without_native_settings_say_so_instead_of_claiming_device_modes() {
+    fn folders_without_native_settings_use_the_default_layer_mode() {
         let (temp, state, _) = fixture();
         let source = temp.path().join("SD");
         wavs(&source, "B3", &["1_kick.wav"]);
         let review = state.prepare_sd_import(source).unwrap();
         let native = review.draft.imported_sd.unwrap().native.unwrap();
-        assert!(!review.native_verified);
+        assert!(review.native_verified);
         assert_eq!(native.kits[0].source, "appDefault");
-        assert!(native.issues[0].contains("No native settings were found"));
+        assert!(native.kits[0].issues.is_empty());
     }
 }

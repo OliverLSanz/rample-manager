@@ -5,13 +5,12 @@ Fecha: 2026-11-05. Equipo de referencia: Rample Turbo, firmware 2.00, kit `Z0`.
 > **Cambio de alcance (2026-11-05, [ADR 0007](../adr/0007-read-native-settings-and-never-write-save.md)).**
 > La app gestiona solo los ficheros de audio y **nunca escribe `_save`**. Lo que
 > sigue sobre escritura (lote F, plantilla A7–A8, sección 4) queda como
-> referencia histórica y ya no bloquea el #13. Para lectura siguen siendo útiles:
+> referencia histórica y ya no bloquea el #13.
 >
-> - A1–A3: valores globales 2–4.
-> - El resto del lote A: comprobar las voces 2–4.
-> - Lote G: orden de capas, para leer bien `selected_layer`.
-> - Lotes B–E: solo si algún día se quieren mostrar o simular esos parámetros
->   en la vista previa.
+> **No se harán más capturas (2026-11-05).** El modo global `layerMode` no se
+> lee: la app tiene su propio *Default Layer mode*. Se asume el orden natural
+> estándar de los nombres de fichero, sin lote G. El resto del plan (lotes A–H)
+> queda solo como referencia, por si algún día se quiere ampliar la lectura.
 Este documento continúa la
 [investigación pública previa](rample-kit-tools-and-native-settings.md) (CBOR,
 fixtures de Romper, herramientas), el

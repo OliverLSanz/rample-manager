@@ -108,9 +108,11 @@ watcher; before migration, returning to folders resumes that separate workflow.
 
 Native files in `_save` and other non-audio files are retained as exact bytes in
 the Library database. Known operating-system filesystem metadata is ignored.
-Import reads the device-verified fields to set each Kit's initial Layer modes
-and selected Layers. Kits never saved with STORE use the global LAYER default.
-Unverified or unreadable values keep app defaults and are listed in the review.
+Import reads each Kit's STOREd Layer modes and selected Layers. Kits never saved
+with STORE use your **Default Layer mode**, which you set in the Patches
+workspace and which also applies to new Kits. The Rample's global LAYER setting
+is not read. Unverified or unreadable values use that default and are listed
+in the review.
 
 Existing folder sessions show **Move current folder into Library**. Migration copies
 and validates audio in bounded chunks, backs up the saved session byte for byte as

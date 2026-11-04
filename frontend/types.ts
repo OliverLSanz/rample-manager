@@ -299,7 +299,12 @@ export interface Patch {
   voices: Voice[];
 }
 export interface PatchSnapshot {
-  graph: { selectedPatch: string; patches: Patch[] };
+  graph: {
+    selectedPatch: string;
+    patches: Patch[];
+    /** Used for new Kits and imported Kits never saved with STORE. */
+    defaultLayerMode?: LayerMode;
+  };
   session: Session | null;
   samples: LibrarySample[];
   validation: string[];
@@ -309,6 +314,7 @@ export type PatchAction =
   | { type: "open" }
   | { type: "createPatch" | "renamePatch"; name: string }
   | { type: "selectPatch"; patch: string }
+  | { type: "setDefaultMode"; mode: LayerMode }
   | { type: "createKit" | "addressKit"; bank: string; number: number }
   | { type: "selectKit"; kit: string }
   | { type: "addLayer"; channel: number; sample: string }
@@ -334,12 +340,11 @@ export interface ImportedSd {
 }
 export interface NativeReading {
   verifiedFirmware: string;
-  globalLayerMode: LayerMode | null;
-  issues: string[];
+  defaultLayerMode: LayerMode;
   kits: {
     bank: string;
     number: number;
-    source: "store" | "globalDefault" | "appDefault" | "unreadable";
+    source: "store" | "appDefault" | "unreadable";
     voices: { modeRestored: boolean; selectionRestored: boolean }[];
     issues: string[];
   }[];
