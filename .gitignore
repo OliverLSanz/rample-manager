@@ -10,3 +10,4 @@ test-results/
 *.log
 /Resources/rample library/
 /src-tauri/gen/
+/Rample SD Captures/
