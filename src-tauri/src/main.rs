@@ -971,6 +971,7 @@ fn main() {
             act,
             export_kit,
             managed::export_sample,
+            managed::sample_waveform,
             convert_imports,
             show_backups,
             sample_edits::sample_revisions,

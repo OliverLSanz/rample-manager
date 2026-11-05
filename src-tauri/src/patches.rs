@@ -258,6 +258,14 @@ pub enum PatchAction {
         channel: usize,
         sample: String,
     },
+    /// Adds a Layer to Voice `channel` of any Kit in any Patch, without
+    /// changing the open Patch or Kit.
+    AddLayerTo {
+        patch: String,
+        kit: String,
+        channel: usize,
+        sample: String,
+    },
     RemoveLayer {
         channel: usize,
         layer: String,
@@ -274,6 +282,72 @@ pub enum PatchAction {
     Musical {
         action: Action,
     },
+}
+/// Appends a Layer to the playing Voice, or to `channel` of `(patch, kit)`.
+fn add_layer(
+    graph: &mut PatchGraph,
+    store: &managed::ManagedLibrary,
+    target: Option<(String, String)>,
+    channel: usize,
+    sample: String,
+) -> Result<(), String> {
+    if !store.list()?.iter().any(|s| s.id == sample && !s.retired) {
+        return Err("Sample is unavailable. Restore retired Samples from Trash first.".into());
+    }
+    let (patch, voice) = match &target {
+        Some((patch, kit)) => {
+            let patch = graph
+                .patches
+                .iter_mut()
+                .find(|p| &p.id == patch)
+                .ok_or("Patch no longer exists.")?;
+            let index = patch
+                .kits
+                .iter()
+                .position(|k| &k.id == kit)
+                .ok_or("Kit no longer exists.")?;
+            if channel >= patch.kits[index].voices.len() {
+                return Err("Invalid Voice.".into());
+            }
+            (patch, (index, channel))
+        }
+        None => {
+            let patch = graph.current_mut()?;
+            let id = patch
+                .voice_kits
+                .get(channel)
+                .unwrap_or(&patch.selected_kit)
+                .clone();
+            let index = patch
+                .kits
+                .iter()
+                .position(|k| k.id == id)
+                .ok_or("Select a Kit first.")?;
+            if channel >= patch.kits[index].voices.len() {
+                return Err("Invalid Voice.".into());
+            }
+            (patch, (index, channel))
+        }
+    };
+    let voice = &mut patch.kits[voice.0].voices[voice.1];
+    let id = Uuid::new_v4().to_string();
+    voice.layers.push(Layer {
+        id: id.clone(),
+        sample_id: sample.clone(),
+    });
+    if voice.selected_layer.is_empty() {
+        voice.selected_layer = id;
+    }
+    if let Some(imported) = &mut patch.imported_sd {
+        if let Some(index) = imported
+            .unassigned
+            .iter()
+            .position(|file| file.sample_id.as_deref() == Some(&sample))
+        {
+            imported.unassigned.remove(index);
+        }
+    }
+    Ok(())
 }
 fn valid_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
@@ -588,29 +662,15 @@ impl AppState {
                 patch.voice_kits.clear();
             }
             PatchAction::AddLayer { channel, sample } => {
-                if !store.list()?.iter().any(|s| s.id == sample && !s.retired) {
-                    return Err(
-                        "Sample is unavailable. Restore retired Samples from Trash first.".into(),
-                    );
-                }
-                let voice = graph.current_mut()?.voice_mut(channel)?;
-                let id = Uuid::new_v4().to_string();
-                voice.layers.push(Layer {
-                    id: id.clone(),
-                    sample_id: sample.clone(),
-                });
-                if voice.selected_layer.is_empty() {
-                    voice.selected_layer = id;
-                }
-                if let Some(imported) = &mut graph.current_mut()?.imported_sd {
-                    if let Some(index) = imported
-                        .unassigned
-                        .iter()
-                        .position(|file| file.sample_id.as_deref() == Some(&sample))
-                    {
-                        imported.unassigned.remove(index);
-                    }
-                }
+                add_layer(&mut graph, store, None, channel, sample)?;
+            }
+            PatchAction::AddLayerTo {
+                patch,
+                kit,
+                channel,
+                sample,
+            } => {
+                add_layer(&mut graph, store, Some((patch, kit)), channel, sample)?;
             }
             PatchAction::RemoveLayer { channel, layer } => {
                 let voice = graph.current_mut()?.voice_mut(channel)?;
@@ -1189,5 +1249,58 @@ mod tests {
         });
         let original = edited.graph.patches.iter().find(|p| p.id == patch).unwrap();
         assert_eq!(original.kit().unwrap().voices[1].layers.len(), 2);
+    }
+
+    #[test]
+    fn layers_can_be_added_to_any_kit_without_changing_the_open_one() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0]
+            .id
+            .clone();
+        // A Sample's waveform is its current Rample sound, read off the callback.
+        let peaks = state.sample_waveform(sample.clone()).unwrap();
+        assert_eq!(peaks.len(), 100);
+        assert!(peaks.iter().any(|p| *p > 0.99));
+        let run = |action| state.patch_action(action).unwrap();
+        let other = run(PatchAction::CreatePatch {
+            name: "Other".into(),
+        });
+        let other_kit = run(PatchAction::CreateKit {
+            bank: "B".into(),
+            number: 3,
+        });
+        let (other, other_kit) = (
+            other.graph.selected_patch,
+            other_kit.kit().unwrap().id.clone(),
+        );
+        run(PatchAction::CreatePatch {
+            name: "Open".into(),
+        });
+        let open = run(PatchAction::CreateKit {
+            bank: "A".into(),
+            number: 0,
+        });
+        let added = run(PatchAction::AddLayerTo {
+            patch: other.clone(),
+            kit: other_kit.clone(),
+            channel: 2,
+            sample: sample.clone(),
+        });
+        assert_eq!(added.graph.selected_patch, open.graph.selected_patch);
+        assert!(added.kit().unwrap().voices[2].layers.is_empty());
+        let target = added.graph.patches.iter().find(|p| p.id == other).unwrap();
+        let voice = &target.kits[0].voices[2];
+        assert_eq!(voice.layers[0].sample_id, sample);
+        assert_eq!(voice.selected_layer, voice.layers[0].id);
+        assert!(state
+            .patch_action(PatchAction::AddLayerTo {
+                patch: other,
+                kit: "missing".into(),
+                channel: 0,
+                sample,
+            })
+            .is_err());
     }
 }

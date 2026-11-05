@@ -770,6 +770,10 @@ impl AppState {
             library.prepare(id)
         }
     }
+    /// Normalized peaks of a Sample's current Rample sound, including its edits.
+    pub fn sample_waveform(&self, id: String) -> Result<Vec<f32>, String> {
+        Ok(self.prepare_library_sample(&id, true)?.waveform.clone())
+    }
     pub fn list_samples(&self) -> Result<Vec<LibrarySample>, String> {
         self.managed
             .lock()
@@ -916,6 +920,16 @@ pub(super) async fn restore_sample(
 ) -> Result<LibrarySample, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || state.restore_sample(id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(super) async fn sample_waveform(
+    id: String,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<f32>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.sample_waveform(id))
         .await
         .map_err(|e| e.to_string())?
 }
