@@ -536,8 +536,9 @@ it("selects several Samples to add, tag or retire them together", async () => {
   expect(
     await screen.findByText("Added 2 Samples to Kit A0, Voice 1."),
   ).toBeTruthy();
+  // A tag that exists in another case takes the Library's spelling.
   fireEvent.change(screen.getByRole("textbox", { name: "Tag to add" }), {
-    target: { value: "kept" },
+    target: { value: "KEPT" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
   await screen.findByText("Tagged 2 Samples #kept.");
@@ -589,11 +590,11 @@ it("removes a tag from selected Samples and offers Undo", async () => {
   expect(within(filters).getByRole("button", { name: "#kick 3" })).toBeTruthy();
 });
 
-it("renames, merges and deletes a tag across the Library from its filter", async () => {
+it("renames, merges in any case and deletes a tag across the Library from its filter", async () => {
   const user = userEvent.setup();
   const rows = [
     sample("a", "A", { tags: ["kick"] }),
-    sample("b", "B", { tags: ["Kick", "kick"] }),
+    sample("b", "B", { tags: ["kick", "Industrial"] }),
     sample("c", "C", { tags: ["snare"] }),
   ];
   show(rows);
@@ -603,24 +604,25 @@ it("renames, merges and deletes a tag across the Library from its filter", async
   fireEvent.click(within(filters).getByRole("button", { name: "#kick 2" }));
   expect(names()).toEqual(["A", "B"]);
 
+  // Typing another existing tag in any case merges into its spelling.
   vi.mocked(native.replaceSampleTag).mockResolvedValueOnce([
-    { ...rows[0], tags: ["Kick"] },
-    { ...rows[1], tags: ["Kick"] },
+    { ...rows[0], tags: ["Industrial"] },
+    { ...rows[1], tags: ["Industrial"] },
   ]);
   await user.click(screen.getByRole("button", { name: "Rename tag #kick" }));
   const input = screen.getByRole("textbox", { name: "New name for #kick" });
   await user.clear(input);
-  await user.type(input, "Kick{Enter}");
-  await screen.findByText("Merged #kick into #Kick.");
+  await user.type(input, "INDUSTRIAL{Enter}");
+  await screen.findByText("Merged #kick into #Industrial.");
   expect(native.replaceSampleTag).toHaveBeenLastCalledWith(
     "kick",
-    "Kick",
+    "Industrial",
     null,
   );
   // The filter follows the merged tag.
   expect(
     within(filters)
-      .getByRole("button", { name: "#Kick 2" })
+      .getByRole("button", { name: "#Industrial 2" })
       .getAttribute("aria-pressed"),
   ).toBe("true");
   expect(names()).toEqual(["A", "B"]);
@@ -633,24 +635,38 @@ it("renames, merges and deletes a tag across the Library from its filter", async
   );
   expect(native.replaceSampleTag).toHaveBeenCalledTimes(1);
 
+  // Another case of the same tag respells it.
   vi.mocked(native.replaceSampleTag).mockResolvedValueOnce([
-    { ...rows[2], tags: ["hat"] },
+    { ...rows[2], tags: ["Snare"] },
   ]);
   await user.click(screen.getByRole("button", { name: "Rename tag #snare" }));
   await user.type(
     screen.getByRole("textbox", { name: "New name for #snare" }),
-    "{Control>}a{/Control}{Backspace}hat{Enter}",
+    "{Control>}a{/Control}{Backspace}Snare{Enter}",
   );
-  await screen.findByText("Renamed #snare to #hat.");
+  await screen.findByText("Renamed #snare to #Snare.");
+  expect(native.replaceSampleTag).toHaveBeenLastCalledWith(
+    "snare",
+    "Snare",
+    null,
+  );
 
   vi.mocked(native.replaceSampleTag).mockResolvedValueOnce([
     { ...rows[0], tags: [] },
     { ...rows[1], tags: [] },
   ]);
-  await user.click(screen.getByRole("button", { name: "Delete tag #Kick" }));
-  await screen.findByText("Deleted #Kick from 2 Samples.");
-  expect(native.replaceSampleTag).toHaveBeenLastCalledWith("Kick", null, null);
-  expect(within(filters).queryByRole("button", { name: /#Kick/ })).toBe(null);
+  await user.click(
+    screen.getByRole("button", { name: "Delete tag #Industrial" }),
+  );
+  await screen.findByText("Deleted #Industrial from 2 Samples.");
+  expect(native.replaceSampleTag).toHaveBeenLastCalledWith(
+    "Industrial",
+    null,
+    null,
+  );
+  expect(within(filters).queryByRole("button", { name: /#Industrial/ })).toBe(
+    null,
+  );
   expect(names()).toEqual(["A", "B", "C"]);
   expect(onChanged).toHaveBeenCalledTimes(3);
 });

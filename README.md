@@ -46,14 +46,19 @@ Shift-click (or Shift+↑/↓) select several Samples to add as consecutive Laye
 tag or move to Trash together. The selection lists the tags its Samples carry;
 × removes one from all of them.
 
+Tags ignore case: `kick` and `Kick` are the same tag, and the Library keeps a
+single spelling of each. Typing a tag that already exists in another case uses
+the existing spelling. Opening the Library merges tags left in several cases
+into the spelling most Samples use.
+
 Hovering a tag filter shows **Rename** and **Delete**. Both apply to every
-Sample, including those in Trash. Renaming onto an existing tag merges the two
-(each Sample keeps one copy); tags match exactly, so `kick` and `Kick` are
-different tags. Removing, renaming and deleting tags happen at once and offer
-**Undo** until the next change.
+Sample, including those in Trash. Renaming onto another existing tag, in any
+case, merges the two (each Sample keeps one copy); renaming to another case of
+the same tag respells it. Removing, renaming and deleting tags happen at once
+and offer **Undo** until the next change.
 
 Select a Sample to edit its descriptive name and tags (one tag per
-line). Tags can contain spaces, punctuation and Unicode text. Search matches a
+line; a tag another Sample has keeps that Sample's spelling). Tags can contain spaces, punctuation and Unicode text. Search matches a
 literal, case-insensitive part of a name or tag. Renaming and tagging do not rename
 Original files or change Sample identity. Reimporting known audio retains this
 metadata, including after restarting the app. Samples with the same name remain

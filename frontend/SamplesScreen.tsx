@@ -46,6 +46,16 @@ interface Target {
   channel: number;
 }
 const page = 200;
+/** Tags are case-insensitive: the Library keeps one spelling of each. */
+const sameTag = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** The Library's spelling of a typed tag, or the tag as typed if it is new. */
+function spelling(rows: LibrarySample[], typed: string) {
+  for (const s of rows) {
+    const found = s.tags.find((t) => sameTag(t, typed));
+    if (found) return found;
+  }
+  return typed;
+}
 /** The tag lists a tag change replaced, so Undo can put them back. */
 interface TagUndo {
   changes: { id: string; tags: string[] }[];
@@ -348,10 +358,13 @@ export function SamplesScreen({
     onChanged();
   }
   async function renameTag(from: string) {
-    const to = renameTo.trim();
+    const typed = renameTo.trim();
     setRenaming(null);
-    if (!to || to === from) return;
-    const merge = rows.some((s) => s.tags.includes(to));
+    if (!typed || typed === from) return;
+    // Another case of the same tag respells it; another existing tag merges.
+    const respell = sameTag(typed, from);
+    const to = respell ? typed : spelling(rows, typed);
+    const merge = !respell && rows.some((s) => s.tags.includes(to));
     await changeTag(from, to, null, () =>
       merge ? `Merged #${from} into #${to}.` : `Renamed #${from} to #${to}.`,
     );
@@ -905,12 +918,13 @@ export function SamplesScreen({
                     className="bulk-tag"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      const value = newTag.trim();
-                      if (!value) return;
+                      const typed = newTag.trim();
+                      if (!typed) return;
+                      const value = spelling(rows, typed);
                       void run(async () => {
                         const saved: LibrarySample[] = [];
                         for (const s of picked)
-                          if (!s.tags.includes(value))
+                          if (!s.tags.some((t) => sameTag(t, value)))
                             saved.push(
                               await native.updateSampleMetadata(s.id, s.name, [
                                 ...s.tags,

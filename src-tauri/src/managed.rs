@@ -78,7 +78,7 @@ impl ManagedLibrary {
     pub(super) fn open_root(root: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(root.join("Originals")).map_err(|e| e.to_string())?;
         fs::create_dir_all(root.join("Incoming")).map_err(|e| e.to_string())?;
-        let db = Connection::open(root.join("library.sqlite3")).map_err(|e| e.to_string())?;
+        let mut db = Connection::open(root.join("library.sqlite3")).map_err(|e| e.to_string())?;
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
@@ -131,6 +131,7 @@ impl ManagedLibrary {
         // keeps the empty table so snapshots from any version share one schema.
         db.execute_batch("CREATE TABLE IF NOT EXISTS legacy_migration (id INTEGER PRIMARY KEY CHECK(id=1), patch_id TEXT NOT NULL);")
             .map_err(|e| e.to_string())?;
+        merge_tag_case(&mut db)?;
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
@@ -253,6 +254,8 @@ impl ManagedLibrary {
         if name.trim().is_empty() {
             return Err("Sample name cannot be empty.".into());
         }
+        // A tag another Sample already has keeps its spelling.
+        let tags = canonical_tags(tags, &tag_spellings(&tag_rows(&self.db)?, Some(id)));
         let changed = self
             .db
             .execute(
@@ -272,55 +275,49 @@ impl ManagedLibrary {
     }
     /// Removes `tag` from the Samples in `only`, or from every Sample in the
     /// Library and Trash when `only` is `None`, writing `replacement` in its
-    /// place. A Sample that already has the replacement keeps a single copy at
-    /// its first position, so renaming onto an existing tag merges both. Tags
-    /// match exactly. One transaction; returns the Samples that changed.
+    /// place. Tags are case-insensitive: a replacement that names another
+    /// existing tag takes its spelling and merges both (each Sample keeps one
+    /// copy); one that differs from `tag` only in case respells it. One
+    /// transaction; returns the Samples that changed.
     pub fn replace_tag(
         &mut self,
         tag: &str,
         replacement: Option<&str>,
         only: Option<&[String]>,
     ) -> Result<Vec<LibrarySample>, String> {
+        let from = tag_key(tag);
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        let rows = tag_rows(&tx)?;
         let replacement = match replacement.map(str::trim) {
             Some("") => return Err("Tag name cannot be empty.".into()),
-            Some(name) if name == tag => return Ok(vec![]),
-            other => other,
-        };
-        let tx = self.db.transaction().map_err(|e| e.to_string())?;
-        let rows = {
-            let mut query = tx
-                .prepare("SELECT id, tags FROM samples ORDER BY rowid")
-                .map_err(|e| e.to_string())?;
-            let rows: Vec<(String, String)> = query
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<_, _>>()
-                .map_err(|e| e.to_string())?;
-            rows
+            Some(name) if tag_key(name) == from => Some(name.to_owned()),
+            Some(name) => Some(
+                tag_spellings(&rows, None)
+                    .remove(&tag_key(name))
+                    .unwrap_or_else(|| name.to_owned()),
+            ),
+            None => None,
         };
         let mut changed = vec![];
         for (id, tags) in rows {
-            if only.is_some_and(|ids| !ids.contains(&id)) {
+            if only.is_some_and(|ids| !ids.contains(&id))
+                || !tags.iter().any(|t| tag_key(t) == from)
+            {
                 continue;
             }
-            let tags: Vec<String> = serde_json::from_str(&tags).map_err(|e| e.to_string())?;
-            if !tags.iter().any(|t| t == tag) {
-                continue;
-            }
-            let mut next: Vec<String> = Vec::with_capacity(tags.len());
-            for t in tags {
-                let t = if t == tag {
-                    match replacement {
-                        Some(name) => name.to_owned(),
-                        None => continue,
+            let replaced = tags
+                .iter()
+                .filter_map(|t| {
+                    if tag_key(t) == from {
+                        replacement.clone()
+                    } else {
+                        Some(t.clone())
                     }
-                } else {
-                    t
-                };
-                if replacement == Some(t.as_str()) && next.contains(&t) {
-                    continue;
-                }
-                next.push(t);
+                })
+                .collect();
+            let next = canonical_tags(replaced, &HashMap::new());
+            if next == tags {
+                continue;
             }
             tx.execute(
                 "UPDATE samples SET tags=?2 WHERE id=?1",
@@ -883,6 +880,92 @@ pub(super) fn validate_wav(path: &Path) -> Result<wav::WavSpec, String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(spec)
+}
+/// Tags are case-insensitive: the Library keeps a single spelling of each.
+fn tag_key(tag: &str) -> String {
+    tag.to_lowercase()
+}
+/// Every Sample's ID and tags (Trash included), in import order.
+fn tag_rows(db: &Connection) -> Result<Vec<(String, Vec<String>)>, String> {
+    let mut query = db
+        .prepare("SELECT id, tags FROM samples ORDER BY rowid")
+        .map_err(|e| e.to_string())?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.map(|row| {
+        let (id, tags) = row.map_err(|e| e.to_string())?;
+        Ok((id, serde_json::from_str(&tags).map_err(|e| e.to_string())?))
+    })
+    .collect()
+}
+/// The Library's spelling of each tag by [`tag_key`], ignoring Sample `except`.
+fn tag_spellings(rows: &[(String, Vec<String>)], except: Option<&str>) -> HashMap<String, String> {
+    let mut spellings = HashMap::new();
+    for (_, tags) in rows.iter().filter(|(id, _)| Some(id.as_str()) != except) {
+        for tag in tags {
+            spellings.entry(tag_key(tag)).or_insert_with(|| tag.clone());
+        }
+    }
+    spellings
+}
+/// Gives each tag its spelling in `spellings` and drops case variants of a
+/// tag the list already has; a new tag keeps its first spelling in the list.
+fn canonical_tags(tags: Vec<String>, spellings: &HashMap<String, String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    tags.into_iter()
+        .filter_map(|tag| {
+            let key = tag_key(&tag);
+            seen.insert(key.clone())
+                .then(|| spellings.get(&key).cloned().unwrap_or(tag))
+        })
+        .collect()
+}
+/// Merges tags that differ only in case, left from when tags were
+/// case-sensitive. Each takes the spelling most Samples use (the earliest
+/// imported on a tie). Idempotent: a merged Library is left untouched.
+fn merge_tag_case(db: &mut Connection) -> Result<(), String> {
+    let rows = tag_rows(db)?;
+    let mut uses: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    for (_, tags) in &rows {
+        let mut counted = HashSet::new();
+        for tag in tags.iter().filter(|tag| counted.insert(*tag)) {
+            let spellings = uses.entry(tag_key(tag)).or_default();
+            match spellings.iter_mut().find(|(s, _)| s == tag) {
+                Some((_, count)) => *count += 1,
+                None => spellings.push((tag.clone(), 1)),
+            }
+        }
+    }
+    if uses.values().all(|spellings| spellings.len() == 1) {
+        return Ok(());
+    }
+    let spellings: HashMap<_, _> = uses
+        .into_iter()
+        .map(|(key, spellings)| {
+            let mut best = &spellings[0];
+            for candidate in &spellings[1..] {
+                if candidate.1 > best.1 {
+                    best = candidate;
+                }
+            }
+            (key, best.0.clone())
+        })
+        .collect();
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    for (id, tags) in rows {
+        let next = canonical_tags(tags.clone(), &spellings);
+        if next != tags {
+            tx.execute(
+                "UPDATE samples SET tags=?2 WHERE id=?1",
+                params![id, serde_json::to_string(&next).map_err(|e| e.to_string())?],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 fn sample_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LibrarySample> {
     let rate: u32 = row.get(4)?;
@@ -1631,68 +1714,87 @@ mod tests {
         }
     }
 
-    #[test]
-    fn tags_are_removed_from_a_selection_deleted_or_renamed_with_merge_and_undone() {
-        let (temp, state, _) = fixture();
-        let paths: Vec<_> = ["A", "B", "C"]
+    fn import_named(temp: &Path, state: &crate::AppState, names: &[&str]) -> Vec<String> {
+        let paths: Vec<_> = names
             .iter()
             .enumerate()
             .map(|(i, name)| {
-                let path = temp.path().join(format!("{name}.wav"));
+                let path = temp.join(format!("{name}.wav"));
                 wav::write_pcm16(&path, &[1024 * (i as i16 + 1); 4410], 44100).unwrap();
                 path
             })
             .collect();
         let samples = state.import_samples(paths).unwrap().samples;
-        let ids: Vec<_> = samples.iter().map(|s| s.id.clone()).collect();
+        samples.into_iter().map(|s| s.id).collect()
+    }
+
+    #[test]
+    fn tags_ignore_case_when_removed_from_a_selection_deleted_or_renamed_with_merge_and_undone() {
+        let (temp, state, _) = fixture();
+        let ids = import_named(temp.path(), &state, &["A", "B", "C"]);
         let tag = |i: usize, tags: &[&str]| {
             state
                 .update_sample_metadata(
                     ids[i].clone(),
-                    samples[i].name.clone(),
+                    ["A", "B", "C"][i].into(),
                     tags.iter().map(|t| t.to_string()).collect(),
                 )
                 .unwrap()
+                .tags
         };
-        tag(0, &["kick", "Kick", "dry"]);
-        tag(1, &["dry", "kick"]);
-        tag(2, &["kick"]);
-        state.retire_sample(ids[2].clone()).unwrap();
         let tags = |i: usize| {
             let all = state.managed.lock().unwrap().list().unwrap();
             all.into_iter().find(|s| s.id == ids[i]).unwrap().tags
         };
+        // A typed tag takes the spelling another Sample already uses, and a
+        // list keeps one copy of each tag.
+        assert_eq!(tag(0, &["kick", "Dry", "KICK"]), ["kick", "Dry"]);
+        assert_eq!(tag(1, &["dry", "KICK"]), ["Dry", "kick"]);
+        assert_eq!(tag(0, &["Kick", "Dry"]), ["kick", "Dry"]);
+        // A tag no other Sample has can be respelled on its own Sample.
+        assert_eq!(tag(2, &["Snare"]), ["Snare"]);
+        assert_eq!(tag(2, &["snare", "kick"]), ["snare", "kick"]);
+        state.retire_sample(ids[2].clone()).unwrap();
 
         // Removing from a selection leaves other Samples and other tags alone.
         let removed = state
-            .replace_sample_tag("dry".into(), None, Some(vec![ids[0].clone()]))
+            .replace_sample_tag("DRY".into(), None, Some(vec![ids[0].clone()]))
             .unwrap();
         assert_eq!(removed.len(), 1);
-        assert_eq!(tags(0), ["kick", "Kick"]);
-        assert_eq!(tags(1), ["dry", "kick"]);
+        assert_eq!(tags(0), ["kick"]);
+        assert_eq!(tags(1), ["Dry", "kick"]);
 
-        // Renaming onto an existing tag merges it, Trash included; tags match exactly.
+        // Renaming onto an existing tag, in any case, merges into its spelling;
+        // Trash included.
         let renamed = state
-            .replace_sample_tag("kick".into(), Some(" Kick ".into()), None)
+            .replace_sample_tag("kick".into(), Some(" SNARE ".into()), None)
             .unwrap();
         assert_eq!(renamed.len(), 3);
-        assert_eq!(tags(0), ["Kick"]);
-        assert_eq!(tags(1), ["dry", "Kick"]);
-        assert_eq!(tags(2), ["Kick"]);
+        assert_eq!(tags(0), ["snare"]);
+        assert_eq!(tags(1), ["Dry", "snare"]);
+        assert_eq!(tags(2), ["snare"]);
+        // Renaming a tag to another case of itself respells it everywhere.
+        let respelled = state
+            .replace_sample_tag("snare".into(), Some("Snare".into()), None)
+            .unwrap();
+        assert_eq!(respelled.len(), 3);
+        assert_eq!(tags(1), ["Dry", "Snare"]);
         assert!(state
-            .replace_sample_tag("Kick".into(), Some("Kick".into()), None)
+            .replace_sample_tag("SNARE".into(), Some("Snare".into()), None)
             .unwrap()
             .is_empty());
         assert!(state
-            .replace_sample_tag("Kick".into(), Some("  ".into()), None)
+            .replace_sample_tag("Snare".into(), Some("  ".into()), None)
             .is_err());
 
         // Deleting removes it everywhere; restoring the previous lists undoes it.
         let before: Vec<_> = (0..3).map(tags).collect();
-        let deleted = state.replace_sample_tag("Kick".into(), None, None).unwrap();
+        let deleted = state
+            .replace_sample_tag("snare".into(), None, None)
+            .unwrap();
         assert_eq!(deleted.len(), 3);
         assert!(tags(0).is_empty() && tags(2).is_empty());
-        assert_eq!(tags(1), ["dry"]);
+        assert_eq!(tags(1), ["Dry"]);
         let undo: Vec<_> = (0..3)
             .map(|i| super::SampleTags {
                 id: ids[i].clone(),
@@ -1701,6 +1803,54 @@ mod tests {
             .collect();
         state.set_sample_tags(undo).unwrap();
         assert_eq!((0..3).map(tags).collect::<Vec<_>>(), before);
+    }
+
+    #[test]
+    fn opening_merges_tags_that_differ_only_in_case_into_the_most_used_spelling() {
+        let (temp, state, _) = fixture();
+        let ids = import_named(temp.path(), &state, &["A", "B", "C", "D"]);
+        let legacy = [
+            r#"["Industrial","fx"]"#,
+            r#"["industrial"]"#,
+            r#"["industrial","Industrial","FX"]"#,
+            r#"["industrial","Hit"]"#,
+        ];
+        for (id, tags) in ids.iter().zip(legacy) {
+            state
+                .managed
+                .lock()
+                .unwrap()
+                .db
+                .execute(
+                    "UPDATE samples SET tags=?2 WHERE id=?1",
+                    rusqlite::params![id, tags],
+                )
+                .unwrap();
+        }
+        drop(state);
+        let support = temp.path().join("support");
+        let tags = |library: &super::ManagedLibrary| -> Vec<Vec<String>> {
+            let all = library.list().unwrap();
+            ids.iter()
+                .map(|id| all.iter().find(|s| &s.id == id).unwrap().tags.clone())
+                .collect()
+        };
+        let library = super::ManagedLibrary::open(&support).unwrap();
+        // "industrial" is on 3 Samples, "Industrial" on 2; "fx" and "FX" tie, so
+        // the earliest imported spelling wins.
+        let merged = tags(&library);
+        assert_eq!(
+            merged,
+            [
+                vec!["industrial", "fx"],
+                vec!["industrial"],
+                vec!["industrial", "fx"],
+                vec!["industrial", "Hit"],
+            ]
+        );
+        drop(library);
+        let reopened = super::ManagedLibrary::open(&support).unwrap();
+        assert_eq!(tags(&reopened), merged);
     }
 
     #[test]
