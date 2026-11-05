@@ -77,15 +77,14 @@ fn ensure_empty(destination: &Path, except: Option<&str>) -> Result<(), String> 
     };
     Err(format!("Build Patch currently writes only to an empty folder or card. This destination already contains {shown}{more}. Nothing was written."))
 }
-#[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), String> {
-    fs::File::open(path)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())
-}
-#[cfg(not(unix))]
-fn sync_directory(_: &Path) -> Result<(), String> {
-    Ok(())
+/// Best effort: every file is already synced, and some removable-media
+/// filesystems do not support syncing a directory handle. Published files are
+/// validated by reading them back instead.
+fn sync_directory(path: &Path) {
+    #[cfg(unix)]
+    let _ = fs::File::open(path).and_then(|f| f.sync_all());
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 impl ManagedLibrary {
@@ -143,7 +142,7 @@ impl ManagedLibrary {
         cleanup.map_err(|e| {
             format!("The Patch was built, but its temporary folder {staging_name} could not be removed: {e}. Delete it before using the card.")
         })?;
-        sync_directory(destination)?;
+        sync_directory(destination);
         let mut kits: Vec<String> = files.iter().map(|f| f.kit.clone()).collect();
         kits.dedup();
         let mut notices = vec![];
@@ -237,7 +236,7 @@ fn publish(
             .map_err(|e| format!("Could not write {}: {e}", file.path))?;
     }
     for folder in claimed.iter() {
-        sync_directory(folder)?;
+        sync_directory(folder);
     }
     // Validate the complete published output, not only the staged copies.
     for (file, sha256) in files.iter().zip(hashes) {
