@@ -74,6 +74,10 @@ sort-order captures are planned.
   memory is kept only where nothing verified was read.
 - Native interpretation is not part of the SD recognition fingerprint; the
   preserved native bytes already are.
+- A Patch imported before native reading existed is not treated as an
+  unchanged recognition. Importing the SD again offers **Update existing
+  Patch**, which applies the stored modes while keeping the Patch's name,
+  tempo, patterns and mixer.
 
 ## Known limits (no further captures planned)
 

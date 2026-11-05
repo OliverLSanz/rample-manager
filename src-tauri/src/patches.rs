@@ -424,7 +424,7 @@ impl AppState {
                             validation.push(format!("{}: {issue}", patch.name));
                         }
                     }
-                    None => validation.push(format!("{}: Layer modes were not read from this SD Import. Import the SD again to start from its stored Layer modes.", patch.name)),
+                    None => validation.push(format!("{}: Layer modes were not read from this SD Import. Import the SD again and choose Update existing Patch to read its stored Layer modes.", patch.name)),
                 }
             }
             for kit in &patch.kits {

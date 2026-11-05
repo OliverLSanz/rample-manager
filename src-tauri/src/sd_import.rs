@@ -241,6 +241,12 @@ impl ManagedLibrary {
         let (Some(before), Some(now)) = (&existing.imported_sd, &draft.imported_sd) else {
             return Ok(None);
         };
+        // A Patch imported before native reading existed never received the
+        // SD's stored Layer modes. Offer an explicit update instead of
+        // silently reopening it with app defaults.
+        if before.native.is_none() && now.native.is_some() {
+            return Ok(None);
+        }
         let same = now.files.iter().all(|file| {
             before
                 .files
@@ -1237,5 +1243,62 @@ mod tests {
         assert!(review.native_verified);
         assert_eq!(native.kits[0].source, "appDefault");
         assert!(native.kits[0].issues.is_empty());
+    }
+    #[test]
+    fn sd_imported_before_native_reading_offers_update_with_stored_modes() {
+        use rample_core::{model::LayerMode, native::fixtures};
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        wavs(&source, "A0", &["1_a.wav", "1_b.wav", "1_c.wav"]);
+        std::fs::create_dir_all(source.join("_save")).unwrap();
+        std::fs::write(
+            source.join("_save/A0.rpl"),
+            fixtures::kit([2, 0, 0, 0], [2, 0, 0, 0]),
+        )
+        .unwrap();
+        let first = state.prepare_sd_import(source.clone()).unwrap();
+        let saved = state
+            .finish_sd_import(&first.id, super::SdImportChoice::New { name: "Old".into() })
+            .unwrap();
+        let patch_id = saved.graph.selected_patch.clone();
+        // Simulate a Patch saved by a build without native reading, with the
+        // user's own changes to keep.
+        {
+            let store = state.managed.lock().unwrap();
+            let mut graph = store.load_patches().unwrap();
+            let patch = graph.patches.iter_mut().find(|p| p.id == patch_id).unwrap();
+            patch.imported_sd.as_mut().unwrap().native = None;
+            patch.bpm = 97.;
+            let voice = &mut patch.kits[0].voices[0];
+            voice.mode = LayerMode::Single;
+            voice.selected_layer = voice.layers[0].id.clone();
+            store.save_patches(&graph).unwrap();
+        }
+        let reopened = state.patch_action(patches::PatchAction::Open).unwrap();
+        assert!(reopened
+            .validation
+            .iter()
+            .any(|v| v.contains("choose Update existing Patch")));
+        let again = state.prepare_sd_import(source).unwrap();
+        assert_eq!(again.status, "changed");
+        assert_eq!(again.recognized_patch, None);
+        let updated = state
+            .finish_sd_import(&again.id, super::SdImportChoice::Update { patch: patch_id })
+            .unwrap();
+        let patch = updated.graph.current().unwrap();
+        let voice = &patch.kits[0].voices[0];
+        assert_eq!(voice.mode, LayerMode::Sequential);
+        assert_eq!(voice.selected_layer, voice.layers[2].id);
+        assert_eq!(patch.bpm, 97.);
+        assert!(!updated
+            .validation
+            .iter()
+            .any(|v| v.contains("were not read")));
+        // Once updated, the same SD is recognized again.
+        let source = temp.path().join("SD");
+        assert_eq!(
+            state.prepare_sd_import(source).unwrap().status,
+            "recognized"
+        );
     }
 }
