@@ -17,15 +17,27 @@ export const draggedSamples = (data: string) =>
   data.split("\n").filter((id) => id.length > 0);
 const page = 150;
 
-/** Literal, case-insensitive part of a name or tag, like the Library search. */
+/**
+ * Every word of `query` is a literal, case-insensitive part of the name or a
+ * tag, so "kick industrial" finds industrial kicks. Shared with the Library.
+ */
 export function matchesSample(sample: LibrarySample, query: string) {
-  const term = query.trim().toLowerCase();
-  return (
-    !term ||
-    [sample.name, ...sample.tags].some((text) =>
-      text.toLowerCase().includes(term),
-    )
-  );
+  const texts = [sample.name, ...sample.tags].map((t) => t.toLowerCase());
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => texts.some((text) => text.includes(term)));
+}
+/** Whether the Sample has every tag in `tags` (tag filters combine). */
+export const hasTags = (sample: LibrarySample, tags: string[]) =>
+  tags.every((tag) => sample.tags.includes(tag));
+/** Tags of the Samples with how many use each, most used first. */
+export function tagCounts(samples: LibrarySample[]): [string, number][] {
+  const all = new Map<string, number>();
+  for (const s of samples)
+    if (!s.retired) for (const t of s.tags) all.set(t, (all.get(t) ?? 0) + 1);
+  return [...all].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 /**
@@ -55,6 +67,7 @@ export function SamplePanel({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   // The cursor row; the selection grows from the anchor with Shift.
   const [active, setActive] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -66,14 +79,25 @@ export function SamplePanel({
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const matches = useMemo(
-    () => samples.filter((s) => !s.retired && matchesSample(s, query)),
-    [samples, query],
+    () =>
+      samples.filter(
+        (s) => !s.retired && hasTags(s, tags) && matchesSample(s, query),
+      ),
+    [samples, query, tags],
   );
+  // Picked tags first, then the rest by use.
+  const tagList = useMemo(() => {
+    const all = tagCounts(samples).map(([name]) => name);
+    return [
+      ...tags.filter((t) => all.includes(t)),
+      ...all.filter((t) => !tags.includes(t)),
+    ];
+  }, [samples, tags]);
   const shown = matches.slice(0, limit);
   /** Selected Samples that can be added, in list order. */
   const picked = shown.filter((s) => s.readable && selected.includes(s.id));
   useEffect(() => search.current?.focus(), []);
-  useEffect(() => setLimit(page), [query]);
+  useEffect(() => setLimit(page), [query, tags]);
   useEffect(() => {
     if (!added) return;
     const timer = setTimeout(() => setAdded(null), 2500);
@@ -217,6 +241,25 @@ export function SamplePanel({
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
+      {tagList.length > 0 && (
+        <div className="panel-tags" role="group" aria-label="Filter by tags">
+          {tagList.map((tag) => (
+            <button
+              key={tag}
+              aria-pressed={tags.includes(tag)}
+              onClick={() =>
+                setTags((all) =>
+                  all.includes(tag)
+                    ? all.filter((t) => t !== tag)
+                    : [...all, tag],
+                )
+              }
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="panel-options">
         <label>
           <input

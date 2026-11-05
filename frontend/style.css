@@ -1924,6 +1924,28 @@ main {
 .panel-more {
   width: 100%;
 }
+.panel-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 54px;
+  overflow-y: auto;
+  padding: 2px 14px 6px;
+}
+.panel-tags button {
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  color: var(--muted);
+  background: #ffffff08;
+}
+.panel-tags button:hover {
+  color: #eeeff1;
+}
+.panel-tags button[aria-pressed="true"] {
+  color: #15181b;
+  background: var(--voice);
+}
 .panel-selection {
   display: flex;
   align-items: center;
@@ -2096,11 +2118,20 @@ main {
   color: var(--accent);
 }
 .samples-filters h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   margin: 14px 10px 4px;
   font-size: 9px;
   letter-spacing: 1.4px;
   color: var(--muted);
   font-weight: 650;
+}
+.samples-filters h3 .text-button {
+  padding: 0;
+  font-size: 10px;
+  letter-spacing: 0;
+  font-weight: 500;
 }
 .tag-row {
   display: flex;

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import * as native from "./native";
 import { useSampleAudition } from "./audition";
-import { matchesSample } from "./SamplePanel";
+import { hasTags, matchesSample, tagCounts } from "./SamplePanel";
 import { colors } from "./Sequencer";
 import { Waveform } from "./VoiceCard";
 import {
@@ -207,7 +207,8 @@ export function SamplesScreen({
 }) {
   const [samples, setSamples] = useState<LibrarySample[] | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
-  const [tag, setTag] = useState<string | null>(null);
+  // Tag filters combine: a Sample must have every picked tag.
+  const [picks, setPicks] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("import");
   const [selected, setSelected] = useState<string[]>([]);
@@ -244,7 +245,7 @@ export function SamplesScreen({
       alive.current = false;
     };
   }, []);
-  useEffect(() => setLimit(page), [query, filter, tag, sort]);
+  useEffect(() => setLimit(page), [query, filter, picks, sort]);
   // Keep the destination valid when Patches or Kits change.
   useEffect(() => {
     const patch = view.graph.patches.find((p) => p.id === target.patch);
@@ -268,19 +269,19 @@ export function SamplesScreen({
     unused: active.filter((s) => !usage.has(s.id)).length,
     trash: rows.length - active.length,
   };
-  const tags = useMemo(() => {
-    const all = new Map<string, number>();
-    for (const s of rows)
-      if (!s.retired) for (const t of s.tags) all.set(t, (all.get(t) ?? 0) + 1);
-    return [...all].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [rows]);
+  const tags = useMemo(() => tagCounts(rows), [rows]);
+  // The most used tags, plus any picked tag beyond them.
+  const tagRows = [
+    ...tags.slice(0, 40),
+    ...tags.slice(40).filter(([name]) => picks.includes(name)),
+  ];
   const matches = useMemo(() => {
     const found = rows.filter(
       (s) =>
         (filter === "trash" ? s.retired : !s.retired) &&
         (filter !== "patch" || inPatch(s)) &&
         (filter !== "unused" || !usage.has(s.id)) &&
-        (!tag || s.tags.includes(tag)) &&
+        hasTags(s, picks) &&
         matchesSample(s, query),
     );
     if (sort === "name")
@@ -294,7 +295,7 @@ export function SamplesScreen({
           (usage.get(b.id)?.length ?? 0) - (usage.get(a.id)?.length ?? 0),
       );
     return found;
-  }, [rows, filter, tag, query, sort, usage, open?.id]);
+  }, [rows, filter, picks, query, sort, usage, open?.id]);
   const shown = matches.slice(0, limit);
   const picked = selected
     .map((id) => rows.find((s) => s.id === id))
@@ -341,7 +342,10 @@ export function SamplesScreen({
     if (!changed || !alive.current) return false;
     replace(changed);
     // A Library-wide rename or delete carries the tag filter with it.
-    if (!ids && tag === from) setTag(to);
+    if (!ids && picks.includes(from))
+      setPicks((all) => [
+        ...new Set(all.flatMap((t) => (t !== from ? [t] : to ? [to] : []))),
+      ]);
     setMessage(done(changed.length));
     if (changed.length)
       setTagUndo({
@@ -603,8 +607,21 @@ export function SamplesScreen({
               <small>{counts[id]}</small>
             </button>
           ))}
-          {tags.length > 0 && <h3>Tags</h3>}
-          {tags.slice(0, 40).map(([name, count]) =>
+          {tags.length > 0 && (
+            <h3>
+              Tags
+              {picks.length > 0 && (
+                <button
+                  className="text-button"
+                  aria-label="Clear tag filters"
+                  onClick={() => setPicks([])}
+                >
+                  Clear
+                </button>
+              )}
+            </h3>
+          )}
+          {tagRows.map(([name, count]) =>
             renaming === name ? (
               <form
                 key={name}
@@ -632,8 +649,15 @@ export function SamplesScreen({
               <div key={name} className="tag-row">
                 <button
                   className="tag-filter"
-                  aria-pressed={tag === name}
-                  onClick={() => setTag(tag === name ? null : name)}
+                  aria-pressed={picks.includes(name)}
+                  title="Combine tags to find Samples that have all of them"
+                  onClick={() =>
+                    setPicks((all) =>
+                      all.includes(name)
+                        ? all.filter((t) => t !== name)
+                        : [...all, name],
+                    )
+                  }
                 >
                   <span>#{name}</span>
                   <small>{count}</small>

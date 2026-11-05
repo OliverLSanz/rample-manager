@@ -875,6 +875,36 @@ describe("Library", () => {
     expect(native.patchAction).toHaveBeenCalledTimes(1);
   });
 
+  it("combines tag filters in the side panel", async () => {
+    const many = view();
+    many.samples = [
+      { ...sample, id: "a", name: "Big kick", tags: ["kick", "industrial"] },
+      { ...sample, id: "b", name: "Soft kick", tags: ["kick"] },
+      { ...sample, id: "c", name: "Clank", tags: ["industrial"] },
+    ];
+    await openApp(many);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
+    );
+    const panel = screen.getByRole("complementary", { name: "Add Samples" });
+    const tags = within(panel).getByRole("group", { name: "Filter by tags" });
+    const options = () =>
+      within(panel)
+        .getAllByRole("option")
+        .map((o) => o.querySelector("strong")?.textContent);
+    fireEvent.click(within(tags).getByRole("button", { name: "#kick" }));
+    fireEvent.click(within(tags).getByRole("button", { name: "#industrial" }));
+    expect(options()).toEqual(["Big kick"]);
+    expect(
+      within(tags)
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("aria-pressed") === "true")
+        .map((b) => b.textContent),
+    ).toEqual(["#kick", "#industrial"]);
+    fireEvent.click(within(tags).getByRole("button", { name: "#kick" }));
+    expect(options()).toEqual(["Big kick", "Clank"]);
+  });
+
   it("reports a failed add and keeps the panel open", async () => {
     await openApp();
     fireEvent.click(

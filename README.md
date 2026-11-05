@@ -36,7 +36,9 @@ is padded. The square button stops either audition. Clicking a row, or browsing
 with ↑/↓ while **Hear while browsing** is on, plays its Rample sound.
 
 The filters show all Samples, those in the open Patch, those not in any Kit,
-the Trash, or one tag; sort by import order, name, duration or use. Each row
+the Trash, or tags: picking several tags shows the Samples that have all of
+them (`#kick` and `#industrial` for industrial kicks), and **Clear** drops them;
+sort by import order, name, duration or use. Each row
 shows where the Sample plays in the open Patch (such as `A0·V2`) and in how many
 other Patches. The details beside the list show its waveform and **Used in**:
 every Layer that plays it, across Patches; click one to open that Kit. **Add as
@@ -58,8 +60,9 @@ the same tag respells it. Removing, renaming and deleting tags happen at once
 and offer **Undo** until the next change.
 
 Select a Sample to edit its descriptive name and tags (one tag per
-line; a tag another Sample has keeps that Sample's spelling). Tags can contain spaces, punctuation and Unicode text. Search matches a
-literal, case-insensitive part of a name or tag. Renaming and tagging do not rename
+line; a tag another Sample has keeps that Sample's spelling). Tags can contain spaces, punctuation and Unicode text. Search matches
+literal, case-insensitive words: every word must be part of the name or a tag,
+so `kick industrial` finds industrial kicks. Renaming and tagging do not rename
 Original files or change Sample identity. Reimporting known audio retains this
 metadata, including after restarting the app. Samples with the same name remain
 separate entries; selecting or auditioning a row always uses its Sample ID.
@@ -121,7 +124,8 @@ Kit preview uses the Library's mono Rample preparation.
 
 **Add Sample** on a voice card opens the **Add Samples** panel beside the Kit,
 targeting that Voice; the 1–4 buttons change the target. Search matches part of
-a name or tag. ↑/↓ browse and, with **Hear while browsing**, play each Sample as
+a name or tag for every word, and the tag buttons under it combine like the
+Library's tag filters. ↑/↓ browse and, with **Hear while browsing**, play each Sample as
 the Rample will (mono preparation, independently of the mixer); Enter,
 double-click or **+** adds it as the Voice's last Layer. The panel stays open,
 so you can keep auditioning and adding, also while switching Kits. Drag any row

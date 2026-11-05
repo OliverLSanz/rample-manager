@@ -590,6 +590,37 @@ it("removes a tag from selected Samples and offers Undo", async () => {
   expect(within(filters).getByRole("button", { name: "#kick 3" })).toBeTruthy();
 });
 
+it("combines tag filters and search words to find Samples with all of them", async () => {
+  const rows = [
+    sample("a", "Big kick", { tags: ["kick", "industrial"] }),
+    sample("b", "Soft kick", { tags: ["kick"] }),
+    sample("c", "Clank", { tags: ["industrial"] }),
+  ];
+  show(rows);
+  const filters = await screen.findByRole("navigation", {
+    name: "Sample filters",
+  });
+  fireEvent.click(within(filters).getByRole("button", { name: "#kick 2" }));
+  expect(names()).toEqual(["Big kick", "Soft kick"]);
+  fireEvent.click(
+    within(filters).getByRole("button", { name: "#industrial 2" }),
+  );
+  expect(names()).toEqual(["Big kick"]);
+  // Picking a tag again drops it; Clear drops them all.
+  fireEvent.click(within(filters).getByRole("button", { name: "#kick 2" }));
+  expect(names()).toEqual(["Big kick", "Clank"]);
+  fireEvent.click(
+    within(filters).getByRole("button", { name: "Clear tag filters" }),
+  );
+  expect(names()).toEqual(["Big kick", "Soft kick", "Clank"]);
+  // Every search word must match the name or a tag.
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search Samples by name or tag" }),
+    { target: { value: "KICK industrial" } },
+  );
+  expect(names()).toEqual(["Big kick"]);
+});
+
 it("renames, merges in any case and deletes a tag across the Library from its filter", async () => {
   const user = userEvent.setup();
   const rows = [
