@@ -872,12 +872,6 @@ footer {
   font-size: 10px;
   padding-bottom: 2px;
 }
-footer > div {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
 footer b {
   font-weight: 400;
   margin: 0 2px;
@@ -2340,4 +2334,71 @@ main {
 .detail-error {
   font-size: 11px;
   color: #f3a394;
+}
+
+.build-blockers {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #e2b86b;
+  color: #15181b;
+  font: 700 10px var(--mono);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.compatibility.notes summary {
+  color: var(--muted);
+}
+
+.shortcuts-button {
+  gap: 7px;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.modal:has(.shortcut-groups) {
+  width: 620px;
+}
+.shortcut-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 26px;
+  margin-top: 20px;
+}
+.shortcut-groups h3 {
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.shortcut-groups dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.shortcut-groups dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+}
+.shortcut-groups dt {
+  flex-shrink: 0;
+}
+.shortcut-groups dd {
+  margin: 0;
+  color: #b9bfc8;
+  text-align: right;
+}
+
+.issue-kit {
+  font: 11px var(--mono);
+  color: var(--accent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f6806114;
 }

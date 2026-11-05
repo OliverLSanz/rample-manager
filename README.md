@@ -85,8 +85,9 @@ occurrences of the same Samples, same modes and selections) or deletes it. Used
 addresses are refused as you type. With a Kit focused, ↑/↓ select the previous or
 next Kit and Delete removes it.
 
-Deleting a Kit or Patch happens at once and shows **Undo** (also Cmd/Ctrl+Z) for
-ten seconds. Undo restores it exactly, with the same identities, even after
+Deleting a Kit or Patch, or removing a Layer, happens at once and shows **Undo**
+(also Cmd/Ctrl+Z) for ten seconds. Undoing a Layer puts it back at its position,
+with its selection, and shows its Kit. Undo restores it exactly, with the same identities, even after
 other edits, until the next deletion, a Library restore or quitting the app.
 A deleted imported Patch stops being recognized when its card is imported
 again; undo restores that recognition. A duplicated Patch starts without the
@@ -126,18 +127,27 @@ patterns, mixer and tempo persist within each Patch when changing Kits. Musical
 controls reuse prepared audio, so changing a step or stopping playback does not
 reread/decode long Originals; opening the app, the Library or the editor
 revalidates assets. Incomplete drafts remain editable: missing Voice 1 and more
-than 12 Layers are listed under **issues to fix before Build**, retaining every
-Layer. Patches save locally in the private Library database. These controls
+than 12 Layers, duplicate addresses and audio that cannot be prepared are listed
+under **issues to fix before Build**, retaining every Layer. While any remain,
+**Build to SD…** shows their number and opens that list instead of asking for a
+destination. Notes from SD Import about native settings are listed apart and do
+not block a Build. Patches save locally in the private Library database. These controls
 never write native Rample settings (`_save`). To use a mode on the device, set
 it on the Rample and STORE.
 
-| Shortcut                               | Action            |
-| -------------------------------------- | ----------------- |
-| Space                                  | Play / stop       |
-| 1–4                                    | Audition a voice  |
-| Option/Alt-click or right-click a step | Edit its velocity |
+| Shortcut                               | Action                            |
+| -------------------------------------- | --------------------------------- |
+| Space                                  | Play / stop                       |
+| 1–4                                    | Audition a voice                  |
+| Option/Alt-click or right-click a step | Edit its velocity                 |
+| [ and ]                                | Previous or next Kit              |
+| Cmd/Ctrl+1, Cmd/Ctrl+2                 | Kit or Samples view               |
+| Cmd/Ctrl+F                             | Search the current view           |
+| Cmd/Ctrl+Z                             | Undo a deletion while it is shown |
+| ?                                      | List all shortcuts                |
 
-Shortcuts leave text fields and focused buttons alone. The **Pattern** menu loads
+Shortcuts leave text fields alone; Space and 1–4 also leave focused buttons
+alone. The **Pattern** menu loads
 an example beat or clears the sequence.
 
 **Import Rample SD…** copies an SD root or local copy into managed storage and

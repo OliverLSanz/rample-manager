@@ -48,7 +48,7 @@ Kit and Layer management belong on this screen, never in a second dialog that
 repeats it. The switcher only chooses, creates, renames or imports Patches and
 returns to the main window. Pure view logic lives in `frontend/patchView.ts`.
 The folder session is not shown; it is only offered as **Move current folder
-into Library**. Kits and Patches delete at once with an in-memory Undo
+into Library**. Kits, Patches and Layers delete at once with an in-memory Undo
 (`patches::Deleted`), not a confirmation; Undo must restore the same IDs.
 Deleting a Patch unlinks its `sd_intakes` rows in the same transaction.
 

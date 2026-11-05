@@ -66,6 +66,18 @@ export function patchIssues(view: PatchSnapshot, patch: Patch): string[] {
   });
 }
 
+/**
+ * Issues that make Build Patch refuse the Patch: Kit structure (Voice 1, the
+ * 12-Layer limit, duplicate addresses) and Layer audio that cannot be
+ * prepared. SD Import notes about native settings do not block a Build.
+ */
+export function buildBlockers(issues: string[]): string[] {
+  return issues.filter(
+    (issue) =>
+      /^[A-Z]\d+: /.test(issue) || /^Voice \d+, Layer \d+:/.test(issue),
+  );
+}
+
 export function kitIssues(issues: string[], kit: PatchKit): string[] {
   const prefix = `${kitAddress(kit)}: `;
   return issues

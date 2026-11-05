@@ -7,6 +7,7 @@ import {
   Grid2X2,
   HardDriveDownload,
   History,
+  Info,
   Keyboard,
   Layers,
   LoaderCircle,
@@ -36,8 +37,10 @@ import {
   currentKit,
   currentPatch,
   kitAddress,
+  buildBlockers,
   nextFreeAddress,
   patchIssues,
+  sortedKits,
   voiceSource,
 } from "./patchView";
 import {
@@ -115,6 +118,76 @@ function VelocityDialog({
         <button className="primary" onClick={onClose}>
           Done
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+const mod = /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl+";
+const shortcutGroups: [string, [string, string][]][] = [
+  [
+    "Playback",
+    [
+      ["Space", "Play or stop the sequencer"],
+      ["1 – 4", "Audition a voice"],
+      ["Right-click a step", "Edit its velocity"],
+    ],
+  ],
+  [
+    "Kits",
+    [
+      ["[ and ]", "Previous or next Kit"],
+      ["↑ ↓ in the Kit list", "Select a Kit"],
+      ["Delete in the Kit list", "Delete the focused Kit"],
+      [`${mod}Z`, "Undo a deletion while it is offered"],
+    ],
+  ],
+  [
+    "Views",
+    [
+      [`${mod}1`, "Kit"],
+      [`${mod}2`, "Samples"],
+      [`${mod}F`, "Search the current view"],
+      ["?", "These shortcuts"],
+    ],
+  ],
+  [
+    "Samples and Add Samples",
+    [
+      ["↑ ↓", "Browse, hearing each Sample"],
+      ["Enter", "Add as a Layer"],
+      ["Space", "Hear the selected Sample"],
+      [`Shift or ${mod}click`, "Select several Samples"],
+    ],
+  ],
+];
+
+function ShortcutsSheet({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal label="Keyboard shortcuts" onClose={onClose}>
+      <div className="modal-heading">
+        <Keyboard size={20} />
+        <h2>Keyboard shortcuts</h2>
+        <button aria-label="Close keyboard shortcuts" onClick={onClose}>
+          <X size={17} />
+        </button>
+      </div>
+      <div className="shortcut-groups">
+        {shortcutGroups.map(([title, rows]) => (
+          <section key={title} aria-label={title}>
+            <h3>{title}</h3>
+            <dl>
+              {rows.map(([keys, action]) => (
+                <div key={keys}>
+                  <dt>
+                    <kbd>{keys}</kbd>
+                  </dt>
+                  <dd>{action}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
       </div>
     </Modal>
   );
@@ -223,13 +296,17 @@ export default function App() {
     },
     [act],
   );
-  const onPatch = useCallback((action: PatchAction) => void act(action), [act]);
-  /** Deletes a Kit or Patch, then offers Undo for a few seconds. */
+  /** Deletes a Kit, Patch or Layer, then offers Undo for a few seconds. */
   const remove = useCallback(
     async (action: PatchAction) => {
       if (await act(action)) setUndoOffer((n) => n + 1);
     },
     [act],
+  );
+  const onPatch = useCallback(
+    (action: PatchAction) =>
+      void (action.type === "removeLayer" ? remove(action) : act(action)),
+    [act, remove],
   );
   const undo = useCallback(() => {
     setUndoOffer(0);
@@ -309,7 +386,8 @@ export default function App() {
     };
   }, []);
 
-  const overlay = sdImport || snapshots || !!editor || !!velocity;
+  const [shortcuts, setShortcuts] = useState(false);
+  const overlay = sdImport || snapshots || shortcuts || !!editor || !!velocity;
   useEffect(() => {
     function key(e: KeyboardEvent) {
       if (overlay || !view) return;
@@ -326,6 +404,49 @@ export default function App() {
         e.preventDefault();
         undo();
         return;
+      }
+      const command = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+      if (command && (e.key === "1" || e.key === "2")) {
+        e.preventDefault();
+        if (e.key === "2") setAdding(null);
+        setScreen(e.key === "1" ? "kit" : "samples");
+        return;
+      }
+      if (command && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        const search =
+          screen === "samples"
+            ? 'input[aria-label="Search Samples by name or tag"]'
+            : adding !== null
+              ? '.sample-panel input[type="search"]'
+              : 'input[aria-label="Search kits or samples"]';
+        document.querySelector<HTMLInputElement>(search)?.focus();
+        return;
+      }
+      const typing =
+        e.target instanceof Element &&
+        !!e.target.closest(
+          'input,textarea,select,[role="listbox"],[contenteditable="true"]',
+        );
+      // Option is allowed: some layouts, such as Spanish, type [ ] with it.
+      if (!typing && !e.metaKey && !e.ctrlKey) {
+        if (e.key === "?") {
+          e.preventDefault();
+          setShortcuts(true);
+          return;
+        }
+        if (e.key === "[" || e.key === "]") {
+          e.preventDefault();
+          const open = currentPatch(view);
+          const kits = sortedKits(open);
+          const at = kits.findIndex((k) => k.id === open?.selectedKit);
+          const next = kits[at + (e.key === "]" ? 1 : -1)];
+          if (next) {
+            setScreen("kit");
+            void act({ type: "selectKit", kit: next.id });
+          }
+          return;
+        }
       }
       if (
         e.target instanceof Element &&
@@ -345,7 +466,7 @@ export default function App() {
     }
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [overlay, view, musical, undoOffer, undo]);
+  }, [overlay, view, musical, undoOffer, undo, screen, adding, act]);
 
   const samples = useMemo(
     () => new Map<string, LibrarySample>(view?.samples.map((s) => [s.id, s])),
@@ -357,10 +478,25 @@ export default function App() {
     () => (view && patch ? patchIssues(view, patch) : []),
     [view, patch],
   );
+  const blockers = buildBlockers(issues);
+  const notes = issues.filter((issue) => !blockers.includes(issue));
+  const blockersRef = useRef<HTMLDetailsElement>(null);
   const busy = pending > 0;
 
   async function build() {
     if (!patch || busy || building) return;
+    if (blockers.length) {
+      // Choosing a card would only end in a refusal: show what to fix first.
+      setScreen("kit");
+      requestAnimationFrame(() => {
+        const details = blockersRef.current;
+        if (!details) return;
+        details.open = true;
+        details.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        details.querySelector("summary")?.focus();
+      });
+      return;
+    }
     const destination = await native.chooseFolder(
       "Choose a folder or SD card for Build Patch",
     );
@@ -507,11 +643,23 @@ export default function App() {
             <button
               className="secondary export-button"
               disabled={!patch || !!building}
-              title="Write this Patch's Kit audio to a folder or SD card"
+              title={
+                blockers.length
+                  ? "Fix the listed issues before building this Patch"
+                  : "Write this Patch's Kit audio to a folder or SD card"
+              }
               onClick={() => void build()}
             >
               <Upload size={14} />
               Build to SD…
+              {blockers.length > 0 && (
+                <span
+                  className="build-blockers"
+                  aria-label={`${blockers.length} ${blockers.length === 1 ? "issue blocks" : "issues block"} Build`}
+                >
+                  {blockers.length}
+                </span>
+              )}
             </button>
           </div>
         </header>
@@ -728,17 +876,61 @@ export default function App() {
                   <span>{transport.error}</span>
                 </div>
               )}
-              {issues.length > 0 && (
-                <details className="compatibility">
+              {blockers.length > 0 && (
+                <details className="compatibility" ref={blockersRef}>
                   <summary>
                     <TriangleAlert size={13} />
-                    {issues.length} {issues.length === 1 ? "issue" : "issues"}{" "}
-                    to fix before Build
+                    {blockers.length}{" "}
+                    {blockers.length === 1 ? "issue" : "issues"} to fix before
+                    Build
                     <ChevronDown size={12} />
                   </summary>
                   <ul>
-                    {issues.map((issue, i) => (
-                      <li key={i}>{issue}</li>
+                    {blockers.map((issue, i) => {
+                      // Kit issues start with the address: link to that Kit.
+                      const [, address, rest] =
+                        /^([A-Z]\d+): (.*)$/s.exec(issue) ?? [];
+                      const target = patch.kits.find(
+                        (k) => kitAddress(k) === address,
+                      );
+                      return (
+                        <li key={i}>
+                          {target ? (
+                            <>
+                              <button
+                                className="issue-kit"
+                                aria-label={`Show Kit ${address}`}
+                                onClick={() =>
+                                  void act({
+                                    type: "selectKit",
+                                    kit: target.id,
+                                  })
+                                }
+                              >
+                                {address}
+                              </button>{" "}
+                              {rest}
+                            </>
+                          ) : (
+                            issue
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </details>
+              )}
+              {notes.length > 0 && (
+                <details className="compatibility notes">
+                  <summary>
+                    <Info size={13} />
+                    {notes.length} {notes.length === 1 ? "note" : "notes"} on
+                    this Patch
+                    <ChevronDown size={12} />
+                  </summary>
+                  <ul>
+                    {notes.map((note, i) => (
+                      <li key={i}>{note}</li>
                     ))}
                   </ul>
                 </details>
@@ -765,12 +957,17 @@ export default function App() {
           )}
           {screen === "kit" && (
             <footer>
-              <div>
+              <button
+                className="shortcuts-button"
+                onClick={() => setShortcuts(true)}
+              >
                 <Keyboard size={13} />
                 <span>Space: play / stop</span>
                 <b>·</b>
                 <span>1–4: audition voice</span>
-              </div>
+                <b>·</b>
+                <span>? all shortcuts</span>
+              </button>
               <span title="Build to SD writes Bank/Kit folders and prepared audio. It never writes native Rample settings (_save).">
                 Drafts are saved on this computer · Build never writes _save
               </span>
@@ -861,6 +1058,7 @@ export default function App() {
           onToggle={() => musical({ type: "togglePlayback" })}
         />
       )}
+      {shortcuts && <ShortcutsSheet onClose={() => setShortcuts(false)} />}
       {velocity && session && (
         <VelocityDialog
           channel={velocity.channel}

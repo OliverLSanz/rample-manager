@@ -546,9 +546,17 @@ describe("Patch-first main screen", () => {
     expect(screen.getByText("2 issues to fix before Build")).toBeTruthy();
     expect(
       screen.getByText(
-        "B12: Voice 2 has 13 Layers; Rample supports at most 12. All draft Layers are retained.",
+        "Voice 2 has 13 Layers; Rample supports at most 12. All draft Layers are retained.",
       ),
     ).toBeTruthy();
+    // Each Kit issue links to its Kit.
+    fireEvent.click(screen.getByRole("button", { name: "Show Kit B12" }));
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "selectKit",
+        kit: "other-kit",
+      }),
+    );
     expect(
       screen.getByText("Voice 1, Layer 2: Original changed."),
     ).toBeTruthy();
@@ -1031,6 +1039,76 @@ describe("keyboard", () => {
     expect(native.patchAction).toHaveBeenCalledTimes(calls);
   });
 
+  it("switches views, searches, walks Kits and lists every shortcut", async () => {
+    vi.mocked(native.listSamples).mockResolvedValue([sample]);
+    const user = userEvent.setup();
+    await openApp();
+    await user.keyboard("{Meta>}2{/Meta}");
+    expect(
+      await screen.findByRole("listbox", { name: "Library Samples" }),
+    ).toBeTruthy();
+    await user.keyboard("{Meta>}f{/Meta}");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Search Samples by name or tag",
+    );
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard("{Meta>}1{/Meta}");
+    expect(await screen.findByRole("region", { name: "Voice 1" })).toBeTruthy();
+    await user.keyboard("{Meta>}f{/Meta}");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Search kits or samples",
+    );
+    // Brackets walk the Kits in Rample order, but not while typing.
+    await user.keyboard("]");
+    expect(native.patchAction).not.toHaveBeenCalledWith({
+      type: "selectKit",
+      kit: "other-kit",
+    });
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard("]");
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "selectKit",
+        kit: "other-kit",
+      }),
+    );
+    await user.keyboard("?");
+    const sheet = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
+    expect(within(sheet).getByText("Previous or next Kit")).toBeTruthy();
+    expect(within(sheet).getByText("Search the current view")).toBeTruthy();
+    // The sheet suspends playback shortcuts until it closes.
+    const calls = vi.mocked(native.patchAction).mock.calls.length;
+    await user.keyboard("1");
+    expect(native.patchAction).toHaveBeenCalledTimes(calls);
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("dialog", { name: "Keyboard shortcuts" }),
+    ).toBeNull();
+  });
+
+  it("offers Undo after removing a Layer", async () => {
+    await openApp();
+    const removed = view();
+    removed.graph.patches[0].kits[1].voices[0].layers.pop();
+    removed.undo = "Layer 2 of A0 Voice 1";
+    vi.mocked(native.patchAction).mockResolvedValueOnce(removed);
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Voice 1" })).getByRole(
+        "button",
+        { name: "Remove Layer 2" },
+      ),
+    );
+    expect(
+      await screen.findByText("Deleted Layer 2 of A0 Voice 1"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Undo/ }));
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "undoDelete",
+      }),
+    );
+  });
+
   it("opens a velocity editor from a step's context menu", async () => {
     await openApp();
     fireEvent.contextMenu(
@@ -1100,10 +1178,41 @@ const backup = {
   removed: ["A0/1_Old.wav", "C3/1_Old.wav"],
 };
 function build() {
-  fireEvent.click(screen.getByRole("button", { name: "Build to SD…" }));
+  fireEvent.click(screen.getByRole("button", { name: /Build to SD/ }));
+}
+/** The fixture without Kit issues, so Build asks for a destination. */
+function buildable() {
+  const snapshot = view();
+  snapshot.validation = [];
+  return snapshot;
 }
 
 describe("Build to SD", () => {
+  it("shows what blocks a Build instead of asking for a folder", async () => {
+    const blocked = view();
+    blocked.validation.push(
+      "Live set: Layer modes were not read from this SD Import.",
+    );
+    await openApp(blocked);
+    const button = screen.getByRole("button", { name: /Build to SD/ });
+    expect(
+      within(button).getByLabelText("1 issue blocks Build").textContent,
+    ).toBe("1");
+    fireEvent.click(button);
+    await vi.waitFor(() =>
+      expect(
+        screen.getByText(/1 issue to fix before Build/).closest("details")
+          ?.open,
+      ).toBe(true),
+    );
+    expect(native.chooseFolder).not.toHaveBeenCalled();
+    // Native settings notes are listed apart and do not block a Build.
+    expect(screen.getByText("1 note on this Patch")).toBeTruthy();
+    expect(
+      screen.getByText("Layer modes were not read from this SD Import."),
+    ).toBeTruthy();
+  });
+
   it("reviews destination changes before applying a Build and reports its backup", async () => {
     vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/RAMPLE");
     const review = buildReview();
@@ -1115,7 +1224,7 @@ describe("Build to SD", () => {
           finish = resolve;
         }),
     );
-    await openApp();
+    await openApp(buildable());
     build();
     const panel = await screen.findByRole("region", {
       name: "Build Patch review",
@@ -1180,7 +1289,7 @@ describe("Build to SD", () => {
         ],
       }),
     );
-    await openApp();
+    await openApp(buildable());
     build();
     const panel = await screen.findByRole("region", {
       name: "Build Patch review",
@@ -1214,7 +1323,7 @@ describe("Build to SD", () => {
       backup: { ...backup, status: "incomplete", error },
       error,
     });
-    await openApp();
+    await openApp(buildable());
     build();
     fireEvent.click(
       within(
@@ -1229,7 +1338,7 @@ describe("Build to SD", () => {
   });
 
   it("reports a blocked review without claiming output and ignores a cancelled folder choice", async () => {
-    await openApp();
+    await openApp(buildable());
     vi.mocked(native.chooseFolder).mockResolvedValueOnce(null);
     build();
     await vi.waitFor(() => expect(native.chooseFolder).toHaveBeenCalled());
@@ -1262,7 +1371,7 @@ describe("Build to SD", () => {
       backup: { ...backup, restored: 1_800_000_100_000 },
       notices: [],
     });
-    await openApp();
+    await openApp(buildable());
     fireEvent.click(
       screen.getByRole("button", { name: "Destination backups" }),
     );
@@ -1308,7 +1417,7 @@ describe("Build to SD", () => {
       error,
     });
     vi.mocked(native.patchBuildBackups).mockResolvedValue([incomplete]);
-    await openApp();
+    await openApp(buildable());
     build();
     fireEvent.click(
       within(
