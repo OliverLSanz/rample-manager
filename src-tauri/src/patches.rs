@@ -126,11 +126,26 @@ pub(super) enum Deleted {
         /// offers it again after undo.
         intakes: Vec<String>,
     },
+    Layer {
+        patch: String,
+        kit: String,
+        address: String,
+        channel: usize,
+        index: usize,
+        layer: Layer,
+        selected: bool,
+    },
 }
 impl Deleted {
     fn label(&self) -> String {
         match self {
             Deleted::Kit { kit, .. } => format!("Kit {}", kit.address()),
+            Deleted::Layer {
+                address,
+                channel,
+                index,
+                ..
+            } => format!("Layer {} of {address} Voice {}", index + 1, channel + 1),
             Deleted::Patch { patch, .. } => format!("Patch {}", patch.name),
         }
     }
@@ -635,6 +650,44 @@ impl AppState {
                             reset = true;
                         }
                     }
+                    Deleted::Layer {
+                        patch,
+                        kit,
+                        channel,
+                        index,
+                        layer,
+                        selected,
+                        ..
+                    } => {
+                        let target = graph
+                            .patches
+                            .iter_mut()
+                            .find(|p| p.id == patch)
+                            .ok_or("The Patch of that Layer no longer exists.")?;
+                        let shown = target.voice_kit(channel).map(|k| k.id.clone());
+                        let voice = target
+                            .kits
+                            .iter_mut()
+                            .find(|k| k.id == kit)
+                            .ok_or("The Kit of that Layer no longer exists.")?
+                            .voices
+                            .get_mut(channel)
+                            .ok_or("Invalid Voice.")?;
+                        if selected || voice.layers.is_empty() {
+                            voice.selected_layer = layer.id.clone();
+                        }
+                        let index = index.min(voice.layers.len());
+                        voice.layers.insert(index, layer);
+                        // Show the restored Layer where it belongs.
+                        if shown.as_deref() != Some(kit.as_str()) {
+                            target.selected_kit = kit;
+                            target.voice_kits.clear();
+                        }
+                        if graph.selected_patch != patch {
+                            graph.selected_patch = patch;
+                            reset = true;
+                        }
+                    }
                     Deleted::Patch {
                         index,
                         patch,
@@ -673,20 +726,43 @@ impl AppState {
                 add_layer(&mut graph, store, Some((patch, kit)), channel, sample)?;
             }
             PatchAction::RemoveLayer { channel, layer } => {
-                let voice = graph.current_mut()?.voice_mut(channel)?;
+                let patch = graph.current_mut()?;
+                let kit = patch
+                    .voice_kits
+                    .get(channel)
+                    .unwrap_or(&patch.selected_kit)
+                    .clone();
+                let patch_id = patch.id.clone();
+                let address = patch
+                    .kits
+                    .iter()
+                    .find(|k| k.id == kit)
+                    .map(PatchKit::address)
+                    .unwrap_or_default();
+                let voice = patch.voice_mut(channel)?;
                 let index = voice
                     .layers
                     .iter()
                     .position(|l| l.id == layer)
                     .ok_or("Layer no longer exists.")?;
-                voice.layers.remove(index);
-                if voice.selected_layer == layer {
+                let removed = voice.layers.remove(index);
+                let selected = voice.selected_layer == layer;
+                if selected {
                     voice.selected_layer = voice
                         .layers
                         .first()
                         .map(|l| l.id.clone())
                         .unwrap_or_default();
                 }
+                deleted = Some(Deleted::Layer {
+                    patch: patch_id,
+                    kit,
+                    address,
+                    channel,
+                    index,
+                    layer: removed,
+                    selected,
+                });
             }
             PatchAction::MoveLayer { channel, layer, to } => {
                 let voice = graph.current_mut()?.voice_mut(channel)?;
@@ -1302,5 +1378,53 @@ mod tests {
                 sample,
             })
             .is_err());
+    }
+
+    #[test]
+    fn removed_layers_come_back_in_place_with_undo() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0]
+            .id
+            .clone();
+        let run = |action| state.patch_action(action).unwrap();
+        run(PatchAction::CreatePatch { name: "Set".into() });
+        run(PatchAction::CreateKit {
+            bank: "A".into(),
+            number: 4,
+        });
+        for _ in 0..3 {
+            run(PatchAction::AddLayer {
+                channel: 1,
+                sample: sample.clone(),
+            });
+        }
+        let before = run(PatchAction::Open).kit().unwrap().voices[1].clone();
+        let middle = before.layers[1].id.clone();
+        run(PatchAction::SelectLayer {
+            channel: 1,
+            layer: middle.clone(),
+        });
+        let removed = run(PatchAction::RemoveLayer {
+            channel: 1,
+            layer: middle.clone(),
+        });
+        assert_eq!(removed.kit().unwrap().voices[1].layers.len(), 2);
+        assert_eq!(removed.undo.as_deref(), Some("Layer 2 of A4 Voice 2"));
+        // Undo also works after switching to another Kit, and shows it again.
+        let a4 = removed.kit().unwrap().id.clone();
+        run(PatchAction::CreateKit {
+            bank: "A".into(),
+            number: 5,
+        });
+        let restored = run(PatchAction::UndoDelete);
+        assert_eq!(restored.kit().unwrap().id, a4);
+        let voice = &restored.kit().unwrap().voices[1];
+        assert_eq!(
+            voice.layers.iter().map(|l| &l.id).collect::<Vec<_>>(),
+            before.layers.iter().map(|l| &l.id).collect::<Vec<_>>()
+        );
+        assert_eq!(voice.selected_layer, middle);
     }
 }
