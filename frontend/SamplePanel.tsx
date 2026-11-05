@@ -10,8 +10,11 @@ import { useSampleAudition } from "./audition";
 import { colors } from "./Sequencer";
 import type { LibrarySample } from "./types";
 
-/** Drag type for a Library Sample dropped on a voice card. */
+/** Drag type for Library Samples dropped on a voice card: IDs, one per line. */
 export const sampleDrag = "application/x-rample-sample";
+/** The Sample IDs carried by a `sampleDrag` payload, in order. */
+export const draggedSamples = (data: string) =>
+  data.split("\n").filter((id) => id.length > 0);
 const page = 150;
 
 /** Literal, case-insensitive part of a name or tag, like the Library search. */
@@ -29,7 +32,9 @@ export function matchesSample(sample: LibrarySample, query: string) {
  * A side panel beside the Kit for adding Library Samples as Layers. Browsing
  * with the arrow keys auditions each Sample as the Rample will play it; Enter,
  * double-click or + adds it to the target Voice, and the panel stays open for
- * the next one. Rows can also be dragged onto any voice card.
+ * the next one. Shift- and Cmd/Ctrl-click (or Shift+arrows, Cmd/Ctrl+A) select
+ * several, which Enter adds and a drag carries together, in list order. Rows
+ * can also be dragged onto any voice card.
  */
 export function SamplePanel({
   samples,
@@ -45,11 +50,15 @@ export function SamplePanel({
   /** Address of the Kit being edited, such as `A0`. */
   kit: string;
   onChannel: (channel: number) => void;
-  onAdd: (sample: LibrarySample, channel: number) => Promise<boolean>;
+  /** Adds the Samples, in order, as new Layers of Voice `channel`. */
+  onAdd: (samples: LibrarySample[], channel: number) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  // The cursor row; the selection grows from the anchor with Shift.
   const [active, setActive] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [anchor, setAnchor] = useState<string | null>(null);
   const [preview, setPreview] = useState(true);
   const [limit, setLimit] = useState(page);
   const [added, setAdded] = useState<string | null>(null);
@@ -61,6 +70,8 @@ export function SamplePanel({
     [samples, query],
   );
   const shown = matches.slice(0, limit);
+  /** Selected Samples that can be added, in list order. */
+  const picked = shown.filter((s) => s.readable && selected.includes(s.id));
   useEffect(() => search.current?.focus(), []);
   useEffect(() => setLimit(page), [query]);
   useEffect(() => {
@@ -73,8 +84,31 @@ export function SamplePanel({
   function hear(sample: LibrarySample) {
     if (sample.readable) void audition.hear(sample.id, true);
   }
-  function select(sample: LibrarySample, play: boolean) {
+  /**
+   * Moves the cursor to `sample`: `only` selects just it, `toggle` adds or
+   * removes it, `range` selects from the anchor to it.
+   */
+  function select(
+    sample: LibrarySample,
+    play: boolean,
+    how: "only" | "toggle" | "range" = "only",
+  ) {
     setActive(sample.id);
+    if (how === "range") {
+      const from = shown.findIndex((s) => s.id === (anchor ?? active));
+      const to = shown.findIndex((s) => s.id === sample.id);
+      const [a, b] = from < 0 ? [to, to] : [from, to].sort((x, y) => x - y);
+      setSelected(shown.slice(a, b + 1).map((s) => s.id));
+    } else {
+      setAnchor(sample.id);
+      setSelected((all) =>
+        how === "only"
+          ? [sample.id]
+          : all.includes(sample.id)
+            ? all.filter((id) => id !== sample.id)
+            : [...all, sample.id],
+      );
+    }
     if (play) void hear(sample);
     requestAnimationFrame(() =>
       list.current
@@ -82,12 +116,32 @@ export function SamplePanel({
         ?.scrollIntoView?.({ block: "nearest" }),
     );
   }
-  async function add(sample: LibrarySample) {
-    if (!sample.readable) return;
-    setActive(sample.id);
-    if (await onAdd(sample, channel)) setAdded(sample.name);
+  async function add(items: LibrarySample[]) {
+    const usable = items.filter((s) => s.readable);
+    if (!usable.length) return;
+    if (await onAdd(usable, channel))
+      setAdded(
+        usable.length === 1 ? usable[0].name : `${usable.length} Samples`,
+      );
+  }
+  /** The Samples a row acts on: the whole selection when the row is in it. */
+  function group(sample: LibrarySample) {
+    return selected.includes(sample.id) && picked.length > 1
+      ? picked
+      : [sample];
   }
   function key(e: React.KeyboardEvent) {
+    const typing = e.target === search.current;
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      e.key.toLowerCase() === "a" &&
+      !typing &&
+      shown.length
+    ) {
+      e.preventDefault();
+      setSelected(shown.map((s) => s.id));
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const at = shown.findIndex((s) => s.id === active);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -99,10 +153,10 @@ export function SamplePanel({
             Math.max(0, at + (e.key === "ArrowDown" ? 1 : -1)),
           )
         ];
-      if (next) select(next, preview);
+      if (next) select(next, preview, e.shiftKey ? "range" : "only");
     } else if (e.key === "Enter" && at >= 0) {
       e.preventDefault();
-      void add(shown[at]);
+      void add(picked.length ? picked : [shown[at]]);
     } else if (e.key === " " && at >= 0 && e.target !== search.current) {
       e.preventDefault();
       e.stopPropagation();
@@ -180,6 +234,7 @@ export function SamplePanel({
         className="panel-list"
         role="listbox"
         aria-label="Library Samples"
+        aria-multiselectable="true"
         aria-activedescendant={active ? `panel-${active}` : undefined}
         tabIndex={0}
         ref={list}
@@ -193,16 +248,30 @@ export function SamplePanel({
             id={`panel-${sample.id}`}
             data-sample={sample.id}
             role="option"
-            aria-selected={sample.id === active}
+            aria-selected={selected.includes(sample.id)}
             aria-disabled={!sample.readable || undefined}
-            className="panel-row"
+            className={`panel-row ${sample.id === active ? "cursor" : ""}`}
             draggable={sample.readable}
             onDragStart={(e) => {
-              e.dataTransfer.setData(sampleDrag, sample.id);
+              const dragged = group(sample);
+              e.dataTransfer.setData(
+                sampleDrag,
+                dragged.map((s) => s.id).join("\n"),
+              );
               e.dataTransfer.effectAllowed = "copy";
             }}
-            onClick={() => select(sample, true)}
-            onDoubleClick={() => void add(sample)}
+            onClick={(e) =>
+              select(
+                sample,
+                !e.shiftKey && !e.metaKey && !e.ctrlKey,
+                e.shiftKey
+                  ? "range"
+                  : e.metaKey || e.ctrlKey
+                    ? "toggle"
+                    : "only",
+              )
+            }
+            onDoubleClick={() => void add([sample])}
           >
             <span>
               <strong>{sample.name}</strong>
@@ -233,7 +302,8 @@ export function SamplePanel({
               disabled={!sample.readable}
               onClick={(e) => {
                 e.stopPropagation();
-                void add(sample);
+                setActive(sample.id);
+                void add([sample]);
               }}
             >
               <Plus size={14} />
@@ -257,6 +327,17 @@ export function SamplePanel({
           </p>
         )}
       </div>
+      {picked.length > 1 && (
+        <div className="panel-selection" role="group" aria-label="Selection">
+          <span>{picked.length} selected</span>
+          <button className="primary" onClick={() => void add(picked)}>
+            <Plus size={13} /> Add {picked.length} to Voice {channel + 1}
+          </button>
+          <button className="text-button" onClick={() => setSelected([])}>
+            Clear
+          </button>
+        </div>
+      )}
       <footer>
         {audition.error ? (
           <span role="alert">{audition.error}</span>
@@ -266,7 +347,8 @@ export function SamplePanel({
           </span>
         ) : (
           <span>
-            ↑↓ browse · Enter adds to Voice {channel + 1} · drag to any voice
+            ↑↓ browse · ⇧/⌘-click selects several · Enter adds to Voice{" "}
+            {channel + 1} · drag to any voice
           </span>
         )}
       </footer>

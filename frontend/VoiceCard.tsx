@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { colors } from "./Sequencer";
-import { sampleDrag } from "./SamplePanel";
+import { draggedSamples, sampleDrag } from "./SamplePanel";
 import { heardLayer, kitAddress } from "./patchView";
 import {
   modes,
@@ -88,7 +88,8 @@ export const VoiceCard = memo(function VoiceCard({
   onAdd: (channel: number) => void;
   onEdit: (channel: number) => void;
   /** A Library Sample dropped on this card becomes its last Layer. */
-  onDropSample: (channel: number, sample: string) => void;
+  /** Samples dropped on this Voice, in order. */
+  onDropSample: (channel: number, samples: string[]) => void;
 }) {
   // A Layer drag type per Voice: Layers reorder within their own Voice only.
   const layerDrag = `application/x-rample-layer-${channel}`;
@@ -126,7 +127,7 @@ export const VoiceCard = memo(function VoiceCard({
         const layer = e.dataTransfer.getData(layerDrag);
         if (sample) {
           e.preventDefault();
-          onDropSample(channel, sample);
+          onDropSample(channel, draggedSamples(sample));
         } else if (layer && count > 0) {
           e.preventDefault();
           onPatch({ type: "moveLayer", channel, layer, to: count - 1 });

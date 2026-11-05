@@ -786,6 +786,95 @@ describe("Library", () => {
     expect(native.stopSampleAudition).toHaveBeenCalledWith("picker", true);
   });
 
+  it("selects several Samples in the side panel to add or drag them together", async () => {
+    const user = userEvent.setup();
+    const many = view();
+    many.samples.push({ ...sample, id: "clap", name: "Clap", tags: [] });
+    await openApp(many);
+    await user.click(
+      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
+    );
+    const panel = screen.getByRole("complementary", { name: "Add Samples" });
+    const option = (name: RegExp) =>
+      within(panel).getByRole("option", { name });
+    const chosen = () =>
+      within(panel)
+        .getAllByRole("option")
+        .filter((o) => o.getAttribute("aria-selected") === "true")
+        .map((o) => o.querySelector("strong")?.textContent);
+    await user.click(option(/Warm kick/));
+    await user.keyboard("{Shift>}");
+    await user.click(option(/Clap/));
+    await user.keyboard("{/Shift}");
+    expect(chosen()).toEqual(["Warm kick", "Dry snare", "Clap"]);
+    await user.keyboard("{Meta>}");
+    await user.click(option(/Dry snare/));
+    await user.keyboard("{/Meta}");
+    expect(chosen()).toEqual(["Warm kick", "Clap"]);
+
+    // Enter adds the selection in list order.
+    vi.mocked(native.patchAction).mockClear();
+    await user.keyboard("{Enter}");
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(native.patchAction).mock.calls.map(([a]) => a),
+      ).toEqual([
+        { type: "addLayer", channel: 0, sample: "sample" },
+        { type: "addLayer", channel: 0, sample: "clap" },
+      ]),
+    );
+    expect(
+      await within(panel).findByText("Added 2 Samples to Voice 1"),
+    ).toBeTruthy();
+
+    // So does the selection's Add button, and Cmd+A selects every row.
+    vi.mocked(native.patchAction).mockClear();
+    within(panel).getByRole("listbox").focus();
+    await user.keyboard("{Meta>}a{/Meta}");
+    expect(chosen()).toEqual(["Warm kick", "Dry snare", "Clap"]);
+    await user.click(
+      within(panel).getByRole("button", { name: "Add 3 to Voice 1" }),
+    );
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenCalledTimes(3),
+    );
+
+    // Dragging a selected row carries the whole selection to any voice.
+    vi.mocked(native.patchAction).mockClear();
+    await user.click(option(/Dry snare/));
+    await user.keyboard("{Shift>}");
+    await user.click(option(/Clap/));
+    await user.keyboard("{/Shift}");
+    const transfer = dataTransfer();
+    fireEvent.dragStart(option(/Clap/), { dataTransfer: transfer });
+    fireEvent.drop(screen.getByRole("region", { name: "Voice 4" }), {
+      dataTransfer: transfer,
+    });
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(native.patchAction).mock.calls.map(([a]) => a),
+      ).toEqual([
+        { type: "addLayer", channel: 3, sample: "snare" },
+        { type: "addLayer", channel: 3, sample: "clap" },
+      ]),
+    );
+    // An unselected row drags alone.
+    vi.mocked(native.patchAction).mockClear();
+    const single = dataTransfer();
+    fireEvent.dragStart(option(/Warm kick/), { dataTransfer: single });
+    fireEvent.drop(screen.getByRole("region", { name: "Voice 2" }), {
+      dataTransfer: single,
+    });
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenCalledWith({
+        type: "addLayer",
+        channel: 1,
+        sample: "sample",
+      }),
+    );
+    expect(native.patchAction).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a failed add and keeps the panel open", async () => {
     await openApp();
     fireEvent.click(

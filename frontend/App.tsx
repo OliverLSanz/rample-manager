@@ -326,10 +326,18 @@ export default function App() {
     (channel: number) => void musical({ type: "audition", channel }),
     [musical],
   );
-  const onDropSample = useCallback(
-    (channel: number, sample: string) =>
-      void act({ type: "addLayer", channel, sample }),
+  /** Adds Samples as new Layers in order, stopping at the first refusal. */
+  const addLayers = useCallback(
+    async (channel: number, samples: string[]) => {
+      for (const sample of samples)
+        if (!(await act({ type: "addLayer", channel, sample }))) return false;
+      return samples.length > 0;
+    },
     [act],
+  );
+  const onDropSample = useCallback(
+    (channel: number, samples: string[]) => void addLayers(channel, samples),
+    [addLayers],
   );
   const onEdit = useCallback((channel: number) => {
     setError(null);
@@ -963,8 +971,11 @@ export default function App() {
           channel={adding}
           kit={kitAddress(kit)}
           onChannel={setAdding}
-          onAdd={(sample, channel) =>
-            act({ type: "addLayer", channel, sample: sample.id })
+          onAdd={(samples, channel) =>
+            addLayers(
+              channel,
+              samples.map((s) => s.id),
+            )
           }
           onClose={() => setAdding(null)}
         />
