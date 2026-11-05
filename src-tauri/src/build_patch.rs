@@ -736,6 +736,28 @@ fn back_up(
         .save(folder)
         .map_err(|e| format!("Could not record the destination backup: {e}."))
 }
+#[cfg(test)]
+type ChangeHook = Box<dyn FnMut(&Path, &str) -> Result<(), String>>;
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs immediately before each destination file change, with
+    /// the destination and the file's path. An error makes that change fail
+    /// on every platform; the hook may also edit the destination.
+    pub(crate) static BEFORE_CHANGE: std::cell::RefCell<Option<ChangeHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+fn before_change(destination: &Path, path: &str) -> Result<(), String> {
+    #[cfg(test)]
+    return BEFORE_CHANGE.with_borrow_mut(|hook| match hook {
+        Some(hook) => hook(destination, path),
+        None => Ok(()),
+    });
+    #[cfg(not(test))]
+    {
+        let _ = (destination, path);
+        Ok(())
+    }
+}
 /// Removes obsolete audio, writes new and replacement Layers, removes Kit folders
 /// left with only metadata and validates every published file.
 fn publish(
@@ -747,7 +769,8 @@ fn publish(
     done: &mut usize,
 ) -> Result<(), String> {
     for path in &review.removals {
-        fs::remove_file(destination.join(path))
+        before_change(destination, path)
+            .and_then(|_| fs::remove_file(destination.join(path)).map_err(|e| e.to_string()))
             .map_err(|e| format!("Could not remove {path}: {e}"))?;
         *done += 1;
     }
@@ -759,12 +782,16 @@ fn publish(
                 .map_err(|e| format!("Could not create Kit folder {}: {e}", file.kit))?;
         }
         let target = destination.join(&file.path);
-        let written = if review.replacements.contains(&file.path) {
-            export.file.persist(&target)
-        } else {
-            export.file.persist_noclobber(&target)
-        };
-        written.map_err(|e| format!("Could not write {}: {}", file.path, e.error))?;
+        before_change(destination, &file.path)
+            .and_then(|_| {
+                if review.replacements.contains(&file.path) {
+                    export.file.persist(&target)
+                } else {
+                    export.file.persist_noclobber(&target)
+                }
+                .map_err(|e| e.error.to_string())
+            })
+            .map_err(|e| format!("Could not write {}: {e}", file.path))?;
         *done += 1;
     }
     for kit in &review.removed_kits {
@@ -1654,6 +1681,59 @@ mod tests {
         let restored = state.restore_patch_build(backup.id, card.clone()).unwrap();
         assert_eq!((restored.restored, restored.removed), (4, 1));
         assert_eq!(contents(&card), before);
+    }
+
+    /// Runs `hook` before each destination change of this thread's Builds.
+    fn before_each_change(hook: impl FnMut(&Path, &str) -> Result<(), String> + 'static) {
+        super::BEFORE_CHANGE.with_borrow_mut(|slot| *slot = Some(Box::new(hook)));
+    }
+
+    #[test]
+    fn a_failed_destination_write_reports_an_incomplete_build_that_its_destination_backup_restores()
+    {
+        let (temp, state, _) = fixture();
+        let (patch, _, _) = live_patch(&state, temp.path());
+        let destination = temp.path().join("Card");
+        populated_card(&destination);
+        foreign_wav(&destination, "B1/1_01_Snare.wav", 700);
+        let before = contents(&destination);
+        let review = state
+            .review_patch_build(patch, destination.clone())
+            .unwrap();
+        before_each_change(|_, path| match path {
+            "B1/1_01_Snare.wav" => Err("the device is full".into()),
+            _ => Ok(()),
+        });
+
+        let reply = state.apply_patch_build(review).unwrap();
+
+        super::BEFORE_CHANGE.with_borrow_mut(|slot| *slot = None);
+        let error = reply.error.unwrap();
+        assert!(
+            error.starts_with(
+                "Build Patch did not complete: Could not write B1/1_01_Snare.wav: the device is full"
+            ),
+            "{error}"
+        );
+        assert!(
+            error.contains("5 of 6 file changes were applied"),
+            "{error}"
+        );
+        let backup = reply.backup.unwrap();
+        assert_eq!(backup.status, "incomplete");
+        assert_eq!(backup.error.as_deref(), Some(error.as_str()));
+        assert_eq!(state.patch_build_backups().unwrap()[0].status, "incomplete");
+        // The failed file keeps its reviewed bytes.
+        assert_eq!(
+            fs::read(destination.join("B1/1_01_Snare.wav")).unwrap(),
+            before["B1/1_01_Snare.wav"].clone().unwrap()
+        );
+
+        let restored = state
+            .restore_patch_build(backup.id, destination.clone())
+            .unwrap();
+        assert_eq!((restored.restored, restored.removed), (4, 1));
+        assert_eq!(contents(&destination), before);
     }
 
     #[test]
