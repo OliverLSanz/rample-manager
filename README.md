@@ -141,7 +141,8 @@ reviewed Kit audio are unchanged; if anything changed, nothing is written and
 you review again. It then renders every Layer, copies every file it will
 replace or remove into `Patch build backups` in the application support
 folder (with a `restore.json` manifest listing paths and SHA-256), verifies
-those copies and only then updates the card. Files that already hold the
+those copies and only then updates the card, rechecking each file right before
+it is replaced or removed so audio saved in the meantime is never overwritten. Files that already hold the
 Patch's current audio are left alone, so rebuilding an unchanged Patch writes
 nothing. A failure after publication starts is reported as an incomplete
 Build with the number of changes applied, never as a complete one.

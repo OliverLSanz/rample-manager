@@ -142,7 +142,9 @@ Patch output or the owned destination state. Then it renders every changed Layer
 through `stage_export`, copies and verifies every replaced or removed file under
 `Patch build backups/<id>/` with a `restore.json` manifest (`applying` before
 publication, then `complete` or `incomplete`), registers the exports and only
-then removes, writes and validates. Errors before publication must say nothing
+then removes, writes and validates, rechecking each target's current bytes
+against the review immediately before it is removed or overwritten (a mismatch
+stops publication as incomplete and is never overwritten). Errors before publication must say nothing
 was written; failures after it return an incomplete reply with its backup and
 progress, never success. Metadata files (`.DS_Store`) of obsolete Kit folders
 that Build removes are backed up too. `restore_patch_build(id, destination)`

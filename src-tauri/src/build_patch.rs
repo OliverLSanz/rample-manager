@@ -758,8 +758,29 @@ fn before_change(destination: &Path, path: &str) -> Result<(), String> {
         Ok(())
     }
 }
+/// Rechecks one destination file against the review immediately before it is
+/// removed or written, so bytes saved after the backup are never lost.
+fn unchanged_since_review(
+    review: &BuildReview,
+    destination: &Path,
+    path: &str,
+    change: &str,
+) -> Result<(), String> {
+    let reviewed = review
+        .state
+        .iter()
+        .find(|f| f.path == path)
+        .map(|f| f.sha256.as_str());
+    if current_hash(destination, path)?.as_deref() != reviewed {
+        return Err(format!(
+            "{path} changed after this review, so it was not {change}"
+        ));
+    }
+    Ok(())
+}
 /// Removes obsolete audio, writes new and replacement Layers, removes Kit folders
-/// left with only metadata and validates every published file.
+/// left with only metadata and validates every published file. Every target is
+/// rechecked against the review right before it changes.
 fn publish(
     review: &BuildReview,
     manifest: &Manifest,
@@ -769,8 +790,9 @@ fn publish(
     done: &mut usize,
 ) -> Result<(), String> {
     for path in &review.removals {
-        before_change(destination, path)
-            .and_then(|_| fs::remove_file(destination.join(path)).map_err(|e| e.to_string()))
+        before_change(destination, path).map_err(|e| format!("Could not remove {path}: {e}"))?;
+        unchanged_since_review(review, destination, path, "removed")?;
+        fs::remove_file(destination.join(path))
             .map_err(|e| format!("Could not remove {path}: {e}"))?;
         *done += 1;
     }
@@ -783,15 +805,14 @@ fn publish(
         }
         let target = destination.join(&file.path);
         before_change(destination, &file.path)
-            .and_then(|_| {
-                if review.replacements.contains(&file.path) {
-                    export.file.persist(&target)
-                } else {
-                    export.file.persist_noclobber(&target)
-                }
-                .map_err(|e| e.error.to_string())
-            })
             .map_err(|e| format!("Could not write {}: {e}", file.path))?;
+        unchanged_since_review(review, destination, &file.path, "overwritten")?;
+        if review.replacements.contains(&file.path) {
+            export.file.persist(&target)
+        } else {
+            export.file.persist_noclobber(&target)
+        }
+        .map_err(|e| format!("Could not write {}: {}", file.path, e.error))?;
         *done += 1;
     }
     for kit in &review.removed_kits {
@@ -1734,6 +1755,46 @@ mod tests {
             .unwrap();
         assert_eq!((restored.restored, restored.removed), (4, 1));
         assert_eq!(contents(&destination), before);
+    }
+
+    #[test]
+    fn a_destination_file_changed_during_publication_is_never_overwritten() {
+        let (temp, state, _) = fixture();
+        let (patch, _, _) = live_patch(&state, temp.path());
+        let destination = temp.path().join("Card");
+        populated_card(&destination);
+        let review = state
+            .review_patch_build(patch, destination.clone())
+            .unwrap();
+        // Another program saves new Kick audio after the backup was verified.
+        before_each_change(|destination, path| {
+            if path == "A0/1_01_Kick.wav" {
+                foreign_wav(destination, path, 111);
+            }
+            Ok(())
+        });
+
+        let reply = state.apply_patch_build(review).unwrap();
+
+        super::BEFORE_CHANGE.with_borrow_mut(|slot| *slot = None);
+        let error = reply.error.unwrap();
+        assert!(
+            error.starts_with(
+                "Build Patch did not complete: A0/1_01_Kick.wav changed after this review, so it was not overwritten."
+            ),
+            "{error}"
+        );
+        assert!(
+            error.contains("3 of 6 file changes were applied"),
+            "{error}"
+        );
+        assert_eq!(reply.backup.unwrap().status, "incomplete");
+        let level = wav::PreparedSample::load(&destination.join("A0/1_01_Kick.wav"), "kept")
+            .unwrap()
+            .head[0][0]
+            * 32768.;
+        assert_eq!(level, 111.);
+        assert!(!destination.join("A0/2_01_Snare.wav").exists());
     }
 
     #[test]
