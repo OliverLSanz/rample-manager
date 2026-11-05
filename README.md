@@ -323,9 +323,11 @@ restore the backup to the original path described in its `restore.json`.
 The app manages audio files and never creates, modifies or deletes `_save/*.rpl`
 ([ADR 0007](docs/adr/0007-read-native-settings-and-never-write-save.md)).
 Import only reads verified fields to fill initial modes. Device settings that
-no longer match the files are adjusted on the Rample. Mappings and remaining
-gaps are in [the mappings note](docs/research/rample-native-settings-mappings.md)
-and [the format study](docs/research/rample-save-format-study.es.md).
+no longer match the files are adjusted on the Rample. The verified mappings and
+the current limits of reading are in
+[the mappings note](docs/research/rample-native-settings-mappings.md).
+[The format study](docs/research/rample-save-format-study.es.md) is historical
+reference only: no further device captures are planned.
 
 ## Session preservation
 
