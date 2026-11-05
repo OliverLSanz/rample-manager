@@ -11,6 +11,7 @@ use crate::{
     *,
 };
 use std::fs;
+use tauri::ipc::Channel;
 use uuid::Uuid;
 
 /// Hidden working folder inside the destination, removed after every build. If
@@ -62,6 +63,35 @@ fn canonical_kit(name: &str) -> bool {
             .is_ok_and(|n| format!("{}{n}", &name[..1]) == name)
 }
 
+/// One step of a running review or Build, sent to the window so a long run on
+/// a large card visibly advances. Informational only: it never decides anything.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildProgress {
+    /// What is happening, such as "Reading the destination".
+    pub stage: &'static str,
+    /// The file being handled, destination-relative where it has a destination path.
+    pub file: String,
+    /// Files of this stage already handled, out of `total`.
+    pub done: usize,
+    pub total: usize,
+}
+/// Receives each [`BuildProgress`] step.
+pub type Progress<'a> = &'a mut dyn FnMut(BuildProgress);
+pub(crate) fn report(progress: Progress, stage: &'static str, file: &str, done: usize, total: usize) {
+    progress(BuildProgress {
+        stage,
+        file: file.to_owned(),
+        done,
+        total,
+    });
+}
+pub(crate) const READING: &str = "Reading the destination";
+const PREPARING: &str = "Preparing audio";
+pub(crate) const BACKING_UP: &str = "Backing up files that change";
+const WRITING: &str = "Writing to the destination";
+const VERIFYING: &str = "Verifying written files";
+
 /// Owned audio on a destination: a WAV file directly inside a canonical Kit folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,8 +116,10 @@ struct Scan {
     conflicts: Vec<String>,
     notices: Vec<String>,
 }
-fn scan(destination: &Path) -> Result<Scan, String> {
+fn scan(destination: &Path, progress: Progress) -> Result<Scan, String> {
     let mut scan = Scan::default();
+    // Hashing is the slow part on a large card: list first so it reports a total.
+    let mut wavs = vec![];
     for entry in fs::read_dir(destination).map_err(read_error)? {
         let entry = entry.map_err(read_error)?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -121,17 +153,22 @@ fn scan(destination: &Path) -> Result<Scan, String> {
                 continue;
             }
             if sd_import::is_wav(&file) && item.file_type().map_err(read_error)?.is_file() {
-                scan.audio.push(DestinationFile {
-                    path: format!("{name}/{file}"),
-                    sha256: managed::fingerprint(&item.path())
-                        .map_err(|e| format!("Could not read {name}/{file}: {e}"))?,
-                });
+                wavs.push((format!("{name}/{file}"), item.path()));
             } else {
                 others.push(file);
             }
         }
         others.sort_by(|a, b| natord::compare(a, b));
         scan.unowned_in_kit.insert(name, others);
+    }
+    wavs.sort_by(|a, b| natord::compare(&a.0, &b.0));
+    let total = wavs.len();
+    for (done, (path, file)) in wavs.into_iter().enumerate() {
+        report(progress, READING, &path, done, total);
+        scan.audio.push(DestinationFile {
+            sha256: managed::fingerprint(&file).map_err(|e| format!("Could not read {path}: {e}"))?,
+            path,
+        });
     }
     scan.kit_folders.sort_by(|a, b| natord::compare(a, b));
     scan.audio.sort_by(|a, b| natord::compare(&a.path, &b.path));
@@ -178,7 +215,12 @@ pub struct BuildReview {
 }
 
 impl ManagedLibrary {
-    fn review_build(&self, patch_id: &str, destination: &Path) -> Result<BuildReview, String> {
+    fn review_build(
+        &self,
+        patch_id: &str,
+        destination: &Path,
+        progress: Progress,
+    ) -> Result<BuildReview, String> {
         let graph = self.load_patches()?;
         let patch = graph
             .patches
@@ -228,7 +270,7 @@ impl ManagedLibrary {
             }
         }
         let kits: Vec<String> = kits.iter().map(|k| k.address()).collect();
-        let found = scan(destination)?;
+        let found = scan(destination, progress)?;
         let mut conflicts = found.conflicts.clone();
         for kit in &kits {
             for entry in &found.root_names {
@@ -334,9 +376,14 @@ impl ManagedLibrary {
     /// Applies a review only if the Patch output and destination are unchanged.
     /// Errors returned here mean nothing on the destination was changed; a reply
     /// with `error` means publication started and the destination is incomplete.
-    fn apply_build(&self, reviewed: &BuildReview, backups: &Path) -> Result<BuildReply, String> {
+    fn apply_build(
+        &self,
+        reviewed: &BuildReview,
+        backups: &Path,
+        progress: Progress,
+    ) -> Result<BuildReply, String> {
         let destination = PathBuf::from(&reviewed.output.destination);
-        let current = self.review_build(&reviewed.patch_id, &destination)?;
+        let current = self.review_build(&reviewed.patch_id, &destination, progress)?;
         if current.output != reviewed.output {
             return Err(
                 "The Patch changed after this review. Review Build Patch again. Nothing was written."
@@ -378,7 +425,7 @@ impl ManagedLibrary {
         fs::create_dir(&staging).map_err(|e| {
             format!("Could not write to the destination: {e}. Nothing was written.")
         })?;
-        let result = self.reconcile(&current, &destination, &staging, backups);
+        let result = self.reconcile(&current, &destination, &staging, backups, progress);
         let cleanup = fs::remove_dir_all(&staging);
         let (manifest, folder) = result?;
         reply.error = manifest.record.error.clone();
@@ -399,6 +446,7 @@ impl ManagedLibrary {
         destination: &Path,
         staging: &Path,
         backups: &Path,
+        progress: Progress,
     ) -> Result<(Manifest, PathBuf), String> {
         let writes: Vec<&BuiltFile> = review
             .output
@@ -408,7 +456,8 @@ impl ManagedLibrary {
             .collect();
         let mut staged = vec![];
         let mut failures = vec![];
-        for file in &writes {
+        for (done, file) in writes.iter().enumerate() {
+            report(progress, PREPARING, &file.path, done, writes.len());
             match self.stage_export(&file.sample_id, staging) {
                 Ok(export) => staged.push(export),
                 Err(error) => failures.push(format!(
@@ -442,7 +491,7 @@ impl ManagedLibrary {
                 .collect(),
         );
         let folder = backups.join(&manifest.record.id);
-        if let Err(error) = manifest.back_up(review, destination, &folder) {
+        if let Err(error) = manifest.back_up(review, destination, &folder, progress) {
             let _ = fs::remove_dir_all(&folder);
             return Err(format!("{error} Nothing was written."));
         }
@@ -461,7 +510,15 @@ impl ManagedLibrary {
         }
         let mut done = 0;
         let total = writes.len() + review.removals.len();
-        let published = publish(review, &manifest, &writes, staged, destination, &mut done);
+        let published = publish(
+            review,
+            &manifest,
+            &writes,
+            staged,
+            destination,
+            &mut done,
+            progress,
+        );
         manifest.record.status = if published.is_ok() {
             BuildStatus::Complete
         } else {
@@ -535,8 +592,11 @@ fn publish(
     staged: Vec<StagedExport>,
     destination: &Path,
     done: &mut usize,
+    progress: Progress,
 ) -> Result<(), String> {
+    let total = review.removals.len() + writes.len();
     for path in &review.removals {
+        report(progress, WRITING, path, *done, total);
         before_change(destination, path).map_err(|e| format!("Could not remove {path}: {e}"))?;
         unchanged_since_review(review, destination, path, "removed")?;
         fs::remove_file(destination.join(path))
@@ -545,6 +605,7 @@ fn publish(
     }
     let hashes: Vec<_> = staged.iter().map(|s| s.sha256.clone()).collect();
     for (file, export) in writes.iter().zip(staged) {
+        report(progress, WRITING, &file.path, *done, total);
         let folder = destination.join(&file.kit);
         if !folder.is_dir() {
             fs::create_dir(&folder)
@@ -579,7 +640,8 @@ fn publish(
         sync_directory(&destination.join(kit));
     }
     // Validate the complete published output, not only the staged copies.
-    for (file, sha256) in writes.iter().zip(hashes) {
+    for (n, (file, sha256)) in writes.iter().zip(hashes).enumerate() {
+        report(progress, VERIFYING, &file.path, n, writes.len());
         let path = destination.join(&file.path);
         managed::validate_wav(&path).map_err(|e| format!("{} is not valid: {e}", file.path))?;
         if managed::fingerprint(&path)? != sha256 {
@@ -619,22 +681,39 @@ pub struct BuildReply {
 }
 
 impl AppState {
+    #[cfg(test)]
     pub fn review_patch_build(
         &self,
         patch_id: String,
         destination: PathBuf,
     ) -> Result<BuildReview, String> {
+        self.review_patch_build_progress(patch_id, destination, &mut |_| {})
+    }
+    pub fn review_patch_build_progress(
+        &self,
+        patch_id: String,
+        destination: PathBuf,
+        progress: Progress,
+    ) -> Result<BuildReview, String> {
         self.managed
             .lock()
             .map_err(|_| "Library is unavailable")?
-            .review_build(&patch_id, &destination)
+            .review_build(&patch_id, &destination, progress)
     }
+    #[cfg(test)]
     pub fn apply_patch_build(&self, review: BuildReview) -> Result<BuildReply, String> {
+        self.apply_patch_build_progress(review, &mut |_| {})
+    }
+    pub fn apply_patch_build_progress(
+        &self,
+        review: BuildReview,
+        progress: Progress,
+    ) -> Result<BuildReply, String> {
         let backups = self.destination_backups()?;
         self.managed
             .lock()
             .map_err(|_| "Library is unavailable")?
-            .apply_build(&review, &backups)
+            .apply_build(&review, &backups, progress)
     }
     /// Reviews and applies in one step, failing on an incomplete Build.
     #[cfg(test)]
@@ -651,26 +730,47 @@ impl AppState {
         }
     }
 }
+/// Forwards progress to the window at most every 40 ms, plus every change of
+/// stage, so a card with thousands of files does not flood the IPC bridge.
+fn throttled(channel: Channel<BuildProgress>) -> impl FnMut(BuildProgress) {
+    let mut last: Option<(std::time::Instant, &'static str)> = None;
+    move |step| {
+        let now = std::time::Instant::now();
+        let due = last.is_none_or(|(at, stage)| {
+            stage != step.stage || now.duration_since(at).as_millis() >= 40
+        });
+        if due {
+            last = Some((now, step.stage));
+            let _ = channel.send(step);
+        }
+    }
+}
 #[tauri::command]
 pub async fn review_patch_build(
     patch_id: String,
     destination: PathBuf,
+    progress: Channel<BuildProgress>,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<BuildReview, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.review_patch_build(patch_id, destination))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        state.review_patch_build_progress(patch_id, destination, &mut throttled(progress))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub async fn apply_patch_build(
     review: BuildReview,
+    progress: Channel<BuildProgress>,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<BuildReply, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.apply_patch_build(review))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        state.apply_patch_build_progress(review, &mut throttled(progress))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -1047,6 +1147,58 @@ mod tests {
             .review_patch_build(patch, temp.path().join("Missing"))
             .is_err());
         assert!(!temp.path().join("Missing").exists());
+    }
+
+    #[test]
+    fn reviewing_and_applying_report_each_file_of_every_stage_in_order() {
+        let (temp, state, _) = fixture();
+        let (patch, _, _) = live_patch(&state, temp.path());
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        let mut reviewing = vec![];
+        let review = state
+            .review_patch_build_progress(patch, destination.clone(), &mut |p| reviewing.push(p))
+            .unwrap();
+        // The four owned WAVs are read, in natural order, with their total.
+        let read: Vec<_> = reviewing
+            .iter()
+            .map(|p| (p.stage, p.file.as_str(), p.done, p.total))
+            .collect();
+        assert_eq!(
+            read,
+            vec![
+                (super::READING, "A0/1_01_Kick.wav", 0, 4),
+                (super::READING, "A0/1_Old.wav", 1, 4),
+                (super::READING, "C3/1_Old.wav", 2, 4),
+                (super::READING, "C4/2_Old.wav", 3, 4),
+            ]
+        );
+
+        let mut applying = vec![];
+        let reply = state
+            .apply_patch_build_progress(review, &mut |p| applying.push(p))
+            .unwrap();
+
+        assert_eq!(reply.error, None);
+        let mut stages: Vec<&str> = applying.iter().map(|p| p.stage).collect();
+        stages.dedup();
+        assert_eq!(
+            stages,
+            vec![
+                super::READING,
+                super::PREPARING,
+                super::BACKING_UP,
+                super::WRITING,
+                super::VERIFYING
+            ]
+        );
+        let writing: Vec<_> = applying
+            .iter()
+            .filter(|p| p.stage == super::WRITING)
+            .map(|p| (p.done, p.total))
+            .collect();
+        assert_eq!(writing, (0..6).map(|n| (n, 6)).collect::<Vec<_>>());
+        assert!(applying.iter().all(|p| p.done < p.total));
     }
 
     #[test]

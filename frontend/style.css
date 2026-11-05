@@ -833,6 +833,42 @@ h1 {
   color: #e2b86b;
   margin-top: 1px;
 }
+.build-progress > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.build-progress-stage {
+  color: #eeeff1;
+}
+.build-progress progress {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--raised);
+}
+.build-progress progress::-webkit-progress-bar {
+  background: var(--raised);
+}
+.build-progress progress::-webkit-progress-value {
+  background: var(--accent);
+  transition: width 80ms linear;
+}
+.build-progress progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.build-progress-file {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .compatibility {
   border: 1px solid var(--line);
   border-radius: 8px;

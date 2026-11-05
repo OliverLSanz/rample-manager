@@ -209,6 +209,7 @@ impl Manifest {
         review: &BuildReview,
         destination: &Path,
         folder: &Path,
+        progress: build_patch::Progress,
     ) -> Result<(), String> {
         let reviewed: HashMap<&str, &str> = review
             .reviewed_audio
@@ -224,7 +225,9 @@ impl Manifest {
             .map_err(|e| format!("Could not create the destination backup: {e}."))?;
         create(&folder.join("files"))?;
         let affected = review.replacements.iter().chain(&review.removals);
+        let total = review.replacements.len() + review.removals.len();
         for (n, path) in affected.enumerate() {
+            build_patch::report(progress, build_patch::BACKING_UP, path, n, total);
             let file = format!("files/{:04}.wav", n + 1);
             let sha256 = copy_hashed(&destination.join(path), &folder.join(&file))
                 .map_err(|e| format!("Could not back up {path}: {e}."))?;

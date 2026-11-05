@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
 import * as native from "./native";
 import type {
   BuildBackup,
+  BuildProgress,
   BuildReply,
   BuildReview,
   BuildStatus,
@@ -24,6 +26,40 @@ function PathList({ label, paths }: { label: string; paths: string[] }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+/**
+ * A running review or Build: a progress bar for the current stage and the file
+ * being handled, so a long run on a large card visibly advances.
+ */
+export function BuildProgressNotice({
+  title,
+  step,
+}: {
+  title: string;
+  step: BuildProgress | null;
+}) {
+  return (
+    <div className="notice build-progress" role="status">
+      <LoaderCircle size={17} className="spin" />
+      <div>
+        <span>{title}</span>
+        {step && (
+          <>
+            <span className="build-progress-stage">
+              {`${step.stage}: ${step.done + 1} of ${step.total}`}
+            </span>
+            <progress
+              aria-label={step.stage}
+              max={step.total}
+              value={step.done}
+            />
+            <small className="build-progress-file">{step.file}</small>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

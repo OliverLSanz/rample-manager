@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   Transport,
@@ -108,13 +108,32 @@ export const auditionEditor = (id: string) =>
 
 export const patchAction = (action: import("./types").PatchAction) =>
   invoke<import("./types").PatchSnapshot>("patch_action", { action });
-export const reviewPatchBuild = (patchId: string, destination: string) =>
+type OnBuildProgress = (step: import("./types").BuildProgress) => void;
+function progressChannel(onProgress?: OnBuildProgress) {
+  const channel = new Channel<import("./types").BuildProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return channel;
+}
+/** Reviews a Build, reporting each destination file it reads. */
+export const reviewPatchBuild = (
+  patchId: string,
+  destination: string,
+  onProgress?: OnBuildProgress,
+) =>
   invoke<import("./types").BuildReview>("review_patch_build", {
     patchId,
     destination,
+    progress: progressChannel(onProgress),
   });
-export const applyPatchBuild = (review: import("./types").BuildReview) =>
-  invoke<import("./types").BuildReply>("apply_patch_build", { review });
+/** Applies a review, reporting each file it reads, prepares, backs up and writes. */
+export const applyPatchBuild = (
+  review: import("./types").BuildReview,
+  onProgress?: OnBuildProgress,
+) =>
+  invoke<import("./types").BuildReply>("apply_patch_build", {
+    review,
+    progress: progressChannel(onProgress),
+  });
 export const patchBuildBackups = () =>
   invoke<import("./types").BuildBackup[]>("patch_build_backups");
 export const restorePatchBuild = (id: string, destination: string) =>

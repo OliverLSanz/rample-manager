@@ -23,6 +23,7 @@ import { SdImport } from "./SdImport";
 import { SamplesScreen } from "./SamplesScreen";
 import { LibrarySnapshots } from "./LibrarySnapshots";
 import {
+  BuildProgressNotice,
   BuildResult,
   BuildReviewPanel,
   DestinationBackups,
@@ -46,6 +47,7 @@ import {
   idleTransport,
   type Action,
   type BuildReply,
+  type BuildProgress,
   type BuildReview,
   type EditorInfo,
   type LayerMode,
@@ -250,6 +252,9 @@ export default function App() {
   } | null>(null);
   const [building, setBuilding] = useState<string | null>(null);
   const [review, setReview] = useState<BuildReview | null>(null);
+  const [buildProgress, setBuildProgress] = useState<BuildProgress | null>(
+    null,
+  );
   const [built, setBuilt] = useState<BuildReply | null>(null);
   const [backups, setBackups] = useState<{ focus: string | null } | null>(null);
   // Counts deletions so each one restarts the Undo offer; 0 hides it.
@@ -491,12 +496,17 @@ export default function App() {
     );
     if (!destination || !alive.current) return;
     setBuilding("Reviewing the destination…");
+    setBuildProgress(null);
     setBuilt(null);
     setReview(null);
     setError(null);
     try {
       await queue.current.catch(() => {});
-      const reviewed = await native.reviewPatchBuild(patch.id, destination);
+      const reviewed = await native.reviewPatchBuild(
+        patch.id,
+        destination,
+        (step) => alive.current && setBuildProgress(step),
+      );
       if (alive.current) setReview(reviewed);
     } catch (e) {
       if (alive.current) setError(errorText(e));
@@ -507,10 +517,14 @@ export default function App() {
   async function applyBuild() {
     if (!review || building) return;
     setBuilding("Building Patch…");
+    setBuildProgress(null);
     setError(null);
     try {
       await queue.current.catch(() => {});
-      const reply = await native.applyPatchBuild(review);
+      const reply = await native.applyPatchBuild(
+        review,
+        (step) => alive.current && setBuildProgress(step),
+      );
       if (alive.current) setBuilt(reply);
     } catch (e) {
       if (alive.current) setError(errorText(e));
@@ -656,10 +670,7 @@ export default function App() {
           className={`workspace ${screen === "samples" ? "samples-mode" : ""}`}
         >
           {building && (
-            <div className="notice" role="status">
-              <LoaderCircle size={17} className="spin" />
-              <span>{building}</span>
-            </div>
+            <BuildProgressNotice title={building} step={buildProgress} />
           )}
           {review && (
             <BuildReviewPanel

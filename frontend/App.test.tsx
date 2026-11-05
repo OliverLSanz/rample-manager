@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -1198,6 +1199,7 @@ describe("Build to SD", () => {
     expect(native.reviewPatchBuild).toHaveBeenCalledWith(
       "patch",
       "/Volumes/RAMPLE",
+      expect.any(Function),
     );
     expect(native.applyPatchBuild).not.toHaveBeenCalled();
     expect(
@@ -1213,9 +1215,30 @@ describe("Build to SD", () => {
     expect(within(panel).getByText(/backed up on this computer/)).toBeTruthy();
     fireEvent.click(within(panel).getByRole("button", { name: "Apply Build" }));
     await vi.waitFor(() =>
-      expect(native.applyPatchBuild).toHaveBeenCalledWith(review),
+      expect(native.applyPatchBuild).toHaveBeenCalledWith(
+        review,
+        expect.any(Function),
+      ),
     );
     expect(await screen.findByText("Building Patch…")).toBeTruthy();
+    // Each file the Build handles is shown with its stage's progress.
+    const report = vi.mocked(native.applyPatchBuild).mock.calls[0][1]!;
+    act(() =>
+      report({
+        stage: "Writing to the destination",
+        file: "A0/2_01_Snare.wav",
+        done: 2,
+        total: 4,
+      }),
+    );
+    expect(
+      screen.getByText("Writing to the destination: 3 of 4"),
+    ).toBeTruthy();
+    expect(screen.getByText("A0/2_01_Snare.wav")).toBeTruthy();
+    const bar = screen.getByRole("progressbar", {
+      name: "Writing to the destination",
+    }) as HTMLProgressElement;
+    expect([bar.value, bar.max]).toEqual([2, 4]);
     finish({
       destination: "/Volumes/RAMPLE",
       kits: ["A0"],

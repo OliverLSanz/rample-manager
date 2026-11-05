@@ -199,6 +199,16 @@ export interface DestinationFile {
   sha256: string;
 }
 /** Reviewed difference between a Patch's output and a destination. */
+/** One step of a running Build Patch review or apply. */
+export interface BuildProgress {
+  /** What is happening, such as "Reading the destination". */
+  stage: string;
+  /** The file being handled. */
+  file: string;
+  /** Files of this stage already handled, out of `total`. */
+  done: number;
+  total: number;
+}
 export interface BuildReview {
   patchId: string;
   patchName: string;
