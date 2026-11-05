@@ -436,6 +436,7 @@ export default function App() {
           <small>2.3</small>
         </div>
         <KitList
+          key={patch?.id ?? ""}
           patch={patch}
           issues={issues}
           samples={samples}

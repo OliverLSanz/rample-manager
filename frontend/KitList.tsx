@@ -196,7 +196,8 @@ function KitMenu({
 /**
  * The Kits of the open Patch, grouped by Bank: browse, create, re-address,
  * duplicate and delete them. Arrow keys move between Kits; Delete removes the
- * focused Kit (it can be undone).
+ * focused Kit (it can be undone). Render it with `key` set to the Patch ID so
+ * search, folding and open forms start fresh for each Patch.
  */
 export function KitList({
   patch,
@@ -219,12 +220,6 @@ export function KitList({
   const [menu, setMenu] = useState<string | null>(null);
   const nav = useRef<HTMLElement>(null);
   const kits = useMemo(() => sortedKits(patch), [patch]);
-  useEffect(() => {
-    setEditing(null);
-    setMenu(null);
-    setSearch("");
-    setCollapsed(new Set());
-  }, [patch?.id]);
   const term = search.trim().toLowerCase();
   const matching = kits.filter(
     (k) =>
