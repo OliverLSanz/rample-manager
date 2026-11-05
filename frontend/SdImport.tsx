@@ -4,6 +4,7 @@ import * as native from "./native";
 import {
   modes,
   type NativeReading,
+  type NativeSource,
   type PatchSnapshot,
   type SdImportChoice,
   type SdImportReview,
@@ -288,7 +289,7 @@ function NativeSummary({
         exactly; the app never writes them.
       </p>
     );
-  const count = (source: string) =>
+  const count = (source: NativeSource) =>
     reading.kits.filter((kit) => kit.source === source).length;
   const fallback =
     modes.find((mode) => mode.id === reading.defaultLayerMode)?.title ??

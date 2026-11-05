@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import * as native from "./native";
-import type { BuildBackup, BuildReply, BuildReview } from "./types";
+import type {
+  BuildBackup,
+  BuildReply,
+  BuildReview,
+  BuildStatus,
+} from "./types";
 
 function plural(count: number, one: string, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
@@ -153,12 +158,13 @@ export function BuildResult({
 }
 
 function status(backup: BuildBackup) {
-  switch (backup.status) {
+  const status: BuildStatus = backup.status;
+  switch (status) {
     case "complete":
       return "Complete";
     case "incomplete":
       return `Incomplete: ${backup.error ?? "the destination is only partly updated."}`;
-    default:
+    case "applying":
       return "Interrupted: the destination may be only partly updated.";
   }
 }

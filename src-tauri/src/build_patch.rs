@@ -234,6 +234,18 @@ struct BackedUpFile {
     /// Backup copy, relative to the backup folder.
     file: String,
 }
+/// Where one Build stands. Serialized as `applying`, `complete` or
+/// `incomplete` in `restore.json` and replies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BuildStatus {
+    /// Publication started and has not ended; if it stays so, the Build was
+    /// interrupted and the destination may be partly updated.
+    Applying,
+    Complete,
+    /// Publication stopped part way; the record says why.
+    Incomplete,
+}
 /// `restore.json` in each destination backup folder.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -244,8 +256,7 @@ struct Manifest {
     patch: String,
     patch_name: String,
     destination: String,
-    /// `applying` until publication ends, then `complete` or `incomplete`.
-    status: String,
+    status: BuildStatus,
     error: Option<String>,
     restored: Option<u64>,
     /// Files Build Patch writes, with the bytes it writes.
@@ -280,7 +291,7 @@ impl Manifest {
             created: self.created,
             patch_name: self.patch_name.clone(),
             destination: self.destination.clone(),
-            status: self.status.clone(),
+            status: self.status,
             error: self.error.clone(),
             restored: self.restored,
             folder: folder.to_string_lossy().into_owned(),
@@ -314,8 +325,7 @@ pub struct BuildBackup {
     pub created: u64,
     pub patch_name: String,
     pub destination: String,
-    /// `applying` (interrupted), `complete` or `incomplete`.
-    pub status: String,
+    pub status: BuildStatus,
     pub error: Option<String>,
     /// When the destination was last restored from this backup.
     pub restored: Option<u64>,
@@ -589,7 +599,7 @@ impl ManagedLibrary {
             patch: review.patch.clone(),
             patch_name: review.patch_name.clone(),
             destination: review.destination.clone(),
-            status: "applying".into(),
+            status: BuildStatus::Applying,
             error: None,
             restored: None,
             written: writes
@@ -631,11 +641,10 @@ impl ManagedLibrary {
         let total = writes.len() + review.removals.len();
         let published = publish(review, &manifest, &writes, staged, destination, &mut done);
         manifest.status = if published.is_ok() {
-            "complete"
+            BuildStatus::Complete
         } else {
-            "incomplete"
-        }
-        .into();
+            BuildStatus::Incomplete
+        };
         manifest.error = published.err().map(|error| {
             format!("Build Patch did not complete: {error}. {done} of {total} file changes were applied, so the destination is only partly updated. Every replaced or removed file is backed up: restore the destination from this backup, or fix the problem and review Build Patch again.")
         });
@@ -1495,7 +1504,7 @@ mod tests {
         assert_ne!(after["A0/1_01_Kick.wav"], before["A0/1_01_Kick.wav"]);
         // Every replaced or removed file is backed up byte for byte, and nothing else.
         let backup = reply.backup.unwrap();
-        assert_eq!(backup.status, "complete");
+        assert_eq!(backup.status, super::BuildStatus::Complete);
         assert_eq!(backup.replaced, vec!["A0/1_01_Kick.wav"]);
         assert_eq!(
             backup.removed,
@@ -1690,13 +1699,16 @@ mod tests {
             "{error}"
         );
         let backup = reply.backup.unwrap();
-        assert_eq!(backup.status, "incomplete");
+        assert_eq!(backup.status, super::BuildStatus::Incomplete);
         assert_eq!(backup.error.as_deref(), Some(error.as_str()));
         assert_eq!(
             backup.replaced,
             vec!["A0/1_01_Kick.wav", "B1/1_01_Snare.wav"]
         );
-        assert_eq!(state.patch_build_backups().unwrap()[0].status, "incomplete");
+        assert_eq!(
+            state.patch_build_backups().unwrap()[0].status,
+            super::BuildStatus::Incomplete
+        );
 
         // The partly updated card is restored to its reviewed state.
         let restored = state.restore_patch_build(backup.id, card.clone()).unwrap();
@@ -1741,9 +1753,12 @@ mod tests {
             "{error}"
         );
         let backup = reply.backup.unwrap();
-        assert_eq!(backup.status, "incomplete");
+        assert_eq!(backup.status, super::BuildStatus::Incomplete);
         assert_eq!(backup.error.as_deref(), Some(error.as_str()));
-        assert_eq!(state.patch_build_backups().unwrap()[0].status, "incomplete");
+        assert_eq!(
+            state.patch_build_backups().unwrap()[0].status,
+            super::BuildStatus::Incomplete
+        );
         // The failed file keeps its reviewed bytes.
         assert_eq!(
             fs::read(destination.join("B1/1_01_Snare.wav")).unwrap(),
@@ -1788,7 +1803,7 @@ mod tests {
             error.contains("3 of 6 file changes were applied"),
             "{error}"
         );
-        assert_eq!(reply.backup.unwrap().status, "incomplete");
+        assert_eq!(reply.backup.unwrap().status, super::BuildStatus::Incomplete);
         let level = wav::PreparedSample::load(&destination.join("A0/1_01_Kick.wav"), "kept")
             .unwrap()
             .head[0][0]
@@ -1827,7 +1842,7 @@ mod tests {
             ]
         );
         assert_eq!(listed[1].patch_name, "Live");
-        assert_eq!(listed[1].status, "complete");
+        assert_eq!(listed[1].status, super::BuildStatus::Complete);
 
         // The older Build's files were changed by the newer one: never overwritten.
         let blocked = state
@@ -2046,6 +2061,22 @@ mod tests {
             tree(&destination),
             vec!["A0/", "A0/1_01_Kick.wav", "A0/2_01_Snare.wav"]
         );
+    }
+
+    #[test]
+    fn build_statuses_keep_their_restore_json_names() {
+        use super::BuildStatus::*;
+        for (status, name) in [
+            (Applying, "applying"),
+            (Complete, "complete"),
+            (Incomplete, "incomplete"),
+        ] {
+            assert_eq!(serde_json::to_value(status).unwrap(), name);
+            assert_eq!(
+                serde_json::from_value::<super::BuildStatus>(name.into()).unwrap(),
+                status
+            );
+        }
     }
 
     #[test]

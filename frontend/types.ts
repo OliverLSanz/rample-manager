@@ -343,6 +343,8 @@ export interface BuildReview {
   state: DestinationFile[];
   folders: string[];
 }
+/** `applying` until publication ends; it stays so when a Build is interrupted. */
+export type BuildStatus = "applying" | "complete" | "incomplete";
 /** Recoverable record of one applied Build Patch. */
 export interface BuildBackup {
   id: string;
@@ -350,8 +352,7 @@ export interface BuildBackup {
   created: number;
   patchName: string;
   destination: string;
-  /** `applying` means the Build was interrupted. */
-  status: "applying" | "complete" | "incomplete";
+  status: BuildStatus;
   error: string | null;
   /** When the destination was last restored from this backup (ms). */
   restored: number | null;
@@ -410,13 +411,15 @@ export interface ImportedSd {
   /** Absent for Imports made before native reading existed. */
   native?: NativeReading | null;
 }
+/** Where an imported Kit's initial Layer modes come from. */
+export type NativeSource = "store" | "appDefault" | "unreadable";
 export interface NativeReading {
   verifiedFirmware: string;
   defaultLayerMode: LayerMode;
   kits: {
     bank: string;
     number: number;
-    source: "store" | "appDefault" | "unreadable";
+    source: NativeSource;
     voices: { modeRestored: boolean; selectionRestored: boolean }[];
     issues: string[];
   }[];

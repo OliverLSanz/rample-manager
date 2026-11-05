@@ -52,12 +52,21 @@ pub struct NativeReading {
 pub struct NativeKitReading {
     pub bank: String,
     pub number: u8,
-    /// `store`: the Kit's own STOREd file; `appDefault`: never STOREd, so the
-    /// user's default Layer mode applies; `unreadable`: its file has an
-    /// unsupported shape and the default applies.
-    pub source: String,
+    pub source: NativeSource,
     pub voices: Vec<NativeVoiceReading>,
     pub issues: Vec<String>,
+}
+/// Where a Kit's initial Layer modes come from. Serialized as `store`,
+/// `appDefault` or `unreadable`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeSource {
+    /// The Kit's own STOREd file.
+    Store,
+    /// No stored Kit file, so the user's Default Layer mode applies.
+    AppDefault,
+    /// Its stored file has an unsupported shape, so the default applies.
+    Unreadable,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,14 +211,14 @@ fn read_native(
         let mut entry = NativeKitReading {
             bank: kit.bank.clone(),
             number: kit.number,
-            source: "appDefault".into(),
+            source: NativeSource::AppDefault,
             voices: vec![NativeVoiceReading::default(); 4],
             issues: vec![],
         };
         let file = format!("_save/{folder}.rpl");
         match files.get(&file).map(|bytes| native::read_kit(bytes)) {
             Some(Ok(settings)) => {
-                entry.source = "store".into();
+                entry.source = NativeSource::Store;
                 for (channel, stored) in settings.voices.iter().enumerate() {
                     let voice = &mut kit.voices[channel];
                     let restored = &mut entry.voices[channel];
@@ -239,7 +248,7 @@ fn read_native(
                 }
             }
             Some(Err(error)) => {
-                entry.source = "unreadable".into();
+                entry.source = NativeSource::Unreadable;
                 entry.issues.push(format!("{file} could not be interpreted ({error}). The file is preserved; your default Layer mode is used."));
             }
             // Never saved with STORE: the user's default Layer mode applies.
@@ -1122,8 +1131,11 @@ mod tests {
             .clone()
             .unwrap();
         assert_eq!(native.default_layer_mode, LayerMode::Velocity);
-        let sources: Vec<_> = native.kits.iter().map(|k| k.source.as_str()).collect();
-        assert_eq!(sources, ["store", "appDefault"]);
+        let sources: Vec<_> = native.kits.iter().map(|k| k.source).collect();
+        assert_eq!(
+            sources,
+            [super::NativeSource::Store, super::NativeSource::AppDefault]
+        );
         let saved = state
             .finish_sd_import(
                 &review.id,
@@ -1236,7 +1248,7 @@ mod tests {
         assert_eq!(a0.voices[0].selected_layer, a0.voices[0].layers[0].id);
         assert_eq!(a0.voices[1].mode, LayerMode::Sequential);
         assert_eq!(a0.voices[1].selected_layer, a0.voices[1].layers[0].id);
-        assert_eq!(native.kits[1].source, "unreadable");
+        assert_eq!(native.kits[1].source, super::NativeSource::Unreadable);
         assert_eq!(
             state.sd_native_blob(&review.id, "_save/A1.rpl").unwrap(),
             truncated
@@ -1263,7 +1275,7 @@ mod tests {
         let review = state.prepare_sd_import(source).unwrap();
         let native = review.draft.imported_sd.unwrap().native.unwrap();
         assert!(review.native_verified);
-        assert_eq!(native.kits[0].source, "appDefault");
+        assert_eq!(native.kits[0].source, super::NativeSource::AppDefault);
         assert!(native.kits[0].issues.is_empty());
         assert!(native.issues.is_empty());
     }
@@ -1282,7 +1294,7 @@ mod tests {
             .native
             .clone()
             .unwrap();
-        assert_eq!(native.kits[0].source, "appDefault");
+        assert_eq!(native.kits[0].source, super::NativeSource::AppDefault);
         assert_eq!(native.issues.len(), 1, "{:?}", native.issues);
         assert!(native.issues[0].starts_with("No _save folder was found"));
         let saved = state
@@ -1297,6 +1309,21 @@ mod tests {
             .validation
             .iter()
             .any(|v| v.starts_with("Copy: No _save folder was found")));
+    }
+    #[test]
+    fn native_sources_keep_their_saved_names() {
+        use super::NativeSource::*;
+        for (source, name) in [
+            (Store, "store"),
+            (AppDefault, "appDefault"),
+            (Unreadable, "unreadable"),
+        ] {
+            assert_eq!(serde_json::to_value(source).unwrap(), name);
+            assert_eq!(
+                serde_json::from_value::<super::NativeSource>(name.into()).unwrap(),
+                source
+            );
+        }
     }
     #[test]
     fn sd_imported_before_native_reading_offers_update_with_stored_modes() {
