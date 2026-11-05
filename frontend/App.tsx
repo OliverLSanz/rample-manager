@@ -28,6 +28,7 @@ import {
   DestinationBackups,
 } from "./BuildPatch";
 import { KitList } from "./KitList";
+import { SamplePanel } from "./SamplePanel";
 import { PatchMenu } from "./PatchMenu";
 import { VoiceCard } from "./VoiceCard";
 import { SequencerRow, TransportBar } from "./Sequencer";
@@ -169,7 +170,8 @@ export default function App() {
   const [pending, setPending] = useState(0);
   const [sdImport, setSdImport] = useState(false);
   const [library, setLibrary] = useState(false);
-  const [picker, setPicker] = useState<number | null>(null);
+  // The Voice that the Add Samples panel adds to; null while it is closed.
+  const [adding, setAdding] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState(false);
   const [editor, setEditor] = useState<EditorInfo | null>(null);
   const [velocity, setVelocity] = useState<{
@@ -246,6 +248,11 @@ export default function App() {
     (channel: number) => void musical({ type: "audition", channel }),
     [musical],
   );
+  const onDropSample = useCallback(
+    (channel: number, sample: string) =>
+      void act({ type: "addLayer", channel, sample }),
+    [act],
+  );
   const onEdit = useCallback((channel: number) => {
     setError(null);
     setPending((n) => n + 1);
@@ -301,13 +308,7 @@ export default function App() {
     };
   }, []);
 
-  const overlay =
-    sdImport ||
-    library ||
-    picker !== null ||
-    snapshots ||
-    !!editor ||
-    !!velocity;
+  const overlay = sdImport || library || snapshots || !!editor || !!velocity;
   useEffect(() => {
     function key(e: KeyboardEvent) {
       if (overlay || !view) return;
@@ -328,7 +329,7 @@ export default function App() {
       if (
         e.target instanceof Element &&
         e.target.closest(
-          'button,a[href],input,textarea,select,[role="button"],[contenteditable="true"]',
+          'button,a[href],input,textarea,select,[role="button"],[role="listbox"],[contenteditable="true"]',
         )
       )
         return;
@@ -423,7 +424,7 @@ export default function App() {
     ) ?? []),
   ];
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${adding !== null && kit ? "with-panel" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-drag" data-tauri-drag-region />
         <div className="brand">
@@ -442,7 +443,13 @@ export default function App() {
           onDelete={(kit) => void remove({ type: "deleteKit", kit })}
         />
         <div className="sidebar-bottom">
-          <button className="folder-button" onClick={() => setLibrary(true)}>
+          <button
+            className="folder-button"
+            onClick={() => {
+              setAdding(null);
+              setLibrary(true);
+            }}
+          >
             <AudioLines size={15} /> Library samples…
           </button>
           <button
@@ -592,8 +599,9 @@ export default function App() {
                           onPatch={onPatch}
                           onMode={onMode}
                           onAudition={onAudition}
-                          onAdd={setPicker}
+                          onAdd={setAdding}
                           onEdit={onEdit}
+                          onDropSample={onDropSample}
                         />
                       );
                     })}
@@ -732,6 +740,18 @@ export default function App() {
           </footer>
         </div>
       </main>
+      {adding !== null && kit && (
+        <SamplePanel
+          samples={view.samples}
+          channel={adding}
+          kit={kitAddress(kit)}
+          onChannel={setAdding}
+          onAdd={(sample, channel) =>
+            act({ type: "addLayer", channel, sample: sample.id })
+          }
+          onClose={() => setAdding(null)}
+        />
+      )}
       <div className="toasts">
         {undoOffer > 0 && view.undo && (
           <div className="toast undo-toast" role="status">
@@ -779,18 +799,6 @@ export default function App() {
           }}
         />
       )}
-      {picker !== null && (
-        <LibrarySamples
-          onClose={() => {
-            setPicker(null);
-            void act({ type: "open" });
-          }}
-          onSelect={async (id) => {
-            if (await act({ type: "addLayer", channel: picker, sample: id }))
-              setPicker(null);
-          }}
-        />
-      )}
       {snapshots && (
         <LibrarySnapshots
           managed={legacy.managed}
@@ -798,7 +806,7 @@ export default function App() {
           onRestored={(result) => {
             requestVersion.current++;
             setEditor(null);
-            setPicker(null);
+            setAdding(null);
             setLibrary(false);
             setSdImport(false);
             setVelocity(null);

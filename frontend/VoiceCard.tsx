@@ -1,4 +1,4 @@
-import { memo, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties, type DragEvent } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { colors } from "./Sequencer";
+import { sampleDrag } from "./SamplePanel";
 import { heardLayer, kitAddress } from "./patchView";
 import {
   modes,
@@ -70,6 +71,7 @@ export const VoiceCard = memo(function VoiceCard({
   onAudition,
   onAdd,
   onEdit,
+  onDropSample,
 }: {
   channel: number;
   /** The selected Kit. */
@@ -85,7 +87,14 @@ export const VoiceCard = memo(function VoiceCard({
   onAudition: (channel: number) => void;
   onAdd: (channel: number) => void;
   onEdit: (channel: number) => void;
+  /** A Library Sample dropped on this card becomes its last Layer. */
+  onDropSample: (channel: number, sample: string) => void;
 }) {
+  // A Layer drag type per Voice: Layers reorder within their own Voice only.
+  const layerDrag = `application/x-rample-layer-${channel}`;
+  const [dropping, setDropping] = useState<"sample" | number | null>(null);
+  const accepts = (e: DragEvent, type: string) =>
+    [...e.dataTransfer.types].includes(type);
   const color = colors[channel];
   const mode = modes.find((m) => m.id === voice.mode) ?? modes[0];
   const heard = heardLayer(voice, activeIndex);
@@ -94,9 +103,35 @@ export const VoiceCard = memo(function VoiceCard({
   const number = channel + 1;
   return (
     <section
-      className="sample-card"
+      className={`sample-card ${dropping === "sample" ? "dropping" : ""}`}
       aria-label={`Voice ${number}`}
       style={{ "--voice": color } as CSSProperties}
+      onDragOver={(e) => {
+        if (accepts(e, sampleDrag)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDropping("sample");
+        } else if (accepts(e, layerDrag)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+          setDropping(null);
+      }}
+      onDrop={(e) => {
+        setDropping(null);
+        const sample = e.dataTransfer.getData(sampleDrag);
+        const layer = e.dataTransfer.getData(layerDrag);
+        if (sample) {
+          e.preventDefault();
+          onDropSample(channel, sample);
+        } else if (layer && count > 0) {
+          e.preventDefault();
+          onPatch({ type: "moveLayer", channel, layer, to: count - 1 });
+        }
+      }}
     >
       <div className="voice-heading">
         <h2>
@@ -162,7 +197,34 @@ export const VoiceCard = memo(function VoiceCard({
           return (
             <li
               key={layer.id}
-              className={`${selected ? "selected" : ""} ${heard?.id === layer.id ? "heard" : ""}`}
+              className={`${selected ? "selected" : ""} ${heard?.id === layer.id ? "heard" : ""} ${dropping === index ? "drop-before" : ""}`}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(layerDrag, layer.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                if (!accepts(e, layerDrag)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "move";
+                setDropping(index);
+              }}
+              onDrop={(e) => {
+                const dragged = e.dataTransfer.getData(layerDrag);
+                if (!dragged) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setDropping(null);
+                if (dragged !== layer.id)
+                  onPatch({
+                    type: "moveLayer",
+                    channel,
+                    layer: dragged,
+                    to: index,
+                  });
+              }}
+              onDragEnd={() => setDropping(null)}
             >
               <button
                 className="layer-name"

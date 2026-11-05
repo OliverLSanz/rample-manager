@@ -40,8 +40,8 @@ Original files or change Sample identity. Reimporting known audio retains this
 metadata, including after restarting the app. Samples with the same name remain
 separate entries; selecting or auditioning a row always uses its Sample ID.
 
-**Move to Trash** retires a Sample from ordinary Library searches and the add-Sample
-picker. Open **Trash** to audition or **Restore** it. Existing Layers keep their
+**Move to Trash** retires a Sample from ordinary Library searches and the Add
+Samples panel. Open **Trash** to audition or **Restore** it. Existing Layers keep their
 Sample identity and saved sound, including after restarting. Restore makes the
 same Sample available again without copying audio or changing its Kit references.
 Reimporting known retired audio reports the existing Trash entry and offers
@@ -82,12 +82,20 @@ original's SD Import report.
 
 Each voice card lists its Voice's ordered Layers. Click a Layer to select it;
 hover it to move it up or down, **repeat** it (intentionally adding another
-occurrence of the same Sample) or remove just that occurrence. Selection follows
-the occurrence when its position changes, even for duplicates. **Add Sample**
-opens name/tag search and audition. All five Layer modes use this saved order;
+occurrence of the same Sample) or remove just that occurrence, or drag it to
+another position in its Voice. Selection follows the occurrence when its
+position changes, even for duplicates. All five Layer modes use this saved order;
 new Voices use the Library's Default Layer mode. The waveform shows the Layer you
 hear: the selected one in Single sample mode, otherwise the one last triggered.
 Kit preview uses the Library's mono Rample preparation.
+
+**Add Sample** on a voice card opens the **Add Samples** panel beside the Kit,
+targeting that Voice; the 1–4 buttons change the target. Search matches part of
+a name or tag. ↑/↓ browse and, with **Hear while browsing**, play each Sample as
+the Rample will (mono preparation, independently of the mixer); Enter,
+double-click or **+** adds it as the Voice's last Layer. The panel stays open,
+so you can keep auditioning and adding, also while switching Kits. Drag any row
+onto a voice card to add it there. Long Libraries show 150 matches at a time.
 
 Select a Layer and click the sliders button beside **Audition** to edit its complete Original. Trim,
 gain, varispeed pitch, EQ, echo and reverb are saved as reversible Sample Edits;

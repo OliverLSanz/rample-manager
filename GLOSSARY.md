@@ -33,7 +33,7 @@ An independently editable Sample derived from another Sample, sharing its
 Original while retaining its own name, tags and Sample Edits.
 
 **Trash**:
-The recoverable collection of retired Samples hidden from the add-Sample picker
+The recoverable collection of retired Samples hidden from the Add Samples panel
 but still available to Layers that already reference them.
 
 **Patch**:

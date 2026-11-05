@@ -36,6 +36,7 @@ vi.mock("./native", () => ({
   listSamples: vi.fn(),
   querySamples: vi.fn(),
   openSampleAudition: vi.fn(),
+  auditionSample: vi.fn(),
   stopSampleAudition: vi.fn(),
   openManagedEditor: vi.fn(),
   prepareSdImport: vi.fn(),
@@ -158,6 +159,25 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
+
+/** jsdom has no DataTransfer; this keeps data by type like a browser does. */
+function dataTransfer() {
+  const data: Record<string, string> = {};
+  return {
+    data,
+    get types() {
+      return Object.keys(data);
+    },
+    setData(type: string, value: string) {
+      data[type] = value;
+    },
+    getData(type: string) {
+      return data[type] ?? "";
+    },
+    effectAllowed: "all",
+    dropEffect: "none",
+  };
+}
 
 async function openApp(initial: PatchSnapshot = view()) {
   vi.mocked(native.patchAction).mockResolvedValue(initial);
@@ -698,61 +718,170 @@ describe("Patch switcher", () => {
 });
 
 describe("Library", () => {
-  it("adds another occurrence from the searchable Library picker", async () => {
-    await openApp();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
+  it("adds Samples from the side panel, auditioning them while browsing", async () => {
+    const user = userEvent.setup();
+    const many = view();
+    many.samples.push(
+      { ...sample, id: "retired", name: "Old kick", retired: true },
+      { ...sample, id: "clap", name: "Clap", tags: ["hand"] },
     );
-    fireEvent.change(await screen.findByRole("searchbox"), {
-      target: { value: "round" },
-    });
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Select Warm kick" }),
+    await openApp(many);
+    await user.click(
+      screen.getByRole("button", { name: "Add Sample to Voice 2" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Use Sample" }));
+    const panel = screen.getByRole("complementary", { name: "Add Samples" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      within(panel)
+        .getByRole("radio", { name: "Voice 2" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    const search = within(panel).getByRole("searchbox");
+    expect(document.activeElement).toBe(search);
+    const options = () =>
+      within(panel)
+        .getAllByRole("option")
+        .map((o) => o.querySelector("strong")?.textContent);
+    // Retired Samples are not offered.
+    expect(options()).toEqual(["Warm kick", "Dry snare", "Clap"]);
+    // Search matches names and tags.
+    await user.type(search, "SNARE");
+    expect(options()).toEqual(["Dry snare"]);
+    await user.clear(search);
+    await user.type(search, "hand");
+    expect(options()).toEqual(["Clap"]);
+    await user.keyboard("{ArrowDown}");
     await vi.waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Library samples" }),
-      ).toBeNull(),
+      expect(native.auditionSample).toHaveBeenLastCalledWith(
+        "clap",
+        "picker",
+        true,
+      ),
     );
-    expect(native.patchAction).toHaveBeenLastCalledWith({
-      type: "addLayer",
-      channel: 0,
-      sample: "sample",
-    });
-  });
-
-  it("reports a failed picker add and prevents a second add while it is pending", async () => {
-    await openApp();
-    let rejectAdd: (error: Error) => void = () => {};
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Select Warm kick" }),
-    );
-    vi.mocked(native.patchAction).mockImplementation(
-      () =>
-        new Promise((_, reject) => {
-          rejectAdd = reject;
-        }),
-    );
-    const use = screen.getByRole("button", { name: "Use Sample" });
-    fireEvent.click(use);
-    await vi.waitFor(() => expect(use.hasAttribute("disabled")).toBe(true));
+    await user.keyboard("{Enter}");
     await vi.waitFor(() =>
       expect(native.patchAction).toHaveBeenLastCalledWith({
         type: "addLayer",
-        channel: 0,
+        channel: 1,
+        sample: "clap",
+      }),
+    );
+    expect(
+      await within(panel).findByText("Added Clap to Voice 2"),
+    ).toBeTruthy();
+    // The panel stays open; the target can change for the next Sample.
+    await user.clear(search);
+    await user.click(within(panel).getByRole("radio", { name: "Voice 4" }));
+    await user.click(
+      within(panel).getByRole("button", { name: "Add Warm kick to Voice 4" }),
+    );
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "addLayer",
+        channel: 3,
         sample: "sample",
       }),
     );
-    rejectAdd(new Error("Library disk is full"));
+    // Turning off browsing audition keeps the arrows silent.
+    vi.mocked(native.auditionSample).mockClear();
+    await user.click(within(panel).getByRole("checkbox"));
+    search.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(native.auditionSample).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("complementary", { name: "Add Samples" }),
+    ).toBeNull();
+    expect(native.stopSampleAudition).toHaveBeenCalledWith("picker", true);
+  });
+
+  it("reports a failed add and keeps the panel open", async () => {
+    await openApp();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
+    );
+    vi.mocked(native.patchAction).mockRejectedValueOnce(
+      new Error("Library disk is full"),
+    );
+    fireEvent.doubleClick(
+      within(
+        screen.getByRole("complementary", { name: "Add Samples" }),
+      ).getByRole("option", { name: /Warm kick/ }),
+    );
     const toast = await screen.findByText("Library disk is full");
     expect(toast.closest('[role="alert"]')).toBeTruthy();
     expect(
-      screen.getByRole("dialog", { name: "Library samples" }),
+      screen.getByRole("complementary", { name: "Add Samples" }),
     ).toBeTruthy();
+    expect(screen.queryByText(/^Added /)).toBeNull();
+  });
+
+  it("pages long Libraries instead of rendering every Sample", async () => {
+    const big = view();
+    big.samples = Array.from({ length: 320 }, (_, i) => ({
+      ...sample,
+      id: `s${i}`,
+      name: `Hit ${i}`,
+    }));
+    await openApp(big);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
+    );
+    const panel = screen.getByRole("complementary", { name: "Add Samples" });
+    expect(within(panel).getAllByRole("option")).toHaveLength(150);
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Show 150 more of 170" }),
+    );
+    expect(within(panel).getAllByRole("option")).toHaveLength(300);
+    expect(within(panel).getByText("320 Samples")).toBeTruthy();
+  });
+
+  it("drops a dragged Sample on any voice and reorders Layers by dragging", async () => {
+    await openApp();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add Sample to Voice 1" }),
+    );
+    const transfer = dataTransfer();
+    fireEvent.dragStart(
+      within(
+        screen.getByRole("complementary", { name: "Add Samples" }),
+      ).getByRole("option", { name: /Dry snare/ }),
+      { dataTransfer: transfer },
+    );
+    const voice3 = screen.getByRole("region", { name: "Voice 3" });
+    fireEvent.dragOver(voice3, { dataTransfer: transfer });
+    expect(voice3.className).toContain("dropping");
+    fireEvent.drop(voice3, { dataTransfer: transfer });
+    expect(voice3.className).not.toContain("dropping");
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "addLayer",
+        channel: 2,
+        sample: "snare",
+      }),
+    );
+
+    const voice1 = screen.getByRole("region", { name: "Voice 1" });
+    const layers = within(voice1).getAllByRole("listitem");
+    const move = dataTransfer();
+    fireEvent.dragStart(layers[1], { dataTransfer: move });
+    fireEvent.dragOver(layers[0], { dataTransfer: move });
+    expect(layers[0].className).toContain("drop-before");
+    fireEvent.drop(layers[0], { dataTransfer: move });
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "moveLayer",
+        channel: 0,
+        layer: "occ-second",
+        to: 0,
+      }),
+    );
+    // A Layer never moves into another Voice.
+    vi.mocked(native.patchAction).mockClear();
+    const other = dataTransfer();
+    fireEvent.dragStart(layers[0], { dataTransfer: other });
+    fireEvent.drop(voice3, { dataTransfer: other });
+    expect(native.patchAction).not.toHaveBeenCalled();
   });
 
   it("refreshes Patch state after a Library restore", async () => {
