@@ -758,8 +758,10 @@ fn validate_store(store: &ManagedLibrary, manifest: &Manifest) -> Result<(), Str
             |r| r.get(0),
         )
         .map_err(|_| "Snapshot has no complete managed musical workspace.".to_owned())?;
-    if !patch_ids.contains(&marker) {
-        return Err("Snapshot migration marker references a missing Patch.".into());
+    // The marker records that the folder session migrated. The Patch it created
+    // may have been deleted since, like any other Patch.
+    if marker.is_empty() {
+        return Err("Snapshot has no complete managed musical workspace.".into());
     }
     Ok(())
 }
@@ -945,6 +947,7 @@ impl AppState {
             *current = staged;
             legacy.editor = None;
             legacy.patch_preview = None;
+            legacy.deleted = None;
             legacy.prepared.clear();
             legacy.banks = std::array::from_fn(|_| vec![]);
             legacy.catalog = Catalog::default();
@@ -1362,6 +1365,33 @@ mod tests {
         }
         let reopened = serde_json::to_value(restarted.open_managed_editor(0).unwrap()).unwrap();
         assert_eq!(reopened["settings"]["gainDb"], -3.);
+    }
+
+    #[test]
+    fn libraries_whose_migrated_patch_was_deleted_still_back_up_and_restore() {
+        let (temp, state, _) = fixture();
+        state.migrate_legacy().unwrap();
+        let migrated = state
+            .patch_action(PatchAction::Open)
+            .unwrap()
+            .graph
+            .selected_patch;
+        state
+            .patch_action(PatchAction::CreatePatch {
+                name: "Kept".into(),
+            })
+            .unwrap();
+        state
+            .patch_action(PatchAction::DeletePatch { patch: migrated })
+            .unwrap();
+        let backup = temp.path().join("without-migrated-patch");
+        state.backup_library(backup.clone()).unwrap();
+        assert!(state.restore_library(backup).unwrap().complete);
+        let view = state.patch_action(PatchAction::Open).unwrap();
+        assert_eq!(view.graph.patches.len(), 1);
+        // A restore replaces the Library, so an older deletion cannot be undone into it.
+        assert_eq!(view.undo, None);
+        assert!(state.patch_action(PatchAction::UndoDelete).is_err());
     }
 
     #[test]

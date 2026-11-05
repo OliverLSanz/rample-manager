@@ -17,7 +17,9 @@ tags and source-relative SD evidence remain in the database. The complete saved
 state includes Samples, Trash, shared Originals, saved and historical Revisions,
 Variants, every Patch and occurrence, musical controls and selection, opaque native
 blobs, pending SD intake drafts, recognition history and the managed migration
-marker. Musical session state is authoritative in the managed Patch graph.
+marker. Musical session state is authoritative in the managed Patch graph. The
+marker records that the folder session migrated; the Patch it created may have
+been deleted since, so it is not required to exist.
 
 Playing transport, unsaved editor previews, Derived caches, abandoned Incoming
 files, audio-device settings, the old folder session and its external paths are not

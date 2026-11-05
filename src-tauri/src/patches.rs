@@ -70,12 +70,6 @@ impl Patch {
     pub fn kit(&self) -> Option<&PatchKit> {
         self.kits.iter().find(|k| k.id == self.selected_kit)
     }
-    fn kit_mut(&mut self) -> Result<&mut PatchKit, String> {
-        self.kits
-            .iter_mut()
-            .find(|k| k.id == self.selected_kit)
-            .ok_or("Select a Kit first.".into())
-    }
     pub fn voice_kit(&self, channel: usize) -> Option<&PatchKit> {
         let Some(id) = self.voice_kits.get(channel) else {
             return self.kit();
@@ -114,6 +108,78 @@ impl Patch {
         }
     }
 }
+/// The last deleted Kit or Patch, kept in memory so it can be undone until
+/// another deletion, an undo or a Library restore replaces it.
+#[derive(Clone)]
+pub(super) enum Deleted {
+    Kit {
+        patch: String,
+        index: usize,
+        kit: PatchKit,
+        selected: bool,
+    },
+    Patch {
+        index: usize,
+        patch: Box<Patch>,
+        selected: bool,
+        /// SD intakes that recognized this Patch, so re-importing its card
+        /// offers it again after undo.
+        intakes: Vec<String>,
+    },
+}
+impl Deleted {
+    fn label(&self) -> String {
+        match self {
+            Deleted::Kit { kit, .. } => format!("Kit {}", kit.address()),
+            Deleted::Patch { patch, .. } => format!("Patch {}", patch.name),
+        }
+    }
+}
+/// A copy with fresh Kit and Layer IDs, keeping each Voice's selection.
+fn copy_kit(kit: &PatchKit) -> PatchKit {
+    PatchKit {
+        id: Uuid::new_v4().to_string(),
+        bank: kit.bank.clone(),
+        number: kit.number,
+        voices: kit
+            .voices
+            .iter()
+            .map(|voice| {
+                let layers: Vec<Layer> = voice
+                    .layers
+                    .iter()
+                    .map(|l| Layer {
+                        id: Uuid::new_v4().to_string(),
+                        sample_id: l.sample_id.clone(),
+                    })
+                    .collect();
+                let selected = voice
+                    .layers
+                    .iter()
+                    .position(|l| l.id == voice.selected_layer)
+                    .and_then(|i| layers.get(i))
+                    .map(|l| l.id.clone())
+                    .unwrap_or_default();
+                PatchVoice {
+                    layers,
+                    selected_layer: selected,
+                    mode: voice.mode,
+                }
+            })
+            .collect(),
+    }
+}
+/// After removing the selected Kit, select its neighbour in Rample order.
+fn neighbour(kits: &[PatchKit], removed: &PatchKit) -> String {
+    let mut sorted: Vec<&PatchKit> = kits.iter().collect();
+    sorted.sort_by(|a, b| a.bank.cmp(&b.bank).then(a.number.cmp(&b.number)));
+    sorted
+        .iter()
+        .find(|k| (&k.bank, k.number) > (&removed.bank, removed.number))
+        .or(sorted.last())
+        .map(|k| k.id.clone())
+        .unwrap_or_default()
+}
 #[derive(Clone)]
 pub(super) struct PatchPreview {
     key: String,
@@ -132,6 +198,8 @@ pub struct PatchSnapshot {
     pub waveforms: BTreeMap<String, Vec<f32>>,
     pub validation: Vec<String>,
     pub playing: bool,
+    /// What `UndoDelete` would restore, such as `Kit A3`.
+    pub undo: Option<String>,
 }
 #[cfg(test)]
 impl PatchSnapshot {
@@ -159,10 +227,30 @@ pub enum PatchAction {
         bank: String,
         number: u8,
     },
+    /// Moves `kit`, or the selected Kit when absent, to another address.
     AddressKit {
         bank: String,
         number: u8,
+        #[serde(default)]
+        kit: Option<String>,
     },
+    DuplicateKit {
+        kit: String,
+        bank: String,
+        number: u8,
+    },
+    DeleteKit {
+        kit: String,
+    },
+    DuplicatePatch {
+        patch: String,
+        name: String,
+    },
+    DeletePatch {
+        patch: String,
+    },
+    /// Restores the last deleted Kit or Patch.
+    UndoDelete,
     SelectKit {
         kit: String,
     },
@@ -266,6 +354,10 @@ impl AppState {
         );
         let mut trigger = None;
         let mut transport = None;
+        let mut deleted = None;
+        let mut undone = false;
+        // SD intakes whose recognized Patch changes with this action.
+        let mut intake_links: Vec<(String, Option<String>)> = vec![];
         let mut reset = !self.patch_active.load(Ordering::Relaxed);
         match action {
             PatchAction::Open => {}
@@ -319,12 +411,173 @@ impl AppState {
                 patch.selected_kit = id;
                 patch.voice_kits.clear();
             }
-            PatchAction::AddressKit { bank, number } => {
+            PatchAction::AddressKit { bank, number, kit } => {
                 let patch = graph.current_mut()?;
-                valid_address(patch, &bank, number, &patch.selected_kit)?;
-                let kit = patch.kit_mut()?;
+                let id = kit.unwrap_or_else(|| patch.selected_kit.clone());
+                valid_address(patch, &bank, number, &id)?;
+                let kit = patch
+                    .kits
+                    .iter_mut()
+                    .find(|k| k.id == id)
+                    .ok_or("Kit no longer exists.")?;
                 kit.bank = bank;
                 kit.number = number;
+            }
+            PatchAction::DuplicateKit { kit, bank, number } => {
+                let patch = graph.current_mut()?;
+                valid_address(patch, &bank, number, "")?;
+                let source = patch
+                    .kits
+                    .iter()
+                    .find(|k| k.id == kit)
+                    .ok_or("Kit no longer exists.")?;
+                let mut copy = copy_kit(source);
+                copy.bank = bank;
+                copy.number = number;
+                patch.selected_kit = copy.id.clone();
+                patch.kits.push(copy);
+                patch.voice_kits.clear();
+            }
+            PatchAction::DeleteKit { kit } => {
+                let patch = graph.current_mut()?;
+                let index = patch
+                    .kits
+                    .iter()
+                    .position(|k| k.id == kit)
+                    .ok_or("Kit no longer exists.")?;
+                let removed = patch.kits.remove(index);
+                let selected = patch.selected_kit == removed.id;
+                if selected {
+                    patch.selected_kit = neighbour(&patch.kits, &removed);
+                    patch.voice_kits.clear();
+                }
+                if patch.voice_kits.contains(&removed.id) {
+                    patch.voice_kits.clear();
+                }
+                deleted = Some(Deleted::Kit {
+                    patch: patch.id.clone(),
+                    index,
+                    kit: removed,
+                    selected,
+                });
+            }
+            PatchAction::DuplicatePatch { patch, name } => {
+                valid_name(&name)?;
+                let index = graph
+                    .patches
+                    .iter()
+                    .position(|p| p.id == patch)
+                    .ok_or("Patch no longer exists.")?;
+                let source = &graph.patches[index];
+                let ids: HashMap<String, String> = source
+                    .kits
+                    .iter()
+                    .map(|k| (k.id.clone(), Uuid::new_v4().to_string()))
+                    .collect();
+                let copy = Patch {
+                    id: Uuid::new_v4().to_string(),
+                    // A copy is not the card it was imported from: its Import
+                    // report and recognition stay with the original.
+                    imported_sd: None,
+                    name,
+                    selected_kit: ids.get(&source.selected_kit).cloned().unwrap_or_default(),
+                    kits: source
+                        .kits
+                        .iter()
+                        .map(|k| PatchKit {
+                            id: ids[&k.id].clone(),
+                            ..copy_kit(k)
+                        })
+                        .collect(),
+                    bpm: source.bpm,
+                    voices: source.voices.clone(),
+                    voice_kits: source
+                        .voice_kits
+                        .iter()
+                        .filter_map(|id| ids.get(id).cloned())
+                        .collect(),
+                };
+                graph.selected_patch = copy.id.clone();
+                graph.patches.insert(index + 1, copy);
+                reset = true;
+            }
+            PatchAction::DeletePatch { patch } => {
+                let index = graph
+                    .patches
+                    .iter()
+                    .position(|p| p.id == patch)
+                    .ok_or("Patch no longer exists.")?;
+                let removed = graph.patches.remove(index);
+                let selected = graph.selected_patch == removed.id;
+                if selected {
+                    graph.selected_patch = graph
+                        .patches
+                        .get(index)
+                        .or(graph.patches.last())
+                        .map(|p| p.id.clone())
+                        .unwrap_or_default();
+                    reset = true;
+                }
+                let intakes = store.intakes_of(&removed.id)?;
+                intake_links.extend(intakes.iter().map(|id| (id.clone(), None)));
+                deleted = Some(Deleted::Patch {
+                    index,
+                    patch: Box::new(removed),
+                    selected,
+                    intakes,
+                });
+            }
+            PatchAction::UndoDelete => {
+                match legacy.deleted.clone().ok_or("There is nothing to undo.")? {
+                    Deleted::Kit {
+                        patch,
+                        index,
+                        kit,
+                        selected,
+                    } => {
+                        let target = graph
+                            .patches
+                            .iter_mut()
+                            .find(|p| p.id == patch)
+                            .ok_or("The Patch of that Kit no longer exists.")?;
+                        if target
+                            .kits
+                            .iter()
+                            .any(|k| k.bank == kit.bank && k.number == kit.number)
+                        {
+                            return Err(format!(
+                                "{} is now used by another Kit. Move that Kit, then undo again.",
+                                kit.address()
+                            ));
+                        }
+                        if selected {
+                            target.selected_kit = kit.id.clone();
+                            target.voice_kits.clear();
+                        }
+                        let index = index.min(target.kits.len());
+                        target.kits.insert(index, kit);
+                        if graph.selected_patch != patch {
+                            graph.selected_patch = patch;
+                            reset = true;
+                        }
+                    }
+                    Deleted::Patch {
+                        index,
+                        patch,
+                        selected,
+                        intakes,
+                    } => {
+                        if selected || graph.patches.is_empty() {
+                            graph.selected_patch = patch.id.clone();
+                            reset = true;
+                        }
+                        intake_links
+                            .extend(intakes.into_iter().map(|id| (id, Some(patch.id.clone()))));
+                        let index = index.min(graph.patches.len());
+                        graph.patches.insert(index, *patch);
+                    }
+                }
+                undone = true;
             }
             PatchAction::SelectKit { kit } => {
                 let patch = graph.current_mut()?;
@@ -452,7 +705,16 @@ impl AppState {
         }
         // Durable arrangement first. A missing/corrupt asset remains a visible draft issue.
         if persist {
-            store.save_patches(&graph)?;
+            if intake_links.is_empty() {
+                store.save_patches(&graph)?;
+            } else {
+                store.save_patches_and_intakes(&graph, &intake_links)?;
+            }
+        }
+        if deleted.is_some() {
+            legacy.deleted = deleted;
+        } else if undone {
+            legacy.deleted = None;
         }
         let mut validation = vec![];
         for patch in &graph.patches {
@@ -586,6 +848,7 @@ impl AppState {
             waveforms,
             validation,
             playing: legacy.playing,
+            undo: legacy.deleted.as_ref().map(Deleted::label),
         })
     }
     pub fn close_patch(&self) -> Result<(), String> {
@@ -790,5 +1053,141 @@ mod tests {
             graph.current().unwrap().kit().unwrap().voices[0].layers[0].id,
             second
         );
+    }
+
+    fn kit_at<'a>(view: &'a PatchSnapshot, address: &str) -> Option<&'a PatchKit> {
+        view.graph
+            .current()?
+            .kits
+            .iter()
+            .find(|k| k.address() == address)
+    }
+    #[test]
+    fn deleted_kits_select_a_neighbour_and_undo_restores_them_exactly() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0]
+            .id
+            .clone();
+        let run = |action| state.patch_action(action).unwrap();
+        run(PatchAction::CreatePatch { name: "Set".into() });
+        for number in [0, 1, 2] {
+            run(PatchAction::CreateKit {
+                bank: "A".into(),
+                number,
+            });
+        }
+        run(PatchAction::SelectKit {
+            kit: kit_at(&run(PatchAction::Open), "A1").unwrap().id.clone(),
+        });
+        let with_layer = run(PatchAction::AddLayer { channel: 0, sample });
+        let original = kit_at(&with_layer, "A1").unwrap().clone();
+        assert_eq!(original.voices[0].layers.len(), 1);
+        let deleted = run(PatchAction::DeleteKit {
+            kit: original.id.clone(),
+        });
+        assert!(kit_at(&deleted, "A1").is_none());
+        // The next Kit in Rample order is selected.
+        assert_eq!(deleted.kit().unwrap().address(), "A2");
+        assert_eq!(deleted.undo.as_deref(), Some("Kit A1"));
+        // Other edits in between do not prevent undo.
+        run(PatchAction::Musical {
+            action: Action::SetBpm { value: 99. },
+        });
+        let restored = run(PatchAction::UndoDelete);
+        let kit = kit_at(&restored, "A1").unwrap();
+        assert_eq!(kit.id, original.id);
+        assert_eq!(kit.voices[0].layers[0].id, original.voices[0].layers[0].id);
+        assert_eq!(restored.kit().unwrap().id, original.id);
+        assert_eq!(restored.undo, None);
+        assert!(state.patch_action(PatchAction::UndoDelete).is_err());
+        // Undo survives saving: the restored Kit is durable.
+        assert!(kit_at(&run(PatchAction::Open), "A1").is_some());
+        // An address reused meanwhile is reported, keeping the undo.
+        let a2 = kit_at(&restored, "A2").unwrap().id.clone();
+        run(PatchAction::DeleteKit { kit: original.id });
+        run(PatchAction::AddressKit {
+            bank: "A".into(),
+            number: 1,
+            kit: Some(a2),
+        });
+        let error = state.patch_action(PatchAction::UndoDelete).err().unwrap();
+        assert!(error.contains("A1 is now used by another Kit"), "{error}");
+        assert_eq!(run(PatchAction::Open).undo.as_deref(), Some("Kit A1"));
+    }
+    #[test]
+    fn duplicated_kits_and_patches_get_new_identities_and_keep_their_arrangement() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Kick.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0]
+            .id
+            .clone();
+        let run = |action| state.patch_action(action).unwrap();
+        run(PatchAction::CreatePatch { name: "Set".into() });
+        run(PatchAction::CreateKit {
+            bank: "A".into(),
+            number: 0,
+        });
+        run(PatchAction::AddLayer {
+            channel: 1,
+            sample: sample.clone(),
+        });
+        let two = run(PatchAction::AddLayer { channel: 1, sample });
+        let second = two.kit().unwrap().voices[1].layers[1].id.clone();
+        let source = run(PatchAction::SelectLayer {
+            channel: 1,
+            layer: second,
+        });
+        let kit = source.kit().unwrap().clone();
+        assert!(state
+            .patch_action(PatchAction::DuplicateKit {
+                kit: kit.id.clone(),
+                bank: "A".into(),
+                number: 0,
+            })
+            .is_err());
+        let copied = run(PatchAction::DuplicateKit {
+            kit: kit.id.clone(),
+            bank: "C".into(),
+            number: 7,
+        });
+        let copy = copied.kit().unwrap();
+        assert_eq!(copy.address(), "C7");
+        assert_ne!(copy.id, kit.id);
+        assert_ne!(copy.voices[1].layers[0].id, kit.voices[1].layers[0].id);
+        assert_eq!(copy.voices[1].layers.len(), 2);
+        // The selection follows the same position.
+        assert_eq!(copy.voices[1].selected_layer, copy.voices[1].layers[1].id);
+        assert_eq!(kit_at(&copied, "A0").unwrap().id, kit.id);
+
+        let patch = copied.graph.selected_patch.clone();
+        let duplicated = run(PatchAction::DuplicatePatch {
+            patch: patch.clone(),
+            name: "Set copy".into(),
+        });
+        let copy = duplicated.graph.current().unwrap();
+        assert_eq!(copy.name, "Set copy");
+        assert_ne!(copy.id, patch);
+        assert_eq!(copy.kits.len(), 2);
+        assert_eq!(copy.kit().unwrap().address(), "C7");
+        let original = duplicated
+            .graph
+            .patches
+            .iter()
+            .find(|p| p.id == patch)
+            .unwrap();
+        assert!(copy
+            .kits
+            .iter()
+            .all(|k| original.kits.iter().all(|o| o.id != k.id)));
+        // Editing the copy leaves the original alone.
+        let edited = run(PatchAction::RemoveLayer {
+            channel: 1,
+            layer: copy.kit().unwrap().voices[1].layers[0].id.clone(),
+        });
+        let original = edited.graph.patches.iter().find(|p| p.id == patch).unwrap();
+        assert_eq!(original.kit().unwrap().voices[1].layers.len(), 2);
     }
 }

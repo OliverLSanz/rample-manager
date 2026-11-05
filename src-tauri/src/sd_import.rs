@@ -267,6 +267,41 @@ fn read_native(
 }
 
 impl ManagedLibrary {
+    /// SD intakes that currently recognize `patch`.
+    pub(crate) fn intakes_of(&self, patch: &str) -> Result<Vec<String>, String> {
+        let mut query = self
+            .db
+            .prepare("SELECT id FROM sd_intakes WHERE patch_id=?1 ORDER BY rowid")
+            .map_err(|e| e.to_string())?;
+        let ids = query
+            .query_map([patch], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string());
+        ids
+    }
+    /// Saves Patches together with the intakes they gain or lose, so a deleted
+    /// Patch never leaves an SD intake pointing at it.
+    pub(crate) fn save_patches_and_intakes(
+        &self,
+        graph: &crate::patches::PatchGraph,
+        links: &[(String, Option<String>)],
+    ) -> Result<(), String> {
+        let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        for (intake, patch) in links {
+            tx.execute(
+                "UPDATE sd_intakes SET patch_id=?2 WHERE id=?1",
+                rusqlite::params![intake, patch],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.execute(
+            "INSERT INTO patch_state(id,payload) VALUES (1,?1) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+            [serde_json::to_string(graph).map_err(|e| e.to_string())?],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
     fn recognize_sd(&self, fingerprint: &str) -> Result<Option<String>, String> {
         self.db.query_row("SELECT patch_id FROM sd_intakes WHERE fingerprint=?1 AND patch_id IS NOT NULL ORDER BY rowid DESC LIMIT 1", [fingerprint], |row| row.get(0))
             .optional().map_err(|e| e.to_string())
@@ -869,6 +904,61 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("Unknown.wav")));
+    }
+    #[test]
+    fn deleting_an_imported_patch_forgets_its_card_until_undo() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        std::fs::create_dir_all(source.join("A0")).unwrap();
+        wav::write_pcm16(&source.join("A0/1_Kick.wav"), &[8192; 4410], 44100).unwrap();
+        let review = state.prepare_sd_import(source.clone()).unwrap();
+        let imported = state
+            .finish_sd_import(
+                &review.id,
+                super::SdImportChoice::New {
+                    name: "Card".into(),
+                },
+            )
+            .unwrap();
+        let card = imported.graph.selected_patch.clone();
+        let other = state
+            .patch_action(patches::PatchAction::CreatePatch {
+                name: "Other".into(),
+            })
+            .unwrap()
+            .graph
+            .selected_patch;
+        let deleted = state
+            .patch_action(patches::PatchAction::DeletePatch {
+                patch: card.clone(),
+            })
+            .unwrap();
+        assert!(deleted.graph.patches.iter().all(|p| p.id != card));
+        // Deleting a Patch that is not open keeps the open one.
+        assert_eq!(deleted.graph.selected_patch, other);
+        assert_eq!(deleted.undo.as_deref(), Some("Patch Card"));
+        // The card is no longer recognized.
+        assert_eq!(
+            state
+                .prepare_sd_import(source.clone())
+                .unwrap()
+                .recognized_patch,
+            None
+        );
+        let restored = state
+            .patch_action(patches::PatchAction::UndoDelete)
+            .unwrap();
+        let patch = restored
+            .graph
+            .patches
+            .iter()
+            .find(|p| p.id == card)
+            .unwrap();
+        assert!(patch.imported_sd.is_some());
+        assert_eq!(
+            state.prepare_sd_import(source).unwrap().recognized_patch,
+            Some(card)
+        );
     }
     #[test]
     fn unrelated_directories_do_not_change_sd_recognition_but_empty_kits_do() {

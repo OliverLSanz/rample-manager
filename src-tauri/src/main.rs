@@ -60,6 +60,8 @@ struct Library {
     playing: bool,
     editor: Option<editor::EditorState>,
     patch_preview: Option<patches::PatchPreview>,
+    /// The last deleted Kit or Patch, for undo.
+    deleted: Option<patches::Deleted>,
     restore_legacy_audio: bool,
 }
 impl Library {
@@ -99,6 +101,7 @@ impl Library {
             playing: false,
             editor: None,
             patch_preview: None,
+            deleted: None,
             restore_legacy_audio: false,
         })
     }
