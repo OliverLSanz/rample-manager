@@ -1,33 +1,16 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
-import {
-  Activity,
-  ArrowDownUp,
   AudioLines,
-  Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  FolderPlus,
+  DatabaseBackup,
+  Disc3,
   Grid2X2,
-  HardDrive,
+  HardDriveDownload,
+  History,
   Keyboard,
   Layers,
   LoaderCircle,
-  Pause,
-  Play,
-  RefreshCw,
-  Search,
   Settings2,
-  SlidersHorizontal,
   TriangleAlert,
   Upload,
   X,
@@ -37,926 +20,43 @@ import { Modal } from "./Modal";
 import { SampleEditor } from "./SampleEditor";
 import { SdImport } from "./SdImport";
 import { LibrarySamples } from "./LibrarySamples";
+import { LibrarySnapshots } from "./LibrarySnapshots";
 import { LibraryMigration } from "./LibraryMigration";
-import { PatchEditor } from "./PatchEditor";
+import {
+  BuildResult,
+  BuildReviewPanel,
+  DestinationBackups,
+} from "./BuildPatch";
+import { KitList } from "./KitList";
+import { PatchMenu } from "./PatchMenu";
+import { VoiceCard } from "./VoiceCard";
 import { SequencerRow, TransportBar } from "./Sequencer";
 import {
-  basename,
-  compatibilityWarnings,
-  displaySample,
+  currentKit,
+  currentPatch,
+  kitAddress,
+  nextFreeAddress,
+  patchIssues,
+  voiceSource,
+} from "./patchView";
+import {
   idleTransport,
-  modes,
-  sourceSamples,
   type Action,
-  type Kit,
-  type Sample,
-  type Snapshot,
-  type Transport,
-  type Voice,
-  type ReviewedFile,
-  type ImportCandidate,
-  type ConversionReply,
+  type BuildReply,
+  type BuildReview,
   type EditorInfo,
+  type LayerMode,
+  type LibrarySample,
+  type PatchAction,
+  type PatchSnapshot,
+  type Transport,
 } from "./types";
 import "./style.css";
-const colors = ["#f68061", "#83c9ad", "#afa0df", "#dfc275"];
-const isMac = /Mac/i.test(navigator.platform);
-const modifier = isMac ? "⌘" : "Ctrl+";
+
 function errorText(error: unknown) {
-  return typeof error === "string"
-    ? error
-    : error instanceof Error
-      ? error.message
-      : String(error);
+  return error instanceof Error ? error.message : String(error);
 }
 
-function acceptSnapshot(previous: Snapshot | null, next: Snapshot): Snapshot {
-  // Queued folder events cannot reopen destructive compatibility controls after activation.
-  if (previous?.managed && !next.managed) return previous;
-  return !previous || next.revision >= previous.revision ? next : previous;
-}
-
-export default function App() {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [transport, setTransport] = useState<Transport>(idleTransport);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [search, setSearch] = useState("");
-  const [bank, setBank] = useState("All");
-  const [exporting, setExporting] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
-  const [librarySamples, setLibrarySamples] = useState(false);
-  const [patchEditor, setPatchEditor] = useState(false);
-  const [sdImport, setSdImport] = useState(false);
-  const [editor, setEditor] = useState<EditorInfo | null>(null);
-  const [velocity, setVelocity] = useState<{
-    channel: number;
-    step: number;
-  } | null>(null);
-  const serial = useRef(Promise.resolve());
-  const alive = useRef(true);
-  const pending = useRef(0);
-  const latestLibrary = useRef<Snapshot | null>(null);
-  const action = useCallback((a: Action) => {
-    pending.current++;
-    if (
-      [
-        "root",
-        "demo",
-        "selectKit",
-        "selectSource",
-        "selectSample",
-        "setMode",
-        "refresh",
-      ].includes(a.type)
-    )
-      setBusy(true);
-    const task = serial.current
-      .catch(() => {})
-      .then(() => native.act(a))
-      .then((result) => {
-        if (alive.current)
-          setSnapshot((previous) => acceptSnapshot(previous, result));
-      })
-      .catch((e) => {
-        if (alive.current) setError(errorText(e));
-      })
-      .finally(() => {
-        pending.current--;
-        if (pending.current === 0) {
-          setBusy(false);
-          if (latestLibrary.current) {
-            const latest = latestLibrary.current;
-            setSnapshot((previous) => acceptSnapshot(previous, latest));
-            latestLibrary.current = null;
-          }
-        }
-      });
-    serial.current = task;
-    return task;
-  }, []);
-  useEffect(() => {
-    alive.current = true;
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    native
-      .onLibraryChange((s) => {
-        if (pending.current) {
-          latestLibrary.current = s;
-        } else setSnapshot((previous) => acceptSnapshot(previous, s));
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch((e) => setError(errorText(e)));
-    native
-      .getSnapshot()
-      .then((s) => {
-        if (!cancelled) setSnapshot((previous) => acceptSnapshot(previous, s));
-      })
-      .catch((e) => {
-        if (!cancelled) setError(errorText(e));
-      });
-    let polling = false;
-    const timer = setInterval(() => {
-      if (polling) return;
-      polling = true;
-      native
-        .getTransport()
-        .then((t) => {
-          if (!cancelled) setTransport(t);
-        })
-        .catch(() => {})
-        .finally(() => {
-          polling = false;
-        });
-    }, 40);
-    return () => {
-      cancelled = true;
-      alive.current = false;
-      clearInterval(timer);
-      unlisten?.();
-    };
-  }, []);
-  useEffect(() => {
-    if (
-      !snapshot?.managed &&
-      snapshot?.imports.length &&
-      !exporting &&
-      !velocity &&
-      !reviewing &&
-      !librarySamples &&
-      !patchEditor &&
-      !sdImport &&
-      !editor
-    )
-      setReviewing(true);
-  }, [
-    snapshot?.imports.length,
-    exporting,
-    velocity,
-    reviewing,
-    editor,
-    librarySamples,
-    patchEditor,
-    sdImport,
-  ]);
-  const convertImports = useCallback(async (files: ReviewedFile[]) => {
-    await serial.current;
-    const result = await native.convertImports(files);
-    if (alive.current)
-      setSnapshot((previous) => acceptSnapshot(previous, result.snapshot));
-    return result;
-  }, []);
-  const dismissImports = useCallback(
-    async (files: ReviewedFile[]) => {
-      await action({ type: "dismissImports", files });
-      setReviewing(false);
-    },
-    [action],
-  );
-  const openFolder = useCallback(async () => {
-    try {
-      const path = await native.chooseFolder();
-      if (path) {
-        setSearch("");
-        setBank("All");
-        await action({ type: "root", path });
-      }
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }, [action]);
-  useEffect(() => {
-    function keydown(e: KeyboardEvent) {
-      if (
-        snapshot?.managed ||
-        exporting ||
-        velocity ||
-        reviewing ||
-        editor ||
-        librarySamples ||
-        patchEditor ||
-        sdImport
-      )
-        return;
-      const target = e.target;
-      if ((e.metaKey || e.ctrlKey) && !e.altKey) {
-        if (e.key.toLowerCase() === "o") {
-          e.preventDefault();
-          void openFolder();
-        } else if (e.key.toLowerCase() === "r") {
-          e.preventDefault();
-          void action({ type: "refresh" });
-        } else if (e.key.toLowerCase() === "e" && e.shiftKey) {
-          e.preventDefault();
-          setExporting(true);
-        }
-        return;
-      }
-      if (
-        target instanceof Element &&
-        target.closest('input,textarea,select,[contenteditable="true"]')
-      )
-        return;
-      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        void action({ type: "togglePlayback" });
-      } else if (/^[1-4]$/.test(e.key)) {
-        e.preventDefault();
-        void action({ type: "audition", channel: Number(e.key) - 1 });
-      }
-    }
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  }, [
-    action,
-    openFolder,
-    exporting,
-    velocity,
-    reviewing,
-    editor,
-    librarySamples,
-    patchEditor,
-    sdImport,
-    snapshot?.managed,
-  ]);
-  const reveal = useCallback((channel?: number) => {
-    native.reveal(channel).catch((e) => setError(errorText(e)));
-  }, []);
-  const openEditor = useCallback(async (channel: number) => {
-    setBusy(true);
-    try {
-      await serial.current;
-      setEditor(await native.openEditor(channel));
-      setSnapshot((previous) =>
-        previous ? { ...previous, editorInvalidated: false } : previous,
-      );
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-  if (!snapshot)
-    return (
-      <div className="boot">
-        <AudioLines size={48} />
-        <h1>Rample Preview</h1>
-        {error ? (
-          <>
-            <p role="alert">{error}</p>
-            <button onClick={() => location.reload()}>Retry</button>
-          </>
-        ) : (
-          <>
-            <LoaderCircle className="spin" />
-            <p>Opening your sample library…</p>
-          </>
-        )}
-      </div>
-    );
-  if (snapshot.managed)
-    return (
-      <PatchEditor
-        managed
-        transport={transport}
-        onClose={() => {}}
-        onSnapshot={(next) =>
-          setSnapshot((previous) => acceptSnapshot(previous, next))
-        }
-      />
-    );
-  const { session, catalog } = snapshot;
-  const banks = [...new Set(catalog.kits.map((k) => k.bank))];
-  const filtered = catalog.kits.filter(
-    (k) =>
-      (bank === "All" || k.bank === bank) &&
-      (!search ||
-        k.id.toLowerCase().includes(search.toLowerCase()) ||
-        k.samples.some((s) =>
-          s.name.toLowerCase().includes(search.toLowerCase()),
-        )),
-  );
-  const warnings = compatibilityWarnings(snapshot);
-  return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-drag" data-tauri-drag-region />
-        <div className="brand">
-          <AudioLines size={31} />
-          <div>
-            <strong>RAMPLE</strong>
-            <span>P R E V I E W</span>
-          </div>
-          <small>2.3</small>
-        </div>
-        <div className="library-heading">
-          <span>LIBRARY</span>
-          <span>{catalog.kits.length}</span>
-        </div>
-        <label className="search">
-          <Search size={14} />
-          <input
-            aria-label="Search kits or samples"
-            placeholder="Search kits or samples"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <button aria-label="Clear search" onClick={() => setSearch("")}>
-              <X size={12} />
-            </button>
-          )}
-        </label>
-        <label className="bank-filter">
-          <Layers size={14} />
-          <select
-            aria-label="Filter banks"
-            value={banks.includes(bank) ? bank : "All"}
-            onChange={(e) => setBank(e.target.value)}
-          >
-            <option value="All">All banks</option>
-            {banks.map((b) => (
-              <option key={b} value={b}>
-                Bank {b}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={11} />
-        </label>
-        <nav aria-label="Sample kits" className="kit-list">
-          {filtered.map((k) => (
-            <button
-              key={k.id}
-              className={`kit ${session.selectedKit === k.id ? "selected" : ""}`}
-              aria-label={`Load kit ${k.id}`}
-              aria-current={session.selectedKit === k.id ? "true" : undefined}
-              onClick={() => void action({ type: "selectKit", kit: k.id })}
-            >
-              <b>{k.id}</b>
-              <span>
-                <strong>Kit {k.id}</strong>
-                <small>{k.samples.length} samples</small>
-              </span>
-              {session.selectedKit === k.id ? (
-                <i />
-              ) : k.warnings.length > 0 ? (
-                <TriangleAlert size={11} />
-              ) : null}
-            </button>
-          ))}
-          {!filtered.length && (
-            <p className="no-matches">
-              {search ? "No matches" : "No kits in this bank"}
-            </p>
-          )}
-        </nav>
-        <div className="sidebar-bottom">
-          <button className="folder-button" onClick={() => setSdImport(true)}>
-            <Layers size={15} /> Import Rample SD…
-          </button>
-          <button
-            className="folder-button"
-            onClick={() => setPatchEditor(true)}
-          >
-            <Layers size={15} /> Patches…
-          </button>
-          <button
-            className="folder-button"
-            onClick={() => setLibrarySamples(true)}
-          >
-            <AudioLines size={15} /> Library samples…
-          </button>
-          {snapshot.isDemo && (
-            <div className="demo-note">
-              <span>
-                <Activity size={13} /> Demo library
-              </span>
-              <p>
-                Four sounds to get started.
-                <br />
-                Open your folder to hear your own samples.
-              </p>
-            </div>
-          )}
-          <button className="folder-button" onClick={() => void openFolder()}>
-            <FolderPlus size={15} />
-            Open folder…
-          </button>
-          <small>LOCAL · OFFLINE</small>
-        </div>
-      </aside>
-      <main>
-        <header className="topbar" data-tauri-drag-region>
-          <div className="folder-path">
-            <HardDrive size={16} />
-            <button title={session.rootPath} onClick={() => reveal()}>
-              {basename(session.rootPath)}
-            </button>
-            {snapshot.isDemo && <span className="badge">DEMO</span>}
-          </div>
-          <div className="header-actions">
-            <span className={`live-state ${catalog.error ? "warning" : ""}`}>
-              <i />
-              {busy
-                ? "Loading…"
-                : catalog.error
-                  ? "Library offline"
-                  : snapshot.watching
-                    ? "Live updates"
-                    : "Auto-refresh · 4 s"}
-            </span>
-            <button
-              className={`icon-button ${busy ? "refreshing" : ""}`}
-              title={`Refresh files (${modifier}R)`}
-              aria-label="Refresh files"
-              onClick={() => void action({ type: "refresh" })}
-            >
-              <RefreshCw size={15} />
-            </button>
-            <button
-              className="format-button"
-              aria-label="Check sample formats"
-              title="Review sample formats"
-              onClick={() => void action({ type: "reviewFormats" })}
-            >
-              <TriangleAlert size={16} />
-              <span>Check formats</span>
-            </button>
-            <span className="divider" />
-            <button
-              className="secondary export-button"
-              onClick={() => setExporting(true)}
-            >
-              <Upload size={14} />
-              Export kit
-            </button>
-          </div>
-        </header>
-        <div className="workspace">
-          <LibraryMigration
-            onComplete={() => {
-              setReviewing(false);
-              setEditor(null);
-              setSnapshot((previous) =>
-                previous
-                  ? { ...previous, managed: true, imports: [] }
-                  : previous,
-              );
-            }}
-          />
-          <section className="kit-heading">
-            <div className="kit-code">{session.selectedKit || "—"}</div>
-            <div>
-              <h1>Your kit. In context.</h1>
-              <p>
-                Choose a layer for each voice and hear how your samples fit
-                together.
-              </p>
-            </div>
-            {busy && (
-              <LoaderCircle
-                size={17}
-                className="spin loading-indicator"
-                aria-label="Loading samples"
-              />
-            )}
-          </section>
-          {catalog.error && (
-            <div className="notice" role="alert">
-              <TriangleAlert size={17} />
-              <span>{catalog.error}</span>
-            </div>
-          )}
-          {!catalog.kits.length && !catalog.error && (
-            <div className="notice">
-              <Folder size={17} />
-              <span>
-                No kits found. Choose the root folder containing A0, A1… Z99.
-                WAV filenames inside each kit must start with 1, 2, 3 or 4.
-              </span>
-            </div>
-          )}
-          <section className="sample-cards" aria-label="Sample voices">
-            {session.voices.map((voice, i) => (
-              <SampleCard
-                key={i}
-                channel={i}
-                voice={voice}
-                kits={catalog.kits}
-                sample={displaySample(snapshot, i, transport.activeLayers[i])}
-                samples={sourceSamples(snapshot, i)}
-                peaks={
-                  snapshot.waveforms[
-                    displaySample(snapshot, i, transport.activeLayers[i])?.id ??
-                      ""
-                  ]
-                }
-                layerCount={snapshot.banks[i]?.length ?? 0}
-                activeIndex={transport.activeLayers[i]}
-                onAction={action}
-                onReveal={reveal}
-                onEdit={openEditor}
-              />
-            ))}
-          </section>
-          <section className="sequencer" aria-label="16-step sequencer">
-            <div className="sequencer-heading">
-              <Grid2X2 size={15} />
-              <h2>Sequencer</h2>
-              <span>16 STEPS · 4/4 · 1/16</span>
-              <div className="pattern-menu">
-                <Settings2 size={14} />
-                <select
-                  aria-label="Pattern actions"
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value)
-                      void action({
-                        type: e.target.value as "basicPattern" | "clearPattern",
-                      });
-                  }}
-                >
-                  <option value="" disabled>
-                    Pattern
-                  </option>
-                  <option value="basicPattern">Load example beat</option>
-                  <option value="clearPattern">Clear all 64 steps</option>
-                </select>
-                <ChevronDown size={11} />
-              </div>
-            </div>
-            <div className="step-grid">
-              <div className="step-numbers">
-                <span>VOICE / LEVEL</span>
-                <div className="steps">
-                  {Array.from({ length: 16 }, (_, i) => (
-                    <span
-                      className={`${i % 4 === 0 ? "beat" : ""} ${transport.step === i ? "current" : ""}`}
-                      key={i}
-                    >
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              {session.voices.map((v, i) => (
-                <SequencerRow
-                  key={i}
-                  channel={i}
-                  voice={v}
-                  playhead={transport.running ? transport.step : -1}
-                  onAction={action}
-                  onVelocity={setVelocity}
-                />
-              ))}
-              <div className="position-row">
-                <span />
-                <div className="steps">
-                  {Array.from({ length: 16 }, (_, i) => (
-                    <i
-                      key={i}
-                      className={
-                        transport.running && transport.step === i
-                          ? "current"
-                          : ""
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-            <TransportBar
-              playing={snapshot.playing}
-              bpm={session.bpm}
-              transport={transport}
-              onAction={action}
-            />
-          </section>
-          {transport.error && (
-            <div className="notice" role="alert">
-              <TriangleAlert size={17} />
-              <span>{transport.error}</span>
-            </div>
-          )}
-          {warnings.length > 0 && (
-            <details className="compatibility">
-              <summary>
-                <TriangleAlert size={13} />
-                {warnings.length} Rample compatibility{" "}
-                {warnings.length === 1 ? "warning" : "warnings"}
-                <ChevronDown size={12} />
-              </summary>
-              <ul>
-                {warnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-          <footer>
-            <div>
-              <Keyboard size={13} />
-              <span>Space: play / stop</span>
-              <b>·</b>
-              <span>1–4: audition voice</span>
-              <b>·</b>
-              <span>{modifier}R: refresh</span>
-            </div>
-            <span title="Layer modes are stored on this computer. Native Rample .rpl settings are not changed.">
-              {snapshot.message ||
-                "Modes saved on this computer · native SD sync pending"}
-            </span>
-          </footer>
-        </div>
-      </main>
-      {error && (
-        <div className="toast" role="alert">
-          <TriangleAlert size={17} />
-          <span>{error}</span>
-          <button aria-label="Dismiss error" onClick={() => setError(null)}>
-            <X size={15} />
-          </button>
-        </div>
-      )}
-      {sdImport && (
-        <SdImport
-          onClose={() => setSdImport(false)}
-          onImported={() => {
-            setSdImport(false);
-            setPatchEditor(true);
-          }}
-        />
-      )}
-      {patchEditor && (
-        <PatchEditor
-          transport={transport}
-          onClose={() => {
-            setPatchEditor(false);
-            void native
-              .getSnapshot()
-              .then(setSnapshot)
-              .catch((e) => setError(errorText(e)));
-          }}
-        />
-      )}
-      {librarySamples && (
-        <LibrarySamples onClose={() => setLibrarySamples(false)} />
-      )}
-      {editor && (
-        <SampleEditor
-          initial={editor}
-          transport={transport}
-          invalidated={!!snapshot.editorInvalidated}
-          onClose={() => setEditor(null)}
-          onSaved={(result) =>
-            setSnapshot((previous) => acceptSnapshot(previous, result))
-          }
-          onToggle={() => action({ type: "togglePlayback" })}
-        />
-      )}
-      {reviewing && !exporting && !velocity && (
-        <ImportDialog
-          items={snapshot.imports}
-          backupPath={`${snapshot.supportPath}/Conversion backups`}
-          onConvert={convertImports}
-          onDismiss={dismissImports}
-        />
-      )}
-      {exporting && (
-        <ExportDialog
-          onClose={() => setExporting(false)}
-          onError={(e) => setError(errorText(e))}
-          onExported={() => void action({ type: "refresh" })}
-        />
-      )}
-      {velocity && (
-        <VelocityDialog
-          channel={velocity.channel}
-          step={velocity.step}
-          initial={session.voices[velocity.channel].velocities[velocity.step]}
-          onClose={() => setVelocity(null)}
-          onChange={(value) =>
-            void action({ type: "setVelocity", ...velocity, value })
-          }
-        />
-      )}
-    </div>
-  );
-}
-
-const Waveform = memo(function Waveform({
-  peaks,
-  color,
-}: {
-  peaks?: number[];
-  color: string;
-}) {
-  const path =
-    peaks
-      ?.map((p, i) => {
-        const y = Math.max(1, p * 55);
-        return `M${i * 3 + 1},${(60 - y) / 2}v${y}`;
-      })
-      .join(" ") ?? "";
-  return (
-    <svg
-      className="waveform"
-      viewBox="0 0 300 60"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label="Waveform"
-    >
-      <path d="M0 30H300" stroke={color} strokeOpacity=".13" />
-      <path
-        d={path}
-        stroke={color}
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        opacity=".75"
-      />
-    </svg>
-  );
-});
-const SampleCard = memo(function SampleCard({
-  channel,
-  voice,
-  kits,
-  sample,
-  samples,
-  peaks,
-  layerCount,
-  activeIndex,
-  onAction,
-  onReveal,
-  onEdit,
-}: {
-  channel: number;
-  voice: Voice;
-  kits: Kit[];
-  sample?: Sample;
-  samples: Sample[];
-  peaks?: number[];
-  layerCount: number;
-  activeIndex: number;
-  onAction: (a: Action) => Promise<void>;
-  onReveal: (i: number) => void;
-  onEdit: (i: number) => Promise<void>;
-}) {
-  const selectedExists = samples.some((s) => s.id === voice.samplePath);
-  const missing = !!voice.samplePath && !selectedExists;
-  const mode = modes.find((m) => m.id === voice.layerMode)!;
-  return (
-    <article
-      className="sample-card"
-      style={{ "--voice": colors[channel] } as CSSProperties}
-    >
-      <div className="voice-heading">
-        <h2>
-          <i />
-          VOICE {String(channel + 1).padStart(2, "0")}
-        </h2>
-        <label className="source-select">
-          <select
-            aria-label={`Source kit for voice ${channel + 1}`}
-            value={kits.some((k) => k.id === voice.kitID) ? voice.kitID : ""}
-            onChange={(e) =>
-              void onAction({
-                type: "selectSource",
-                channel,
-                kit: e.target.value,
-              })
-            }
-          >
-            <option value="" disabled>
-              Kit
-            </option>
-            {kits.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.id}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={10} />
-        </label>
-      </div>
-      <label
-        className={`sample-select ${missing ? "missing" : ""}`}
-        title={voice.samplePath || "Select a sample"}
-      >
-        <ArrowDownUp size={14} />
-        <select
-          aria-label={`Sample for voice ${channel + 1}`}
-          value={voice.samplePath}
-          onChange={(e) =>
-            void onAction({
-              type: "selectSample",
-              channel,
-              path: e.target.value,
-            })
-          }
-        >
-          <option value="">No sample</option>
-          {missing && (
-            <option value={voice.samplePath} disabled>
-              Sample deleted
-            </option>
-          )}
-          {samples.map((s) => (
-            <option key={s.id} value={s.id} disabled={!s.readable}>
-              {s.name}
-              {s.warnings.length ? " ⚠" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="mode-row">
-        <label title={mode.description}>
-          <Layers size={11} />
-          <select
-            aria-label={`Layer mode for voice ${channel + 1}`}
-            value={voice.layerMode}
-            onChange={(e) =>
-              void onAction({
-                type: "setMode",
-                channel,
-                mode: e.target.value as Voice["layerMode"],
-              })
-            }
-          >
-            {modes.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.title}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={9} />
-        </label>
-        {voice.layerMode !== "manual" && (
-          <span>
-            {activeIndex >= 0 ? activeIndex + 1 : "–"} / {layerCount}
-          </span>
-        )}
-      </div>
-      <Waveform peaks={peaks} color={colors[channel]} />
-      <div
-        className="sample-detail"
-        title={
-          sample
-            ? `${sample.name} · ${(sample.rate / 1000).toFixed(1)} kHz · ${sample.bits} bit`
-            : ""
-        }
-      >
-        {sample ? (
-          <>
-            <span>{sample.duration.toFixed(2)} s</span>
-            <small>{sample.channels === 1 ? "MONO" : "STEREO"}</small>
-            {sample.warnings.length > 0 && (
-              <TriangleAlert size={12} className="warning" />
-            )}
-          </>
-        ) : (
-          <span>
-            {missing
-              ? "Choose another file or restore it"
-              : "No layers in this voice"}
-          </span>
-        )}
-      </div>
-      <div className="sample-actions">
-        <button
-          disabled={layerCount === 0}
-          onClick={() => void onAction({ type: "audition", channel })}
-          aria-label={`Audition voice ${channel + 1}`}
-        >
-          <Play size={10} fill="currentColor" />
-          Audition<kbd>{channel + 1}</kbd>
-        </button>
-        <button
-          className="icon-button"
-          disabled={!selectedExists}
-          title="Edit selected sample with live sequence preview"
-          aria-label={`Edit sample for voice ${channel + 1}`}
-          onClick={() => void onEdit(channel)}
-        >
-          <SlidersHorizontal size={14} />
-        </button>
-        <button
-          className="icon-button"
-          disabled={!sample}
-          title="Show selected WAV in file manager"
-          aria-label={`Show voice ${channel + 1} sample in file manager`}
-          onClick={() => onReveal(channel)}
-        >
-          <Folder size={14} />
-        </button>
-      </div>
-    </article>
-  );
-});
 function VelocityDialog({
   channel,
   step,
@@ -1018,288 +118,675 @@ function VelocityDialog({
     </Modal>
   );
 }
-function ExportDialog({
-  onClose,
-  onError,
-  onExported,
+
+/** Shown while the Library has no Patch: every Kit lives in a Patch. */
+function FirstPatch({
+  onCreate,
+  onImport,
 }: {
-  onClose: () => void;
-  onError: (e: unknown) => void;
-  onExported: () => void;
+  onCreate: (name: string) => Promise<boolean>;
+  onImport: () => void;
 }) {
-  const [name, setName] = useState("B0");
-  const [busy, setBusy] = useState(false);
-  const valid = /^[A-Z][0-9]{1,2}$/.test(name);
-  async function submit() {
-    try {
-      const parent = await native.chooseFolder(
-        `Export ${name}: choose the destination SD root`,
-      );
-      if (!parent) return;
-      setBusy(true);
-      await native.exportKit(name, parent);
-      onExported();
-      onClose();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [name, setName] = useState("My Patch");
   return (
-    <Modal label="Export kit" onClose={onClose}>
-      <div className="modal-heading">
-        <Upload size={21} />
-        <h2>Export selection</h2>
-        <button aria-label="Close export dialog" onClick={onClose}>
-          <X size={17} />
-        </button>
-      </div>
+    <section className="empty-state" aria-label="Start a Patch">
+      <Disc3 size={34} />
+      <h1>Start a Patch</h1>
       <p>
-        Create a kit with a copy of your selected samples. Choose your SD root
-        as the destination to use it on Rample.
+        A Patch is a complete Rample SD card: its Banks, Kits and the Layers of
+        each Voice. Every Patch shares the same Library of Samples.
       </p>
-      <label className="export-name">
-        Kit name
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim()) void onCreate(name);
+        }}
+      >
         <input
-          aria-label="Kit name"
+          aria-label="New Patch name"
           value={name}
-          onChange={(e) => setName(e.target.value.toUpperCase())}
+          onChange={(e) => setName(e.target.value)}
         />
-        <small>A0–Z99</small>
-      </label>
-      <div className="export-note">
-        <Check size={14} />
-        <span>
-          Compatible mono WAV · voice 1 required · existing kits stay untouched.
-        </span>
-      </div>
-      <p className="small">
-        This exports one selected sample per voice. Layer modes stay on this
-        computer until native SD settings have been verified.
-      </p>
-      <div className="modal-buttons">
-        <button className="secondary" onClick={onClose}>
-          Cancel
+        <button className="primary" disabled={!name.trim()}>
+          Create Patch
         </button>
-        <button
-          className="primary"
-          disabled={!valid || busy}
-          onClick={() => void submit()}
-        >
-          {busy ? (
-            <LoaderCircle className="spin" size={14} />
-          ) : (
-            <FolderOpen size={14} />
-          )}
-          Choose destination…
-        </button>
-      </div>
-    </Modal>
+      </form>
+      <button className="secondary" onClick={onImport}>
+        <HardDriveDownload size={14} /> Import Rample SD…
+      </button>
+    </section>
   );
 }
 
-function ImportDialog({
-  items,
-  backupPath,
-  onConvert,
-  onDismiss,
-}: {
-  items: ImportCandidate[];
-  backupPath: string;
-  onConvert: (files: ReviewedFile[]) => Promise<ConversionReply>;
-  onDismiss: (files: ReviewedFile[]) => Promise<void>;
-}) {
-  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
-  const [busy, setBusy] = useState(false);
+export default function App() {
+  const [view, setView] = useState<PatchSnapshot | null>(null);
+  // The folder session from before the managed Library: whether it has been
+  // moved into the Library, and whether it is only the bundled demo.
+  const [legacy, setLegacy] = useState({ managed: true, isDemo: false });
+  const [transport, setTransport] = useState<Transport>(idleTransport);
   const [error, setError] = useState<string | null>(null);
-  const [reply, setReply] = useState<ConversionReply | null>(null);
-  const reviewed = useRef<ReviewedFile[]>([]);
-  const selected = items.filter(
-    (item) => item.convertible && !excluded.has(item.id),
-  );
-  async function close() {
-    if (busy) return;
-    setBusy(true);
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [pending, setPending] = useState(0);
+  const [sdImport, setSdImport] = useState(false);
+  const [library, setLibrary] = useState(false);
+  const [picker, setPicker] = useState<number | null>(null);
+  const [snapshots, setSnapshots] = useState(false);
+  const [editor, setEditor] = useState<EditorInfo | null>(null);
+  const [velocity, setVelocity] = useState<{
+    channel: number;
+    step: number;
+  } | null>(null);
+  const [building, setBuilding] = useState<string | null>(null);
+  const [review, setReview] = useState<BuildReview | null>(null);
+  const [built, setBuilt] = useState<BuildReply | null>(null);
+  const [backups, setBackups] = useState<{ focus: string | null } | null>(null);
+  const [migrationHidden, setMigrationHidden] = useState(false);
+  const alive = useRef(true);
+  const queue = useRef(Promise.resolve());
+  // Bumped when a Library restore replaces every Patch: older replies are stale.
+  const requestVersion = useRef(0);
+
+  /** Serializes Patch changes; resolves true when the backend accepted it. */
+  const act = useCallback(async (action: PatchAction): Promise<boolean> => {
+    const version = requestVersion.current;
+    let success = false;
+    setPending((n) => n + 1);
+    const task = queue.current
+      .catch(() => {})
+      .then(async () => {
+        if (version !== requestVersion.current) return;
+        const result = await native.patchAction(action);
+        if (alive.current && version === requestVersion.current) {
+          setView(result);
+          success = true;
+        }
+      });
+    queue.current = task;
     try {
-      await onDismiss(
-        reply
-          ? reviewed.current
-          : items.map(({ id, fingerprint }) => ({ id, fingerprint })),
-      );
+      await task;
     } catch (e) {
-      setError(errorText(e));
+      if (alive.current && version === requestVersion.current)
+        setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (alive.current) setPending((n) => n - 1);
     }
-  }
-  async function convert() {
-    if (!selected.length || busy) return;
-    reviewed.current = items.map(({ id, fingerprint }) => ({
-      id,
-      fingerprint,
-    }));
-    setBusy(true);
+    return success;
+  }, []);
+  const musical = useCallback(
+    async (action: Action) => {
+      await act({ type: "musical", action });
+    },
+    [act],
+  );
+  const onPatch = useCallback((action: PatchAction) => void act(action), [act]);
+  const onMode = useCallback(
+    (channel: number, mode: LayerMode) =>
+      void musical({ type: "setMode", channel, mode }),
+    [musical],
+  );
+  const onAudition = useCallback(
+    (channel: number) => void musical({ type: "audition", channel }),
+    [musical],
+  );
+  const onEdit = useCallback((channel: number) => {
+    setError(null);
+    setPending((n) => n + 1);
+    void queue.current
+      .catch(() => {})
+      .then(() => native.openManagedEditor(channel))
+      .then((info) => {
+        if (alive.current) setEditor(info);
+      })
+      .catch((e) => {
+        if (alive.current) setError(errorText(e));
+      })
+      .finally(() => {
+        if (alive.current) setPending((n) => n - 1);
+      });
+  }, []);
+
+  useEffect(() => {
+    alive.current = true;
+    let cancelled = false;
+    native
+      .getSnapshot()
+      .then((s) => {
+        if (!cancelled) setLegacy({ managed: !!s.managed, isDemo: s.isDemo });
+      })
+      .catch(() => {});
+    native
+      .patchAction({ type: "open" })
+      .then((result) => {
+        if (!cancelled) setView(result);
+      })
+      .catch((e) => {
+        if (!cancelled) setBootError(errorText(e));
+      });
+    let polling = false;
+    const timer = setInterval(() => {
+      if (polling) return;
+      polling = true;
+      native
+        .getTransport()
+        .then((t) => {
+          if (!cancelled) setTransport(t);
+        })
+        .catch(() => {})
+        .finally(() => {
+          polling = false;
+        });
+    }, 40);
+    return () => {
+      cancelled = true;
+      alive.current = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const overlay =
+    sdImport ||
+    library ||
+    picker !== null ||
+    snapshots ||
+    !!editor ||
+    !!velocity;
+  useEffect(() => {
+    function key(e: KeyboardEvent) {
+      if (overlay || !view) return;
+      if (
+        e.target instanceof Element &&
+        e.target.closest(
+          'button,a[href],input,textarea,select,[role="button"],[contenteditable="true"]',
+        )
+      )
+        return;
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        void musical({ type: "togglePlayback" });
+      } else if (/^[1-4]$/.test(e.key)) {
+        e.preventDefault();
+        void musical({ type: "audition", channel: Number(e.key) - 1 });
+      }
+    }
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [overlay, view, musical]);
+
+  const samples = useMemo(
+    () => new Map<string, LibrarySample>(view?.samples.map((s) => [s.id, s])),
+    [view?.samples],
+  );
+  const patch = currentPatch(view);
+  const kit = currentKit(patch);
+  const issues = useMemo(
+    () => (view && patch ? patchIssues(view, patch) : []),
+    [view, patch],
+  );
+  const busy = pending > 0;
+
+  async function build() {
+    if (!patch || busy || building) return;
+    const destination = await native.chooseFolder(
+      "Choose a folder or SD card for Build Patch",
+    );
+    if (!destination || !alive.current) return;
+    setBuilding("Reviewing the destination…");
+    setBuilt(null);
+    setReview(null);
     setError(null);
     try {
-      setReply(
-        await onConvert(
-          selected.map(({ id, fingerprint }) => ({ id, fingerprint })),
-        ),
-      );
+      await queue.current.catch(() => {});
+      const reviewed = await native.reviewPatchBuild(patch.id, destination);
+      if (alive.current) setReview(reviewed);
     } catch (e) {
-      setError(errorText(e));
+      if (alive.current) setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (alive.current) setBuilding(null);
     }
   }
-  return (
-    <Modal label="New samples detected" onClose={() => void close()}>
-      <div className="modal-heading">
-        <TriangleAlert size={21} />
-        <h2>{reply ? "Conversion complete" : "New samples detected"}</h2>
-        <button
-          aria-label="Close sample review"
-          disabled={busy}
-          onClick={() => void close()}
-        >
-          <X size={17} />
-        </button>
+  async function applyBuild() {
+    if (!review || building) return;
+    setBuilding("Building Patch…");
+    setError(null);
+    try {
+      await queue.current.catch(() => {});
+      const reply = await native.applyPatchBuild(review);
+      if (alive.current) setBuilt(reply);
+    } catch (e) {
+      if (alive.current) setError(errorText(e));
+    } finally {
+      if (alive.current) {
+        setReview(null);
+        setBuilding(null);
+      }
+    }
+  }
+
+  if (!view)
+    return (
+      <div className="boot">
+        <AudioLines size={48} />
+        <h1>Rample Preview</h1>
+        {bootError ? (
+          <>
+            <p role="alert">{bootError}</p>
+            <button onClick={() => location.reload()}>Retry</button>
+          </>
+        ) : (
+          <>
+            <LoaderCircle className="spin" />
+            <p>Opening your sample library…</p>
+          </>
+        )}
       </div>
-      {reply ? (
-        <>
-          <p>
-            {reply.results.filter((r) => !r.error).length} converted ·{" "}
-            {reply.results.filter((r) => r.error).length} kept unchanged
-          </p>
-          <div className="import-list">
-            {reply.results.map((r, i) => (
-              <div className="import-result" key={i}>
-                <strong>{r.name}</strong>
-                <small className={r.error ? "import-error" : "import-success"}>
-                  {r.error || `Saved as ${basename(r.target || "")}`}
-                </small>
-              </div>
-            ))}
+    );
+
+  const session = view.session;
+  const imported = patch?.importedSd;
+  const report = [
+    ...(imported?.issues ?? []),
+    ...(imported?.unassigned.map(
+      (file) => `Unassigned source occurrence: ${file.path}`,
+    ) ?? []),
+  ];
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-drag" data-tauri-drag-region />
+        <div className="brand">
+          <AudioLines size={31} />
+          <div>
+            <strong>RAMPLE</strong>
+            <span>P R E V I E W</span>
           </div>
-          <p className="small">
-            Originals and restore information are saved in {reply.backupPath}.
-          </p>
-          {reply.snapshot.message && (
-            <p className="import-error" role="alert">
-              {reply.snapshot.message}
-            </p>
-          )}
-          <div className="modal-buttons">
+          <small>2.3</small>
+        </div>
+        <KitList
+          patch={patch}
+          issues={issues}
+          samples={samples}
+          onPatch={act}
+        />
+        <div className="sidebar-bottom">
+          <button className="folder-button" onClick={() => setLibrary(true)}>
+            <AudioLines size={15} /> Library samples…
+          </button>
+          <button
+            className="folder-button"
+            onClick={() => {
+              requestVersion.current++;
+              setSnapshots(true);
+            }}
+          >
+            <DatabaseBackup size={15} /> Library backup…
+          </button>
+          <small>LOCAL · OFFLINE</small>
+        </div>
+      </aside>
+      <main>
+        <header className="topbar" data-tauri-drag-region>
+          <PatchMenu
+            view={view}
+            patch={patch}
+            onPatch={act}
+            onImport={() => setSdImport(true)}
+          />
+          <div className="header-actions">
+            <span className="live-state">
+              <i />
+              {busy ? "Saving…" : "Saved on this computer"}
+            </span>
             <button
-              className="secondary"
-              onClick={() =>
-                void native.showBackups().catch((e) => setError(errorText(e)))
-              }
+              className="icon-button"
+              aria-label="Destination backups"
+              title="Destination backups: undo a previous Build"
+              onClick={() => setBackups({ focus: null })}
             >
-              Show backups
+              <History size={15} />
             </button>
-            {reply.results.some((r) => r.error) && (
-              <button
-                className="secondary"
-                onClick={() => {
-                  setReply(null);
-                  setExcluded(new Set());
+            <span className="divider" />
+            <button
+              className="secondary export-button"
+              disabled={!patch || !!building}
+              title="Write this Patch's Kit audio to a folder or SD card"
+              onClick={() => void build()}
+            >
+              <Upload size={14} />
+              Build to SD…
+            </button>
+          </div>
+        </header>
+        <div className="workspace">
+          {!legacy.managed && !legacy.isDemo && !migrationHidden && (
+            <div className="migration">
+              <LibraryMigration
+                onComplete={() => {
+                  setLegacy((l) => ({ ...l, managed: true }));
+                  void act({ type: "open" });
                 }}
+              />
+              <button
+                className="icon-button"
+                aria-label="Hide folder migration"
+                title="Not now"
+                onClick={() => setMigrationHidden(true)}
               >
-                Review remaining
+                <X size={14} />
               </button>
-            )}
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() => void close()}
-            >
-              Done
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p>
-            These samples need conversion for a mono Rample kit. Convert the
-            selected files and replace the originals?
-          </p>
-          <div className="conversion-target">
-            MONO · WAV PCM · 16-bit · 44.1 kHz
-          </div>
-          <div className="import-list">
-            {items.map((item) => (
-              <label className="import-item" key={item.id}>
-                <input
-                  type="checkbox"
-                  aria-label={`Convert ${item.kit}/${item.name}`}
-                  disabled={busy || !item.convertible}
-                  checked={item.convertible && !excluded.has(item.id)}
-                  onChange={(e) =>
-                    setExcluded((previous) => {
-                      const next = new Set(previous);
-                      if (e.target.checked) next.delete(item.id);
-                      else next.add(item.id);
-                      return next;
-                    })
-                  }
-                />
+            </div>
+          )}
+          {building && (
+            <div className="notice" role="status">
+              <LoaderCircle size={17} className="spin" />
+              <span>{building}</span>
+            </div>
+          )}
+          {review && (
+            <BuildReviewPanel
+              review={review}
+              busy={!!building}
+              onApply={() => void applyBuild()}
+              onCancel={() => setReview(null)}
+            />
+          )}
+          {built && (
+            <BuildResult
+              built={built}
+              onRestore={(backup) => setBackups({ focus: backup })}
+              onDismiss={() => setBuilt(null)}
+            />
+          )}
+          {backups && (
+            <DestinationBackups
+              key={backups.focus ?? ""}
+              focus={backups.focus}
+              onClose={() => setBackups(null)}
+            />
+          )}
+          {!patch ? (
+            <FirstPatch
+              onCreate={(name) => act({ type: "createPatch", name })}
+              onImport={() => setSdImport(true)}
+            />
+          ) : (
+            <>
+              <section className="kit-heading">
+                <div className="kit-code">{kit ? kitAddress(kit) : "—"}</div>
                 <div>
-                  <strong title={item.id}>
-                    {item.kit}/{item.name}
-                  </strong>
-                  {item.issues.map((issue, i) => (
-                    <small key={i}>{issue}</small>
-                  ))}
-                  <small
-                    className={
-                      item.convertible ? "import-success" : "import-error"
-                    }
-                  >
-                    {item.convertible
-                      ? `Replace with ${item.target}`
-                      : "Manual fix required · original will be kept"}
-                  </small>
+                  <h1>Your kit. In context.</h1>
+                  <p>
+                    {kit
+                      ? "Choose the Layers of each voice and hear how your samples fit together."
+                      : `${patch.name} has no Kits yet.`}
+                  </p>
                 </div>
-              </label>
-            ))}
-          </div>
-          <p className="small">
-            All audio is converted to mono. Stereo channels are averaged (L + R)
-            / 2; additional channels are averaged too. Short samples are padded
-            with silence to reach 50 ms. Names and kit structure require manual
-            changes.
-          </p>
-          <p className="small">
-            Original files are backed up before replacement in {backupPath}.
-          </p>
-          <div className="modal-buttons">
-            <button
-              className="secondary"
-              disabled={busy}
-              onClick={() => void close()}
-            >
-              Keep originals
-            </button>
-            <button
-              className="primary"
-              disabled={busy || !selected.length}
-              onClick={() => void convert()}
-            >
-              {busy && <LoaderCircle className="spin" size={14} />}
-              {busy
-                ? "Converting…"
-                : `Convert and replace (${selected.length})`}
-            </button>
-          </div>
-        </>
-      )}
+                {!kit && (
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      const free = nextFreeAddress(patch);
+                      void act({ type: "createKit", ...free });
+                    }}
+                  >
+                    Create Kit {kitAddress(nextFreeAddress(patch))}
+                  </button>
+                )}
+                {busy && (
+                  <LoaderCircle
+                    size={17}
+                    className="spin loading-indicator"
+                    aria-label="Saving"
+                  />
+                )}
+              </section>
+              {kit && session && (
+                <>
+                  <section className="sample-cards" aria-label="Sample voices">
+                    {kit.voices.map((_, channel) => {
+                      const source = voiceSource(patch, kit, channel);
+                      return (
+                        <VoiceCard
+                          key={channel}
+                          channel={channel}
+                          kit={kit}
+                          source={source.kit}
+                          voice={source.voice}
+                          samples={samples}
+                          waveforms={view.waveforms}
+                          activeIndex={transport.activeLayers[channel] ?? -1}
+                          onPatch={onPatch}
+                          onMode={onMode}
+                          onAudition={onAudition}
+                          onAdd={setPicker}
+                          onEdit={onEdit}
+                        />
+                      );
+                    })}
+                  </section>
+                  <section className="sequencer" aria-label="16-step sequencer">
+                    <div className="sequencer-heading">
+                      <Grid2X2 size={15} />
+                      <h2>Sequencer</h2>
+                      <span>16 STEPS · 4/4 · 1/16</span>
+                      <div className="pattern-menu">
+                        <Settings2 size={14} />
+                        <select
+                          aria-label="Pattern actions"
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value)
+                              void musical({
+                                type: e.target.value as
+                                  "basicPattern" | "clearPattern",
+                              });
+                          }}
+                        >
+                          <option value="" disabled>
+                            Pattern
+                          </option>
+                          <option value="basicPattern">
+                            Load example beat
+                          </option>
+                          <option value="clearPattern">
+                            Clear all 64 steps
+                          </option>
+                        </select>
+                        <ChevronDown size={11} />
+                      </div>
+                    </div>
+                    <div className="step-grid">
+                      <div className="step-numbers">
+                        <span>VOICE / LEVEL</span>
+                        <div className="steps">
+                          {Array.from({ length: 16 }, (_, i) => (
+                            <span
+                              className={`${i % 4 === 0 ? "beat" : ""} ${transport.step === i ? "current" : ""}`}
+                              key={i}
+                            >
+                              {String(i + 1).padStart(2, "0")}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {session.voices.map((voice, channel) => (
+                        <SequencerRow
+                          key={channel}
+                          channel={channel}
+                          voice={voice}
+                          playhead={transport.running ? transport.step : -1}
+                          onAction={musical}
+                          onVelocity={setVelocity}
+                        />
+                      ))}
+                      <div className="position-row">
+                        <span />
+                        <div className="steps">
+                          {Array.from({ length: 16 }, (_, i) => (
+                            <i
+                              key={i}
+                              className={
+                                transport.running && transport.step === i
+                                  ? "current"
+                                  : ""
+                              }
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <TransportBar
+                      playing={view.playing}
+                      bpm={session.bpm}
+                      transport={transport}
+                      onAction={musical}
+                    />
+                  </section>
+                </>
+              )}
+              {transport.error && (
+                <div className="notice" role="alert">
+                  <TriangleAlert size={17} />
+                  <span>{transport.error}</span>
+                </div>
+              )}
+              {issues.length > 0 && (
+                <details className="compatibility">
+                  <summary>
+                    <TriangleAlert size={13} />
+                    {issues.length} {issues.length === 1 ? "issue" : "issues"}{" "}
+                    to fix before Build
+                    <ChevronDown size={12} />
+                  </summary>
+                  <ul>
+                    {issues.map((issue, i) => (
+                      <li key={i}>{issue}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {report.length > 0 && (
+                <details className="compatibility">
+                  <summary>
+                    <HardDriveDownload size={13} />
+                    SD Import report
+                    <ChevronDown size={12} />
+                  </summary>
+                  <p>
+                    Kept for reference from the original card. Place each
+                    unassigned occurrence with Add Sample in its Voice.
+                  </p>
+                  <ul>
+                    {report.map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          )}
+          <footer>
+            <div>
+              <Keyboard size={13} />
+              <span>Space: play / stop</span>
+              <b>·</b>
+              <span>1–4: audition voice</span>
+            </div>
+            <span title="Build to SD writes Bank/Kit folders and prepared audio. It never writes native Rample settings (_save).">
+              Drafts are saved on this computer · Build never writes _save
+            </span>
+          </footer>
+        </div>
+      </main>
       {error && (
-        <p className="import-error" role="alert">
-          {error}
-        </p>
+        <div className="toast" role="alert">
+          <TriangleAlert size={17} />
+          <span>
+            {error.split("\n").map((line, i) => (
+              <span key={i}>
+                {i > 0 && <br />}
+                {line}
+              </span>
+            ))}
+          </span>
+          <button aria-label="Dismiss error" onClick={() => setError(null)}>
+            <X size={15} />
+          </button>
+        </div>
       )}
-    </Modal>
+      {sdImport && (
+        <SdImport
+          onClose={() => setSdImport(false)}
+          onImported={(snapshot) => {
+            setView(snapshot);
+            setSdImport(false);
+          }}
+        />
+      )}
+      {library && (
+        <LibrarySamples
+          onClose={() => {
+            setLibrary(false);
+            void act({ type: "open" });
+          }}
+        />
+      )}
+      {picker !== null && (
+        <LibrarySamples
+          onClose={() => {
+            setPicker(null);
+            void act({ type: "open" });
+          }}
+          onSelect={async (id) => {
+            if (await act({ type: "addLayer", channel: picker, sample: id }))
+              setPicker(null);
+          }}
+        />
+      )}
+      {snapshots && (
+        <LibrarySnapshots
+          managed={legacy.managed}
+          onClose={() => setSnapshots(false)}
+          onRestored={(result) => {
+            requestVersion.current++;
+            setEditor(null);
+            setPicker(null);
+            setLibrary(false);
+            setSdImport(false);
+            setVelocity(null);
+            setReview(null);
+            setBuilt(null);
+            if (result.snapshot?.managed)
+              setLegacy((l) => ({ ...l, managed: true }));
+            void act({ type: "open" });
+          }}
+        />
+      )}
+      {editor && (
+        <SampleEditor
+          initial={editor}
+          transport={transport}
+          invalidated={false}
+          onClose={() => {
+            setEditor(null);
+            void act({ type: "open" });
+          }}
+          onSaved={() => {}}
+          onPatchSaved={setView}
+          onToggle={() => musical({ type: "togglePlayback" })}
+        />
+      )}
+      {velocity && session && (
+        <VelocityDialog
+          channel={velocity.channel}
+          step={velocity.step}
+          initial={session.voices[velocity.channel].velocities[velocity.step]}
+          onClose={() => setVelocity(null)}
+          onChange={(value) =>
+            void musical({ type: "setVelocity", ...velocity, value })
+          }
+        />
+      )}
+    </div>
   );
 }

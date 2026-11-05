@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Minus, Plus, Play, Square } from "lucide-react";
 import { type Voice, type Action, type Transport } from "./types";
-const colors = ["#f68061", "#83c9ad", "#afa0df", "#dfc275"];
+export const colors = ["#f68061", "#83c9ad", "#afa0df", "#dfc275"];
 const option = /Mac/i.test(navigator.platform) ? "Option" : "Alt";
 export const SequencerRow = memo(function SequencerRow({
   channel,

@@ -34,6 +34,18 @@ Push each completed commit to the private GitHub repository; do not leave finish
 work only locally. Keep the lockfiles. Never commit user WAVs, session files,
 configuration captures, local build outputs or signing credentials.
 
+## Main screen
+
+The main window is the open Patch (ADR 0008,
+`docs/adr/0008-make-the-open-patch-the-main-screen.md`): Kits in the sidebar
+(`KitList`), the Patch switcher at the top (`PatchMenu`), Layers on the voice
+cards (`VoiceCard`) and the Patch sequencer. Keep one Kit workspace: Patch,
+Kit and Layer management belong on this screen, never in a second dialog that
+repeats it. The switcher only chooses, creates, renames or imports Patches and
+returns to the main window. Pure view logic lives in `frontend/patchView.ts`.
+The folder session is not shown; it is only offered as **Move current folder
+into Library**.
+
 ## Architecture and audio
 
 - `frontend/`: UI, native IPC adapter and UI tests. It never schedules audio.
@@ -48,8 +60,9 @@ have bounded preloaded heads and background disk readers, not whole-file decodin
 Keep headless PCM/timing tests separate from hardware-dependent smoke tests:
 `cargo run -p rample-core --example audio_smoke --features native-audio`.
 
-Changes to selected or automatic layers must reload in real time. Preserve the
-selected filename when a file is removed, so restoring it restores playback.
+Changes to selected or automatic layers must reload in real time. In the legacy
+folder backend kept for migration, preserve the selected filename when a file
+is removed, so restoring it restores playback.
 Source audio is read-only during browsing/playback. The explicit exception is
 conversion approved in the sample-review modal or explicit **Save to sample** in
 the editor: validate the reviewed fingerprint,
@@ -63,7 +76,9 @@ backed up and verified as a Destination backup.
 
 ## Sample validation and conversion
 
-New or revised audio is reviewed against the official manual, including initial
+The folder review and conversion below belong to the legacy folder backend,
+which the interface no longer opens (ADR 0008); keep its behavior intact until
+it is removed. New or revised audio is reviewed against the official manual, including initial
 folder loading. `sample-reviews.json` remembers per-library reviews; declining
 must survive force refreshes/restarts and pending reviews must survive restart.
 `Check formats` explicitly reopens all current issues. Keep review state separate

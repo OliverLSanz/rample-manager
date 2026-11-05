@@ -187,47 +187,6 @@ export const idleTransport: Transport = {
 export function basename(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? "No folder";
 }
-export function sourceSamples(snapshot: Snapshot, channel: number) {
-  const v = snapshot.session.voices[channel];
-  return (
-    snapshot.catalog.kits
-      .find((k) => k.id === v.kitID)
-      ?.samples.filter((s) => s.voice === channel + 1) ?? []
-  );
-}
-export function displaySample(
-  snapshot: Snapshot,
-  channel: number,
-  active: number,
-) {
-  const samples = sourceSamples(snapshot, channel);
-  const voice = snapshot.session.voices[channel];
-  const path =
-    voice.layerMode === "manual"
-      ? voice.samplePath
-      : (snapshot.banks[channel]?.[active] ?? voice.samplePath);
-  return samples.find((s) => s.id === path);
-}
-export function compatibilityWarnings(snapshot: Snapshot) {
-  const kits = new Set(snapshot.session.voices.map((v) => v.kitID));
-  return [
-    ...new Set([
-      ...snapshot.catalog.kits
-        .filter((k) => kits.has(k.id))
-        .flatMap((k) => k.warnings),
-      ...snapshot.session.voices.flatMap((v, i) =>
-        sourceSamples(snapshot, i)
-          .filter(
-            (s) =>
-              s.id === v.samplePath ||
-              (v.layerMode !== "manual" && snapshot.banks[i]?.includes(s.id)),
-          )
-          .flatMap((s) => s.warnings),
-      ),
-    ]),
-  ];
-}
-
 export interface EditSettings {
   start: number;
   end: number;
@@ -307,6 +266,8 @@ export interface PatchSnapshot {
   };
   session: Session | null;
   samples: LibrarySample[];
+  /** Normalized peaks of each prepared Layer of the playing Voices, by Layer ID. */
+  waveforms?: Record<string, number[]>;
   validation: string[];
   playing: boolean;
 }
