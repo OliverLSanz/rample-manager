@@ -111,6 +111,18 @@ pub(super) fn migrate(db: &Connection, version: u32) -> Result<(), String> {
     }
     Ok(())
 }
+/// Operating-system metadata on removable media; never Rample content.
+pub(super) fn is_system_entry(name: &str) -> bool {
+    matches!(
+        name,
+        ".DS_Store"
+            | ".Spotlight-V100"
+            | ".Trashes"
+            | ".fseventsd"
+            | "System Volume Information"
+            | "$RECYCLE.BIN"
+    ) || name.starts_with("._")
+}
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -292,18 +304,7 @@ impl ManagedLibrary {
             .min_depth(1)
             .sort_by_file_name()
             .into_iter()
-            .filter_entry(|entry| {
-                let name = entry.file_name().to_string_lossy();
-                !matches!(
-                    name.as_ref(),
-                    ".DS_Store"
-                        | ".Spotlight-V100"
-                        | ".Trashes"
-                        | ".fseventsd"
-                        | "System Volume Information"
-                        | "$RECYCLE.BIN"
-                ) && !name.starts_with("._")
-            })
+            .filter_entry(|entry| !is_system_entry(&entry.file_name().to_string_lossy()))
         {
             let entry = match entry {
                 Ok(entry) => entry,

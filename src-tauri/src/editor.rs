@@ -21,13 +21,13 @@ pub(super) struct EditorState {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct EditorInfo {
-    id: String,
+    pub(super) id: String,
     channel: usize,
     path: String,
     fingerprint: String,
     duration: f64,
     waveform: Vec<f32>,
-    settings: Settings,
+    pub(super) settings: Settings,
     output_duration: f64,
     managed: Option<ManagedEdit>,
 }
@@ -198,7 +198,7 @@ impl AppState {
             duration: e.settings.output_seconds(),
         })
     }
-    fn close_editor(&self, id: String) -> Result<(), String> {
+    pub(super) fn close_editor(&self, id: String) -> Result<(), String> {
         let mut l = self.library.lock().map_err(|_| "Library is unavailable")?;
         if l.editor.as_ref().is_some_and(|e| e.id == id) {
             self.audio.send(Command::Edit(None))?;
@@ -430,7 +430,7 @@ impl ManagedEdit {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ManagedSaveReply {
-    editor: EditorInfo,
+    pub(super) editor: EditorInfo,
     patch: patches::PatchSnapshot,
 }
 impl AppState {

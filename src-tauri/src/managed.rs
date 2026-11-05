@@ -401,6 +401,25 @@ impl ManagedLibrary {
         }))
     }
     pub fn export_sample(&self, id: &str, destination: &Path) -> Result<(), String> {
+        let parent = destination
+            .parent()
+            .ok_or("Choose an export destination.")?;
+        let staged = self.stage_export(id, parent)?;
+        let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
+        staged.register(&tx)?;
+        staged
+            .file
+            .persist_noclobber(destination)
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| {
+            format!("Sample was exported, but its recognition record could not be saved: {e}")
+        })?;
+        Ok(())
+    }
+    /// Renders the Sample's current Revision for the Rample into a uniquely tagged,
+    /// validated temporary file in `directory`. Every application path that emits
+    /// processed audio registers it with [`StagedExport::register`].
+    pub(super) fn stage_export(&self, id: &str, directory: &Path) -> Result<StagedExport, String> {
         let revision = self.sample_edits(id)?;
         let prepared = self.prepare_revision(id, &revision.id)?;
         let render = if Path::new(&prepared.path)
@@ -412,10 +431,7 @@ impl ManagedLibrary {
         } else {
             "rample-v1"
         };
-        let parent = destination
-            .parent()
-            .ok_or("Choose an export destination.")?;
-        let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
         let mut input = File::open(&prepared.path).map_err(|e| e.to_string())?;
         std::io::copy(&mut input, staged.as_file_mut()).map_err(|e| e.to_string())?;
         // Tag the emitted RIFF container without changing PCM. This distinguishes a
@@ -432,21 +448,21 @@ impl ManagedLibrary {
             .and_then(|_| file.write_all(Uuid::new_v4().to_string().as_bytes()))
             .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
-        validate_wav(staged.path())?;
+        let spec = validate_wav(staged.path())?;
+        // Rample target: standard mono PCM16 at 44.1 kHz and at least 50 ms.
+        if (spec.code, spec.channels, spec.bits, spec.rate) != (1, 1, 16, 44100)
+            || spec.frames < 2205
+        {
+            return Err("Prepared audio is not mono PCM16 at 44.1 kHz of at least 50 ms.".into());
+        }
         let sha256 = fingerprint(staged.path())?;
-        let tx = self.db.unchecked_transaction().map_err(|e| e.to_string())?;
-        tx.execute(
-            "INSERT OR IGNORE INTO exported_audio(sha256,sample_id,revision_id,render) VALUES (?1,?2,?3,?4)",
-            params![sha256, id, revision.id, render],
-        )
-        .map_err(|e| e.to_string())?;
-        staged
-            .persist_noclobber(destination)
-            .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| {
-            format!("Sample was exported, but its recognition record could not be saved: {e}")
-        })?;
-        Ok(())
+        Ok(StagedExport {
+            file: staged,
+            sha256,
+            sample_id: id.to_owned(),
+            revision_id: revision.id,
+            render,
+        })
     }
     fn import_file(&mut self, source: &Path) -> Result<(LibrarySample, bool, String), String> {
         if !fs::metadata(source).map_err(|e| e.to_string())?.is_file() {
@@ -641,6 +657,25 @@ impl ManagedLibrary {
             results,
             samples: self.list()?,
         })
+    }
+}
+/// Validated prepared audio awaiting publication, with its recognition provenance.
+pub(super) struct StagedExport {
+    pub(super) file: tempfile::NamedTempFile,
+    pub(super) sha256: String,
+    pub(super) sample_id: String,
+    pub(super) revision_id: String,
+    pub(super) render: &'static str,
+}
+impl StagedExport {
+    /// Records the emitted hash so reimport resolves it to its Sample and Revision.
+    pub(super) fn register(&self, tx: &rusqlite::Transaction<'_>) -> Result<(), String> {
+        tx.execute(
+            "INSERT OR IGNORE INTO exported_audio(sha256,sample_id,revision_id,render) VALUES (?1,?2,?3,?4)",
+            params![self.sha256, self.sample_id, self.revision_id, self.render],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 pub(super) fn validate_wav(path: &Path) -> Result<wav::WavSpec, String> {

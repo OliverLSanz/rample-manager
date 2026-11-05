@@ -198,6 +198,41 @@ fn valid_address(patch: &Patch, bank: &str, number: u8, except: &str) -> Result<
     }
     Ok(())
 }
+/// Rample structure rules shared by draft validation and Build Patch. Drafts keep
+/// every Layer; these issues only block a build.
+pub(super) fn kit_issues(patch: &Patch) -> Vec<String> {
+    let mut issues = vec![];
+    for kit in &patch.kits {
+        let address = format!("{}{}", kit.bank, kit.number);
+        if !catalog::is_kit_name(&address) || kit.number > 99 {
+            issues.push(format!(
+                "{address}: Use a Bank from A to Z and a Kit number from 0 to 99."
+            ));
+        }
+        if patch
+            .kits
+            .iter()
+            .any(|other| other.id != kit.id && other.bank == kit.bank && other.number == kit.number)
+        {
+            issues.push(format!(
+                "{address}: Another Kit uses the same Bank/Kit address."
+            ));
+        }
+        if kit
+            .voices
+            .first()
+            .is_none_or(|voice| voice.layers.is_empty())
+        {
+            issues.push(format!("{address}: Voice 1 needs a Sample."));
+        }
+        for (i, voice) in kit.voices.iter().enumerate() {
+            if voice.layers.len() > 12 {
+                issues.push(format!("{address}: Voice {} has {} Layers; Rample supports at most 12. All draft Layers are retained.", i + 1, voice.layers.len()));
+            }
+        }
+    }
+    issues
+}
 impl AppState {
     pub fn patch_action(&self, action: PatchAction) -> Result<PatchSnapshot, String> {
         // Same lock order as legacy application commands, including workspace handoff.
@@ -427,17 +462,11 @@ impl AppState {
                     None => validation.push(format!("{}: Layer modes were not read from this SD Import. Import the SD again and choose Update existing Patch to read its stored Layer modes.", patch.name)),
                 }
             }
-            for kit in &patch.kits {
-                let address = format!("{} · {}{}", patch.name, kit.bank, kit.number);
-                if kit.voices[0].layers.is_empty() {
-                    validation.push(format!("{address}: Voice 1 needs a Sample."));
-                }
-                for (i, voice) in kit.voices.iter().enumerate() {
-                    if voice.layers.len() > 12 {
-                        validation.push(format!("{address}: Voice {} has {} Layers; Rample supports at most 12. All draft Layers are retained.", i+1, voice.layers.len()));
-                    }
-                }
-            }
+            validation.extend(
+                kit_issues(patch)
+                    .into_iter()
+                    .map(|issue| format!("{} · {issue}", patch.name)),
+            );
         }
         let session = graph.current().map(Patch::session);
         // Musical controls reuse ready assets: no probing, hashing, decoding or

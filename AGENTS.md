@@ -125,6 +125,19 @@ reported, never guessed. No further captures are planned. Do not guess offsets o
 bytes exactly. Device captures stay in the git-ignored `Rample SD Captures/`;
 tests use generated fixtures. BPM and sequencer steps remain app-only.
 
+## Build Patch
+
+`src-tauri/src/build_patch.rs` writes a Patch's Bank/Kit folders and ordered
+prepared audio into an empty destination only (OS metadata such as
+`.Spotlight-V100` is ignored); populated-card reconciliation is ADR 0005 work.
+Layer files are `<Voice>_<two-digit position>_<safe suffix>.wav`, so natural and
+byte order agree; user-facing Sample names are never changed. Validate structure
+(`patches::kit_issues`) and render every Layer through `stage_export` (the same
+recognized-export path as **Export**) before publishing anything; register each
+emitted hash with its Revision/render, publish Kit folders with an exclusive
+`create_dir` claim, validate the published files, and remove claimed folders on
+failure. Never write `_save`, Layer modes, selections, BPM or sequencer state.
+
 Official SD-format reference: https://squarp.net/rample/manual/
 
 ## Agent skills

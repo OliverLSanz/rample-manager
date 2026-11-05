@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod build_patch;
 mod editor;
 mod legacy_migration;
 mod library_snapshots;
@@ -945,6 +946,7 @@ fn main() {
             sd_import::sd_native_blob,
             sd_import::finish_sd_import,
             patches::patch_action,
+            build_patch::build_patch,
             patches::close_patch,
             managed::list_samples,
             managed::query_samples,
