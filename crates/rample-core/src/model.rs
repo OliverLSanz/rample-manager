@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum LayerMode {
@@ -61,87 +60,22 @@ impl Voice {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct KitVoice {
-    pub sample_name: String,
-    pub layer_mode: LayerMode,
-}
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct KitConfigurations {
-    pub libraries: BTreeMap<String, BTreeMap<String, BTreeMap<String, KitVoice>>>,
-}
-impl KitConfigurations {
-    pub fn remember(&mut self, root: &str, channel: usize, voice: &Voice) {
-        if root.is_empty() || voice.kit_id.is_empty() {
-            return;
-        }
-        let name = std::path::Path::new(&voice.sample_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        self.libraries
-            .entry(root.into())
-            .or_default()
-            .entry(voice.kit_id.clone())
-            .or_default()
-            .insert(
-                channel.to_string(),
-                KitVoice {
-                    sample_name: name,
-                    layer_mode: voice.layer_mode,
-                },
-            );
-    }
-    pub fn get(&self, root: &str, kit: &str, channel: usize) -> Option<&KitVoice> {
-        self.libraries
-            .get(root)?
-            .get(kit)?
-            .get(&channel.to_string())
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
+/// The open Patch as the sequencer plays it: its selected Kit, tempo and Voices.
 pub struct Session {
-    pub schema_version: u32,
-    pub root_path: String,
     pub selected_kit: String,
     pub bpm: f64,
     pub voices: Vec<Voice>,
-    pub kit_configurations: KitConfigurations,
 }
 impl Default for Session {
     fn default() -> Self {
         Self {
-            schema_version: 2,
-            root_path: String::new(),
             selected_kit: String::new(),
             bpm: 120.,
             voices: vec![Voice::default(); 4],
-            kit_configurations: KitConfigurations::default(),
         }
     }
 }
-impl Session {
-    pub fn normalize(&mut self) {
-        self.schema_version = 2;
-        self.bpm = if self.bpm.is_finite() {
-            self.bpm.clamp(30., 300.)
-        } else {
-            120.
-        };
-        self.voices.resize(4, Voice::default());
-        self.voices.truncate(4);
-        self.voices.iter_mut().for_each(Voice::normalize);
-    }
-    pub fn remember(&mut self) {
-        for (i, v) in self.voices.iter().enumerate() {
-            self.kit_configurations.remember(&self.root_path, i, v);
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct LayerSelector {
     pub last: Option<String>,

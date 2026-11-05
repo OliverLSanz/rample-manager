@@ -454,16 +454,3 @@ pub fn render(source: &Path, settings: &Settings, target: &mut File) -> Result<R
         clipped_frames: clipped,
     })
 }
-pub fn save(
-    source: &Path,
-    fingerprint: &str,
-    settings: &Settings,
-    backups: &Path,
-) -> Result<(conversion::Converted, Rendered), String> {
-    let mut stats = None;
-    let converted = conversion::replace_with(source, fingerprint, backups, |original, target| {
-        stats = Some(render(original, settings, target)?);
-        Ok(())
-    })?;
-    Ok((converted, stats.unwrap()))
-}

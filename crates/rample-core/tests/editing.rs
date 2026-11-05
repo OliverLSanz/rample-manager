@@ -1,6 +1,5 @@
 use rample_core::{
     audio::{Command, EditPreview, Meters, Renderer},
-    catalog,
     editing::{self, Engine, Settings},
     model::Voice,
     wav::{self, PreparedSample},
@@ -39,7 +38,7 @@ fn rendered(root: &Path, path: &Path, settings: &Settings) -> (editing::Rendered
     (stats, read(&output))
 }
 #[test]
-fn trim_gain_and_pitch_are_baked_with_backups_and_compatible_mono_output() {
+fn trim_gain_and_pitch_render_compatible_mono_output_without_touching_the_original() {
     let temp = TempDir::new().unwrap();
     let input: Vec<_> = (0..44100)
         .map(|i| (std::f32::consts::TAU * 440. * i as f32 / 44100.).sin() * 0.25)
@@ -51,21 +50,16 @@ fn trim_gain_and_pitch_are_baked_with_backups_and_compatible_mono_output() {
     settings.end = 0.6;
     settings.pitch = 12.;
     settings.gain_db = -6.;
-    let (saved, stats) = editing::save(
-        &path,
-        &catalog::fingerprint(&path),
-        &settings,
-        &temp.path().join("backups"),
-    )
-    .unwrap();
-    assert_eq!(fs::read(saved.backup).unwrap(), original);
-    let spec = wav::inspect(&path).unwrap();
+    let output = temp.path().join("render.wav");
+    let stats = editing::render(&path, &settings, &mut File::create(&output).unwrap()).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let spec = wav::inspect(&output).unwrap();
     assert_eq!(
         (spec.frames, spec.channels, spec.bits, spec.rate),
         (8820, 1, 16, 44100)
     );
     assert!((stats.peak - 0.1253).abs() < 0.002);
-    let audio = read(&path);
+    let audio = read(&output);
     let crosses = audio
         .windows(2)
         .filter(|v| v[0][0] <= 0. && v[1][0] > 0.)
@@ -242,22 +236,18 @@ fn live_parameter_changes_do_not_restart_sequence_timing() {
     assert_eq!(meters.snapshot().step, 0);
 }
 #[test]
-fn invalid_and_stale_edits_never_replace_the_source() {
+fn invalid_edits_are_refused_and_never_change_the_source() {
     let temp = TempDir::new().unwrap();
     let path = sample(temp.path(), &vec![0.25; 4410]);
     let original = fs::read(&path).unwrap();
-    let stamp = catalog::fingerprint(&path);
     let mut settings = Settings::original(0.1);
     settings.end = 0.;
-    assert!(editing::save(&path, &stamp, &settings, &temp.path().join("backups")).is_err());
+    let output = temp.path().join("render.wav");
+    assert!(editing::render(&path, &settings, &mut File::create(&output).unwrap()).is_err());
     assert_eq!(fs::read(&path).unwrap(), original);
     settings.end = 0.1;
     settings.pitch = f64::NAN;
     assert!(Engine::new(&wav::inspect(&path).unwrap(), 44100, &settings).is_err());
-    fs::write(&path, b"a later user edit").unwrap();
-    settings.pitch = 0.;
-    assert!(editing::save(&path, &stamp, &settings, &temp.path().join("backups")).is_err());
-    assert_eq!(fs::read(&path).unwrap(), b"a later user edit");
 }
 #[test]
 fn opening_and_bypassing_an_editor_keep_the_current_source_position() {

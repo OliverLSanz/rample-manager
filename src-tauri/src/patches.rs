@@ -104,7 +104,6 @@ impl Patch {
             bpm: self.bpm,
             voices,
             selected_kit: self.selected_kit.clone(),
-            ..Session::default()
         }
     }
 }

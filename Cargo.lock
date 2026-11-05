@@ -2845,15 +2845,12 @@ version = "2.3.0"
 dependencies = [
  "cpal",
  "crossbeam-channel",
- "natord",
  "rand",
  "serde",
  "serde_json",
- "sha2",
  "symphonia",
  "tempfile",
  "thiserror 2.0.21",
- "walkdir",
 ]
 
 [[package]]

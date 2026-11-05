@@ -1,8 +1,7 @@
 use rample_core::{
     audio::{Command, Meters, Renderer},
-    catalog::{export, is_kit_name, Scanner},
+    catalog::is_kit_name,
     model::{LayerMode, LayerSelector, Voice},
-    session,
     wav::{self, PreparedSample},
 };
 use std::{collections::HashSet, fs, path::Path, sync::Arc};
@@ -22,161 +21,13 @@ fn write(
     p
 }
 #[test]
-fn kit_names_and_natural_order() {
+fn kit_names_are_a_bank_letter_and_a_number() {
     for s in ["A0", "A00", "Z99"] {
         assert!(is_kit_name(s))
     }
     for s in ["a0", "A100", "A1\n", "../A0", ""] {
         assert!(!is_kit_name(s))
     }
-    let t = TempDir::new().unwrap();
-    for (kit, name) in [
-        ("A0", "1_Kick10.wav"),
-        ("A0", "1_Kick2.WAV"),
-        ("A2", "2_snare.wav"),
-        ("A10", "1.wav"),
-        ("other", "1.wav"),
-        ("A0", "5_ignored.wav"),
-    ] {
-        write(t.path(), kit, name, 4410, 44100, 1200);
-    }
-    let c = Scanner::default().scan(t.path(), &HashSet::new(), false);
-    assert_eq!(
-        c.kits.iter().map(|k| k.id.as_str()).collect::<Vec<_>>(),
-        ["A0", "A2", "A10"]
-    );
-    assert_eq!(c.kits[0].samples[0].name, "1_Kick2");
-    assert!(c.kits[0].warnings.iter().any(|w| w.contains("filenames")));
-    assert!(!c.kits[1].warnings.is_empty());
-}
-#[test]
-fn wav_metadata_and_compatibility() {
-    let t = TempDir::new().unwrap();
-    write(t.path(), "A0", "1_valid.wav", 4410, 44100, 1200);
-    write(t.path(), "A0", "2_rate.wav", 4410, 48000, 1200);
-    write(t.path(), "A0", "3_short.wav", 100, 44100, 1200);
-    fs::write(t.path().join("A0/4_broken.wav"), b"bad").unwrap();
-    let c = Scanner::default().scan(t.path(), &HashSet::new(), false);
-    let s = &c.kits[0].samples;
-    assert_eq!(s.len(), 4);
-    assert_eq!(s[0].bits, 16);
-    assert!((s[0].duration - 0.1).abs() < 1e-6);
-    assert!(s[0].warnings.is_empty());
-    assert!(s[1].warnings[0].contains("44.1"));
-    assert!(s[2].warnings[0].contains("50 ms"));
-    assert!(!s[3].readable);
-}
-#[test]
-fn cache_invalidation_add_delete_and_atomic_save() {
-    let t = TempDir::new().unwrap();
-    let p = write(t.path(), "A0", "1.wav", 4410, 44100, 1200);
-    let mut scanner = Scanner::default();
-    let before = scanner.scan(t.path(), &HashSet::new(), false);
-    let same = scanner.scan(t.path(), &HashSet::new(), false);
-    assert_eq!(before, same);
-    let forced = scanner.scan(t.path(), &HashSet::from([p.clone()]), false);
-    assert_ne!(
-        before.kits[0].samples[0].revision,
-        forced.kits[0].samples[0].revision
-    );
-    let tmp = write(t.path(), "A0", "temp.wav", 8820, 44100, 2400);
-    fs::rename(tmp, &p).unwrap();
-    write(t.path(), "A0", "2.wav", 4410, 44100, 1200);
-    let changed = scanner.scan(t.path(), &HashSet::new(), false);
-    assert_eq!(changed.kits[0].samples.len(), 2);
-    assert_eq!(changed.kits[0].samples[0].duration, 0.2);
-    fs::remove_file(p).unwrap();
-    assert_eq!(
-        scanner.scan(t.path(), &HashSet::new(), false).kits[0]
-            .samples
-            .len(),
-        1
-    );
-}
-#[test]
-fn layer_limit_and_missing_volume() {
-    let t = TempDir::new().unwrap();
-    for i in 0..13 {
-        write(t.path(), "A0", &format!("1_{i}.wav"), 4410, 44100, 1200);
-    }
-    let c = Scanner::default().scan(t.path(), &HashSet::new(), false);
-    assert!(c.kits[0].warnings.iter().any(|w| w.contains("supports 12")));
-    assert!(Scanner::default()
-        .scan(&t.path().join("missing"), &HashSet::new(), false)
-        .error
-        .is_some());
-}
-#[cfg(unix)]
-#[test]
-fn symlinks_are_not_followed() {
-    let t = TempDir::new().unwrap();
-    let p = write(t.path(), "A0", "1.wav", 4410, 44100, 1000);
-    std::os::unix::fs::symlink(&p, t.path().join("A0/2.wav")).unwrap();
-    std::os::unix::fs::symlink(t.path().join("A0"), t.path().join("B0")).unwrap();
-    let c = Scanner::default().scan(t.path(), &HashSet::new(), false);
-    assert_eq!(c.kits.len(), 1);
-    assert_eq!(c.kits[0].samples.len(), 1);
-}
-#[test]
-fn export_copies_without_overwrite_or_native_settings() {
-    let t = TempDir::new().unwrap();
-    let p = write(t.path(), "A0", "1_kick.wav", 4410, 44100, 1000);
-    write(t.path(), "A0", "2_snare.wav", 4410, 44100, 1200);
-    let original = fs::read(&p).unwrap();
-    let c = Scanner::default().scan(t.path(), &HashSet::new(), false);
-    let selected = vec![
-        Some(c.kits[0].samples[0].clone()),
-        Some(c.kits[0].samples[1].clone()),
-        None,
-        None,
-    ];
-    let target = export(&selected, t.path(), "B12").unwrap();
-    assert_eq!(fs::read(target.join("1_kick.wav")).unwrap(), original);
-    assert!(export(&selected, t.path(), "B12").is_err());
-    assert!(export(&selected, t.path(), "../oops").is_err());
-    assert_eq!(fs::read(p).unwrap(), original);
-    assert!(!target.join("_save").exists());
-    assert_eq!(fs::read_dir(&target).unwrap().count(), 2);
-}
-#[test]
-fn swift_session_migration_and_atomic_roundtrip() {
-    let t = TempDir::new().unwrap();
-    let old=br#"{"rootPath":"/tmp/library","selectedKit":"A0","bpm":137,"voices":[{"kitID":"A0","samplePath":"/tmp/library/A0/1.wav","steps":[true,false,true],"volume":0.6,"muted":true,"solo":false}],"kitConfigurations":{"libraries":{}}}"#;
-    fs::write(t.path().join("session.json"), old).unwrap();
-    let mut s = session::load(t.path()).unwrap();
-    assert_eq!(s.bpm, 137.);
-    assert_eq!(s.voices.len(), 4);
-    assert_eq!(s.voices[0].steps.len(), 16);
-    assert!(s.voices[0].steps[2]);
-    assert!(s.voices[0].muted);
-    assert_eq!(s.voices[0].layer_mode, LayerMode::Single);
-    assert_eq!(
-        fs::read(t.path().join("session-swift-1.1.0.backup.json")).unwrap(),
-        old
-    );
-    s.voices[0].layer_mode = LayerMode::Reverse;
-    session::save(t.path(), &s).unwrap();
-    let restored = session::load(t.path()).unwrap();
-    assert_eq!(restored.voices[0].layer_mode, LayerMode::Reverse);
-    assert_eq!(
-        restored
-            .kit_configurations
-            .get("/tmp/library", "A0", 0)
-            .unwrap()
-            .layer_mode,
-        LayerMode::Reverse
-    );
-    assert_eq!(
-        fs::read(t.path().join("session-swift-1.1.0.backup.json")).unwrap(),
-        old
-    );
-}
-#[test]
-fn malformed_session_is_preserved() {
-    let t = TempDir::new().unwrap();
-    fs::write(t.path().join("session.json"), b"corrupt").unwrap();
-    assert!(session::load(t.path()).is_err());
-    assert_eq!(fs::read(t.path().join("session.json")).unwrap(), b"corrupt");
 }
 #[test]
 fn layer_modes_wrap_and_default_to_single() {
