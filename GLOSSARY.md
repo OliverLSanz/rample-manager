@@ -64,5 +64,13 @@ configuration into a Patch. A completed Import has no continuing dependency on i
 
 **Build Patch**:
 The generation of a Rample-compatible directory from a Patch: its Bank/Kit
-folders and ordered, prepared audio files. It never writes native settings
-(`_save`); those stay on the device.
+folders and ordered, prepared audio files. On a populated destination it makes
+the Kit audio match the Patch after a reviewed difference, leaving everything
+else untouched. It never writes native settings (`_save`); those stay on the
+device.
+
+**Destination backup**:
+The copy, kept on this computer, of every destination file one Build Patch
+replaced or removed, with a record of the files it wrote, so that destination
+can be restored to its state before that Build.
+_Avoid_: Library backup, snapshot

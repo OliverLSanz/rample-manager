@@ -1542,6 +1542,26 @@ footer > span {
   padding-left: 18px;
   overflow-wrap: anywhere;
 }
+.patch-build h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.patch-build details {
+  margin: 0 0 8px;
+}
+.patch-build-conflicts {
+  padding: 8px 12px;
+  margin: 0 0 8px;
+  background: #d9735512;
+  border: 1px solid #d9735555;
+  border-radius: 6px;
+}
+.patch-build-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .patch-voices {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

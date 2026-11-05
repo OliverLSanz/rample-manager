@@ -318,12 +318,59 @@ export interface BuiltFile {
   layer: number;
   sampleId: string;
   sampleName: string;
+  revisionId: string;
+}
+/** Owned destination audio: a WAV directly inside a canonical Kit folder. */
+export interface DestinationFile {
+  path: string;
+  sha256: string;
+}
+/** Reviewed difference between a Patch's output and a destination. */
+export interface BuildReview {
+  patch: string;
+  patchName: string;
+  destination: string;
+  kits: string[];
+  files: BuiltFile[];
+  additions: string[];
+  replacements: string[];
+  removals: string[];
+  unchanged: string[];
+  removedKits: string[];
+  /** Problems that block applying the review. */
+  conflicts: string[];
+  notices: string[];
+  state: DestinationFile[];
+  folders: string[];
+}
+/** Recoverable record of one applied Build Patch. */
+export interface BuildBackup {
+  id: string;
+  /** Seconds since the Unix epoch. */
+  created: number;
+  patchName: string;
+  destination: string;
+  /** `applying` means the Build was interrupted. */
+  status: "applying" | "complete" | "incomplete";
+  error: string | null;
+  restored: number | null;
+  folder: string;
+  added: string[];
+  replaced: string[];
+  removed: string[];
 }
 export interface BuildReply {
   destination: string;
   kits: string[];
   files: BuiltFile[];
   notices: string[];
+  added: number;
+  replaced: number;
+  removed: number;
+  unchanged: number;
+  backup: BuildBackup | null;
+  /** Set when publication started but did not complete. */
+  error: string | null;
 }
 export type PatchAction =
   | { type: "open" }

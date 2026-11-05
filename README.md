@@ -114,21 +114,38 @@ workspace and which also applies to new Kits. The Rample's global LAYER setting
 is not read. Unverified or unreadable values use that default and are listed
 in the review.
 
-**Build Patch…** writes the selected Patch to an empty folder or freshly
-formatted card (operating-system metadata such as `.Spotlight-V100` is ignored;
-updating a populated card is not supported yet). Every Kit and every ordered
-Layer, including repeated occurrences, becomes a Bank/Kit folder and a mono
-PCM16 44.1 kHz WAV of at least 50 ms rendered from its Original and saved
-Sample Edits, exactly as Kit preview plays it. Files are named
-`<Voice>_<position>_<name>.wav`, for example `A0/1_01_Warm_kick.wav` and
-`A0/1_02_Snare.wav`, so the Rample's numerical/alphabetical sort keeps the
-intended Layer order; Library names are unchanged. Build first checks Voice 1,
-the 12-Layer limit and all audio, listing every problem; nothing is written
-until everything is ready, and a failed build removes its partial output.
+**Build Patch…** writes the selected Patch to a folder or directly onto an SD
+card, empty or populated. Every Kit and every ordered Layer, including repeated
+occurrences, becomes a Bank/Kit folder and a mono PCM16 44.1 kHz WAV of at
+least 50 ms rendered from its Original and saved Sample Edits, exactly as Kit
+preview plays it. Files are named `<Voice>_<position>_<name>.wav`, for example
+`A0/1_01_Warm_kick.wav` and `A0/1_02_Snare.wav`, so the Rample's
+numerical/alphabetical sort keeps the intended Layer order; Library names are
+unchanged. Build first checks Voice 1, the 12-Layer limit and all audio,
+listing every problem.
+
+Before anything is written, Build shows a review of the destination: files to
+add, files to replace, files to remove and files already up to date. Build
+owns only WAV files directly inside `A0`–`Z99` Kit folders: the card's Kit
+audio is made to match the Patch, so Kits that are not in the Patch lose their
+audio and their folder is removed when nothing else is left in it. Native
+settings (`_save`), firmware, other files and folders, and non-canonical names
+such as `A05` are never changed or backed up. Names that would collide on a
+card that ignores letter case (for example an `a0` folder) block the build
+until you move them. **Apply Build** first rechecks that the Patch and the
+reviewed Kit audio are unchanged; if anything changed, nothing is written and
+you review again. It then renders every Layer, copies every file it will
+replace or remove into `Patch build backups` in the application support
+folder (with a `restore.json` manifest listing paths and SHA-256), verifies
+those copies and only then updates the card. Files that already hold the
+Patch's current audio are left alone, so rebuilding an unchanged Patch writes
+nothing. A failure after publication starts is reported as an incomplete
+Build with the number of changes applied, never as a complete one.
 Originals are never modified. Built files are recognized by **Import Rample
 SD…** and **Import samples**, so reimporting a build keeps Samples and their
 edits instead of adding new Originals. Build never writes `_save`, Layer modes,
-selected Layers, BPM or patterns: set modes on the Rample and STORE.
+selected Layers, BPM or patterns: set modes on the Rample and STORE. Settings
+stored on the device that no longer match its files are yours to update there.
 
 Existing folder sessions show **Move current folder into Library**. Migration copies
 and validates audio in bounded chunks, backs up the saved session byte for byte as

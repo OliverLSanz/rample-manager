@@ -15,7 +15,8 @@ vi.mock("./native", () => ({
   chooseFolder: vi.fn(),
   restoreLibrary: vi.fn(),
   patchAction: vi.fn(),
-  buildPatch: vi.fn(),
+  reviewPatchBuild: vi.fn(),
+  applyPatchBuild: vi.fn(),
   closePatch: vi.fn(),
   listSamples: vi.fn(),
   querySamples: vi.fn(),
@@ -347,11 +348,68 @@ it("keeps Patch shortcuts suspended throughout Library and snapshot child views"
   });
 });
 
-it("builds the selected Patch into a chosen folder and lists the ordered files", async () => {
+const builtFiles = [
+  {
+    path: "A0/1_01_Warm_kick.wav",
+    kit: "A0",
+    voice: 1,
+    layer: 1,
+    sampleId: "sample",
+    sampleName: "Warm kick",
+    revisionId: "rev",
+  },
+  {
+    path: "A0/1_02_Warm_kick.wav",
+    kit: "A0",
+    voice: 1,
+    layer: 2,
+    sampleId: "sample",
+    sampleName: "Warm kick",
+    revisionId: "rev",
+  },
+];
+function buildReview(
+  overrides: Partial<import("./types").BuildReview> = {},
+): import("./types").BuildReview {
+  return {
+    patch: "patch",
+    patchName: "Live set",
+    destination: "/Volumes/RAMPLE",
+    kits: ["A0"],
+    files: builtFiles,
+    additions: ["A0/1_02_Warm_kick.wav"],
+    replacements: ["A0/1_01_Warm_kick.wav"],
+    removals: ["A0/1_Old.wav", "C3/1_Old.wav"],
+    unchanged: [],
+    removedKits: ["C3"],
+    conflicts: [],
+    notices: ["1 unassigned SD Import occurrence(s) are not part of any Kit."],
+    state: [],
+    folders: ["A0", "C3"],
+    ...overrides,
+  };
+}
+const backup = {
+  id: "backup-1",
+  created: 1_800_000_000,
+  patchName: "Live set",
+  destination: "/Volumes/RAMPLE",
+  status: "complete" as const,
+  error: null,
+  restored: null,
+  folder: "/Support/Patch build backups/backup-1",
+  added: ["A0/1_02_Warm_kick.wav"],
+  replaced: ["A0/1_01_Warm_kick.wav"],
+  removed: ["A0/1_Old.wav", "C3/1_Old.wav"],
+};
+
+it("reviews destination changes before applying a Build and reports its backup", async () => {
   vi.mocked(native.patchAction).mockResolvedValue(view());
   vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/RAMPLE");
+  const review = buildReview();
+  vi.mocked(native.reviewPatchBuild).mockResolvedValue(review);
   let finish: (reply: import("./types").BuildReply) => void = () => {};
-  vi.mocked(native.buildPatch).mockImplementation(
+  vi.mocked(native.applyPatchBuild).mockImplementation(
     () =>
       new Promise((resolve) => {
         finish = resolve;
@@ -360,44 +418,76 @@ it("builds the selected Patch into a chosen folder and lists the ordered files",
   render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
   await screen.findByDisplayValue("Live set");
   fireEvent.click(screen.getByRole("button", { name: "Build Patch…" }));
+  const panel = await screen.findByRole("region", {
+    name: "Build Patch review",
+  });
+  expect(native.reviewPatchBuild).toHaveBeenCalledWith(
+    "patch",
+    "/Volumes/RAMPLE",
+  );
+  expect(native.applyPatchBuild).not.toHaveBeenCalled();
+  expect(
+    within(panel).getByText(
+      "1 to add, 1 to replace, 2 to remove, 0 already up to date.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(within(panel).getByRole("list", { name: "Files to add" })).getByText(
+      "A0/1_02_Warm_kick.wav",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(
+      within(panel).getByRole("list", { name: "Files to replace" }),
+    ).getByText("A0/1_01_Warm_kick.wav"),
+  ).toBeTruthy();
+  expect(
+    within(
+      within(panel).getByRole("list", { name: "Files to remove" }),
+    ).getByText("C3/1_Old.wav"),
+  ).toBeTruthy();
+  expect(
+    within(panel).getByText("Kits removed from the destination: C3."),
+  ).toBeTruthy();
+  expect(within(panel).getByText(/backed up on this computer/)).toBeTruthy();
+  expect(within(panel).getByText(/_save/)).toBeTruthy();
+
+  fireEvent.click(within(panel).getByRole("button", { name: "Apply Build" }));
   await vi.waitFor(() =>
-    expect(native.buildPatch).toHaveBeenCalledWith("patch", "/Volumes/RAMPLE"),
+    expect(native.applyPatchBuild).toHaveBeenCalledWith(review),
   );
   expect(await screen.findByText("Building Patch…")).toBeTruthy();
-  expect(
-    screen
-      .getByRole("button", { name: "Build Patch…" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
   finish({
     destination: "/Volumes/RAMPLE",
     kits: ["A0"],
-    files: [
-      {
-        path: "A0/1_01_Warm_kick.wav",
-        kit: "A0",
-        voice: 1,
-        layer: 1,
-        sampleId: "sample",
-        sampleName: "Warm kick",
-      },
-      {
-        path: "A0/1_02_Warm_kick.wav",
-        kit: "A0",
-        voice: 1,
-        layer: 2,
-        sampleId: "sample",
-        sampleName: "Warm kick",
-      },
-    ],
+    files: builtFiles,
     notices: ["1 unassigned SD Import occurrence(s) are not part of any Kit."],
+    added: 1,
+    replaced: 1,
+    removed: 2,
+    unchanged: 0,
+    backup,
+    error: null,
   });
   const result = await screen.findByRole("region", {
     name: "Build Patch result",
   });
   expect(
+    screen.queryByRole("region", { name: "Build Patch review" }),
+  ).toBeNull();
+  expect(
     within(result).getByText(
       "Built 1 Kit and 2 audio files into /Volumes/RAMPLE.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(result).getByText(
+      "Added 1, replaced 1 and removed 2 files; 0 were already up to date.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(result).getByText(
+      "Replaced and removed files are backed up in /Support/Patch build backups/backup-1.",
     ),
   ).toBeTruthy();
   expect(
@@ -406,25 +496,90 @@ it("builds the selected Patch into a chosen folder and lists the ordered files",
     ),
   ).toBeTruthy();
   expect(
-    within(result).getByText(
-      "1 unassigned SD Import occurrence(s) are not part of any Kit.",
-    ),
-  ).toBeTruthy();
-  expect(
     within(result).getByText(/set them on the Rample and STORE/),
   ).toBeTruthy();
 });
 
-it("reports a blocked build without claiming output and ignores a cancelled folder choice", async () => {
+it("blocks a review with conflicts and can cancel without applying", async () => {
+  vi.mocked(native.patchAction).mockResolvedValue(view());
+  vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/RAMPLE");
+  vi.mocked(native.reviewPatchBuild).mockResolvedValue(
+    buildReview({
+      conflicts: [
+        "a0 has the same name as Kit folder A0 on cards that ignore letter case.",
+      ],
+    }),
+  );
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  await screen.findByDisplayValue("Live set");
+  fireEvent.click(screen.getByRole("button", { name: "Build Patch…" }));
+  const panel = await screen.findByRole("region", {
+    name: "Build Patch review",
+  });
+  expect(
+    within(panel).getByText(
+      "a0 has the same name as Kit folder A0 on cards that ignore letter case.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(panel)
+      .getByRole("button", { name: "Apply Build" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(within(panel).getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.queryByRole("region", { name: "Build Patch review" }),
+  ).toBeNull();
+  expect(native.applyPatchBuild).not.toHaveBeenCalled();
+});
+
+it("reports an incomplete Build with its backup instead of claiming output", async () => {
+  vi.mocked(native.patchAction).mockResolvedValue(view());
+  vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/RAMPLE");
+  vi.mocked(native.reviewPatchBuild).mockResolvedValue(buildReview());
+  const error =
+    "Build Patch did not complete: Could not write A0/1_02_Warm_kick.wav. 3 of 4 file changes were applied, so the destination is only partly updated.";
+  vi.mocked(native.applyPatchBuild).mockResolvedValue({
+    destination: "/Volumes/RAMPLE",
+    kits: ["A0"],
+    files: builtFiles,
+    notices: [],
+    added: 1,
+    replaced: 1,
+    removed: 2,
+    unchanged: 0,
+    backup: { ...backup, status: "incomplete", error },
+    error,
+  });
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  await screen.findByDisplayValue("Live set");
+  fireEvent.click(screen.getByRole("button", { name: "Build Patch…" }));
+  const panel = await screen.findByRole("region", {
+    name: "Build Patch review",
+  });
+  fireEvent.click(within(panel).getByRole("button", { name: "Apply Build" }));
+  const result = await screen.findByRole("region", {
+    name: "Build Patch result",
+  });
+  expect(within(result).getByText(error)).toBeTruthy();
+  expect(within(result).queryByText(/^Built /)).toBeNull();
+  expect(
+    within(result).getByText(
+      "Replaced and removed files are backed up in /Support/Patch build backups/backup-1.",
+    ),
+  ).toBeTruthy();
+});
+
+it("reports a blocked review without claiming output and ignores a cancelled folder choice", async () => {
   vi.mocked(native.patchAction).mockResolvedValue(view());
   vi.mocked(native.chooseFolder).mockResolvedValueOnce(null);
   render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
   await screen.findByDisplayValue("Live set");
   fireEvent.click(screen.getByRole("button", { name: "Build Patch…" }));
   await vi.waitFor(() => expect(native.chooseFolder).toHaveBeenCalled());
-  expect(native.buildPatch).not.toHaveBeenCalled();
+  expect(native.reviewPatchBuild).not.toHaveBeenCalled();
   vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/RAMPLE");
-  vi.mocked(native.buildPatch).mockRejectedValue(
+  vi.mocked(native.reviewPatchBuild).mockRejectedValue(
     "Build Patch is blocked until the Patch is valid. Nothing was written.\nB12: Voice 1 needs a Sample.",
   );
   fireEvent.click(screen.getByRole("button", { name: "Build Patch…" }));
@@ -437,5 +592,8 @@ it("reports a blocked build without claiming output and ignores a cancelled fold
   ).toBeTruthy();
   expect(
     screen.queryByRole("region", { name: "Build Patch result" }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("region", { name: "Build Patch review" }),
   ).toBeNull();
 });

@@ -116,8 +116,13 @@ export const showEditBackups = () => invoke<void>("show_edit_backups");
 export const patchAction = (action: import("./types").PatchAction) =>
   invoke<import("./types").PatchSnapshot>("patch_action", { action });
 export const closePatch = () => invoke<void>("close_patch");
-export const buildPatch = (patch: string, destination: string) =>
-  invoke<import("./types").BuildReply>("build_patch", { patch, destination });
+export const reviewPatchBuild = (patch: string, destination: string) =>
+  invoke<import("./types").BuildReview>("review_patch_build", {
+    patch,
+    destination,
+  });
+export const applyPatchBuild = (review: import("./types").BuildReview) =>
+  invoke<import("./types").BuildReply>("apply_patch_build", { review });
 
 export const openManagedEditor = (channel: number) =>
   invoke<EditorInfo>("open_managed_editor", { channel });

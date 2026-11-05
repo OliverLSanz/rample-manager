@@ -2,6 +2,7 @@ import { LibrarySnapshots } from "./LibrarySnapshots";
 import { SdImport } from "./SdImport";
 import { useEffect, useRef, useState } from "react";
 import { SampleEditor } from "./SampleEditor";
+import { BuildResult, BuildReviewPanel } from "./BuildPatch";
 import { Modal } from "./Modal";
 import { LibrarySamples } from "./LibrarySamples";
 import { SequencerRow, TransportBar } from "./Sequencer";
@@ -10,6 +11,7 @@ import {
   modes,
   type Action,
   type BuildReply,
+  type BuildReview,
   type EditorInfo,
   type LayerMode,
   type PatchAction,
@@ -40,7 +42,8 @@ export function PatchEditor({
   const [bank, setBank] = useState("A");
   const [number, setNumber] = useState(0);
   const [editor, setEditor] = useState<EditorInfo | null>(null);
-  const [building, setBuilding] = useState(false);
+  const [building, setBuilding] = useState<string | null>(null);
+  const [review, setReview] = useState<BuildReview | null>(null);
   const [built, setBuilt] = useState<BuildReply | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [velocity, setVelocity] = useState<{
@@ -114,22 +117,42 @@ export function PatchEditor({
   async function build() {
     if (!patch || busy) return;
     const destination = await native.chooseFolder(
-      "Choose an empty folder or SD card for Build Patch",
+      "Choose a folder or SD card for Build Patch",
     );
     if (!destination || !alive.current) return;
     setBusy(true);
-    setBuilding(true);
+    setBuilding("Reviewing the destination…");
     setBuilt(null);
+    setReview(null);
     setError(null);
     try {
       await queue.current.catch(() => {});
-      const reply = await native.buildPatch(patch.id, destination);
+      const reviewed = await native.reviewPatchBuild(patch.id, destination);
+      if (alive.current) setReview(reviewed);
+    } catch (e) {
+      if (alive.current) setError(String(e));
+    } finally {
+      if (alive.current) {
+        setBuilding(null);
+        setBusy(false);
+      }
+    }
+  }
+  async function applyBuild() {
+    if (!review || busy) return;
+    setBusy(true);
+    setBuilding("Building Patch…");
+    setError(null);
+    try {
+      await queue.current.catch(() => {});
+      const reply = await native.applyPatchBuild(review);
       if (alive.current) setBuilt(reply);
     } catch (e) {
       if (alive.current) setError(String(e));
     } finally {
       if (alive.current) {
-        setBuilding(false);
+        setReview(null);
+        setBuilding(null);
         setBusy(false);
       }
     }
@@ -317,43 +340,18 @@ export function PatchEditor({
           </div>
         )}
         {busy && (
-          <p role="status">
-            {building ? "Building Patch…" : "Saving and preparing preview…"}
-          </p>
+          <p role="status">{building ?? "Saving and preparing preview…"}</p>
+        )}
+        {review && (
+          <BuildReviewPanel
+            review={review}
+            busy={busy}
+            onApply={() => void applyBuild()}
+            onCancel={() => setReview(null)}
+          />
         )}
         {built && (
-          <section className="patch-build" aria-label="Build Patch result">
-            <p>
-              Built {built.kits.length}{" "}
-              {built.kits.length === 1 ? "Kit" : "Kits"} and{" "}
-              {built.files.length}{" "}
-              {built.files.length === 1 ? "audio file" : "audio files"} into{" "}
-              {built.destination}.
-            </p>
-            <p>
-              Only Bank/Kit folders and prepared audio were written. Layer modes
-              and selections are preview settings in this app: set them on the
-              Rample and STORE.
-            </p>
-            {built.notices.length > 0 && (
-              <ul>
-                {built.notices.map((notice, i) => (
-                  <li key={i}>{notice}</li>
-                ))}
-              </ul>
-            )}
-            <details>
-              <summary>Built files in Layer order</summary>
-              <ul>
-                {built.files.map((file) => (
-                  <li key={file.path}>
-                    {`${file.path} · Voice ${file.voice}, Layer ${file.layer}: ${file.sampleName}`}
-                  </li>
-                ))}
-              </ul>
-            </details>
-            <button onClick={() => setBuilt(null)}>Dismiss</button>
-          </section>
+          <BuildResult built={built} onDismiss={() => setBuilt(null)} />
         )}
         <fieldset disabled={busy} className="patch-settings">
           <label>
@@ -734,9 +732,10 @@ export function PatchEditor({
           </>
         )}
         <p className="patch-native-note">
-          Drafts are saved on this computer. Build Patch writes Bank/Kit folders
-          and prepared audio to an empty folder or card; it never writes native
-          SD settings (_save).
+          Drafts are saved on this computer. Build Patch shows how a folder or
+          card will change, backs up affected Kit audio, then writes Bank/Kit
+          folders and prepared audio; it never writes native SD settings
+          (_save).
         </p>
       </div>
     </Modal>
