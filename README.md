@@ -112,7 +112,9 @@ Import reads each Kit's STOREd Layer modes and selected Layers. Kits never saved
 with STORE use your **Default Layer mode**, which you set in the Patches
 workspace and which also applies to new Kits. The Rample's global LAYER setting
 is not read. Unverified or unreadable values use that default and are listed
-in the review.
+in the review. A source with Kits but no `_save` folder at all (for example a
+copy of only the Kit folders) is reported too: no native settings were found,
+so every Kit uses your Default Layer mode.
 
 **Build Patch…** writes the selected Patch to a folder or directly onto an SD
 card, empty or populated. Every Kit and every ordered Layer, including repeated

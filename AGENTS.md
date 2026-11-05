@@ -121,7 +121,8 @@ by Oliver's controlled firmware 2.00 captures
 The device's global `layerMode` is ignored. The user's Library-wide Default
 Layer mode (`PatchGraph.default_layer_mode`) applies to new Kits, to Kits
 never saved with STORE and to unverified or unreadable values, which are
-reported, never guessed. No further captures are planned. Do not guess offsets or substitute MIDI enums. Preserve the imported
+reported, never guessed. A source with Kits but no `_save` folder gets a
+source-wide `NativeReading.issues` entry instead of silent defaults. No further captures are planned. Do not guess offsets or substitute MIDI enums. Preserve the imported
 bytes exactly. Device captures stay in the git-ignored `Rample SD Captures/`;
 tests use generated fixtures. BPM and sequencer steps remain app-only.
 

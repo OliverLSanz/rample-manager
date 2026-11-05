@@ -51,7 +51,10 @@ replaces the device's global LAYER with its own **Default Layer mode**,
 configured in the Patches workspace and stored with the Library. That default
 applies to new Kits, to imported Kits without their own `.rpl` (never saved
 with STORE) and to unverified or unreadable stored values. The source of those
-Kits is recorded as `appDefault`.
+Kits is recorded as `appDefault`. When the source has no `_save` folder at all,
+the reading also carries a source-wide issue (`NativeReading.issues`): no
+native settings were found, so the default applies to every Kit and the Import
+is not reported as verified.
 
 Layer files are assumed to follow standard natural filename order, as the
 manual describes ("numerically and alphabetically sorted"). No further

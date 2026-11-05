@@ -293,14 +293,17 @@ function NativeSummary({
   const fallback =
     modes.find((mode) => mode.id === reading.defaultLayerMode)?.title ??
     reading.defaultLayerMode;
-  const issues = reading.kits.flatMap((kit) => kit.issues);
+  const issues = [
+    ...(reading.issues ?? []),
+    ...reading.kits.flatMap((kit) => kit.issues),
+  ];
   return (
     <div>
       <p>
         Native settings: Layer modes and selected Layers restored for{" "}
         {count("store")} Kit(s) saved with STORE (firmware{" "}
-        {reading.verifiedFirmware}). {count("appDefault")} Kit(s) never saved
-        with STORE use your default Layer mode ({fallback}).
+        {reading.verifiedFirmware}). {count("appDefault")} Kit(s) without a
+        stored Kit file use your default Layer mode ({fallback}).
       </p>
       <p>
         {preserved} native file(s) preserved exactly. The app never writes

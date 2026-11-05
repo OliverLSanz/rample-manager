@@ -43,6 +43,9 @@ pub struct NativeReading {
     /// The user's default Layer mode applied to Kits without stored modes.
     pub default_layer_mode: LayerMode,
     pub kits: Vec<NativeKitReading>,
+    /// Problems with the source as a whole, such as a missing `_save` folder.
+    #[serde(default)]
+    pub issues: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +67,13 @@ pub struct NativeVoiceReading {
 }
 impl NativeReading {
     pub fn complete(&self) -> bool {
-        self.kits.iter().all(|kit| kit.issues.is_empty())
+        self.issues.is_empty() && self.kits.iter().all(|kit| kit.issues.is_empty())
+    }
+    /// Every problem, source-wide first, in the order the review shows them.
+    pub fn all_issues(&self) -> impl Iterator<Item = &String> {
+        self.issues
+            .iter()
+            .chain(self.kits.iter().flat_map(|kit| &kit.issues))
     }
     fn kit(&self, bank: &str, number: u8) -> Option<&NativeKitReading> {
         self.kits
@@ -164,10 +173,13 @@ type VoiceFiles = HashMap<(String, usize), Vec<(String, Option<String>)>>;
 
 /// Restores verified native Layer modes and selections into the draft Kits.
 /// Kits never saved with STORE, unverified values and unreadable files use the
-/// user's default Layer mode; problems are reported, never guessed.
+/// user's default Layer mode; problems are reported, never guessed. A source
+/// without `_save` (for example a copy of only the Kit folders) is reported
+/// once, because its Kits cannot be told apart from Kits never saved.
 fn read_native(
     patch: &mut Patch,
     default_mode: LayerMode,
+    has_save: bool,
     kit_paths: &HashMap<String, String>,
     files: &HashMap<String, Vec<u8>>,
     voice_files: &VoiceFiles,
@@ -177,6 +189,9 @@ fn read_native(
         default_layer_mode: default_mode,
         ..NativeReading::default()
     };
+    if !has_save && !kit_paths.is_empty() {
+        reading.issues.push("No _save folder was found, so no native settings were read. Layer modes use your Default Layer mode.".into());
+    }
     let mut folders: Vec<_> = kit_paths.iter().collect();
     folders.sort_by(|a, b| a.0.cmp(b.0));
     for (folder, kit_id) in folders {
@@ -302,6 +317,7 @@ impl ManagedLibrary {
         let mut audio_paths = vec![];
         let mut native_files = HashMap::new();
         let mut kit_paths = HashMap::new();
+        let mut has_save = false;
         for entry in walkdir::WalkDir::new(source)
             .min_depth(1)
             .sort_by_file_name()
@@ -338,6 +354,7 @@ impl ManagedLibrary {
                 continue;
             }
             if entry.file_type().is_dir() {
+                has_save |= path == "_save";
                 if !path.contains('/') {
                     if let Some((bank, number)) = address(&path) {
                         if patch
@@ -509,6 +526,7 @@ impl ManagedLibrary {
         state.native = Some(read_native(
             &mut patch,
             graph.default_layer_mode,
+            has_save,
             &kit_paths,
             &native_files,
             &voice_files,
@@ -1237,15 +1255,48 @@ mod tests {
             .any(|v| v.contains("Partial: A0 Voice 1: Stored Layer mode value 7")));
     }
     #[test]
-    fn folders_without_native_settings_use_the_default_layer_mode() {
+    fn kits_without_a_stored_file_in_save_use_the_default_layer_mode_silently() {
         let (temp, state, _) = fixture();
         let source = temp.path().join("SD");
         wavs(&source, "B3", &["1_kick.wav"]);
+        std::fs::create_dir_all(source.join("_save")).unwrap();
         let review = state.prepare_sd_import(source).unwrap();
         let native = review.draft.imported_sd.unwrap().native.unwrap();
         assert!(review.native_verified);
         assert_eq!(native.kits[0].source, "appDefault");
         assert!(native.kits[0].issues.is_empty());
+        assert!(native.issues.is_empty());
+    }
+    #[test]
+    fn a_source_without_save_reports_that_no_native_settings_were_found() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("SD");
+        wavs(&source, "B3", &["1_kick.wav"]);
+        let review = state.prepare_sd_import(source).unwrap();
+        assert!(!review.native_verified);
+        let native = review
+            .draft
+            .imported_sd
+            .as_ref()
+            .unwrap()
+            .native
+            .clone()
+            .unwrap();
+        assert_eq!(native.kits[0].source, "appDefault");
+        assert_eq!(native.issues.len(), 1, "{:?}", native.issues);
+        assert!(native.issues[0].starts_with("No _save folder was found"));
+        let saved = state
+            .finish_sd_import(
+                &review.id,
+                super::SdImportChoice::New {
+                    name: "Copy".into(),
+                },
+            )
+            .unwrap();
+        assert!(saved
+            .validation
+            .iter()
+            .any(|v| v.starts_with("Copy: No _save folder was found")));
     }
     #[test]
     fn sd_imported_before_native_reading_offers_update_with_stored_modes() {

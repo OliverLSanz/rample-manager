@@ -91,7 +91,7 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
   expect(screen.getByText(/Truncated WAV/)).toBeTruthy();
   expect(
     screen.getByText(
-      /restored for 1 Kit\(s\) saved with STORE \(firmware 2\.00\)\. 1 Kit\(s\) never saved with STORE use your default Layer mode \(Velocity\)/,
+      /restored for 1 Kit\(s\) saved with STORE \(firmware 2\.00\)\. 1 Kit\(s\) without a stored Kit file use your default Layer mode \(Velocity\)/,
     ),
   ).toBeTruthy();
   expect(screen.getByText(/1 native file\(s\) preserved exactly/)).toBeTruthy();
@@ -187,4 +187,63 @@ it("reuses an unchanged Patch and restores a recognized Trash Sample by its orig
   expect(native.finishSdImport).toHaveBeenCalledWith("known", {
     type: "reuse",
   });
+});
+it("reports a source without _save instead of presenting its Kits as never saved", async () => {
+  vi.mocked(native.chooseFolder).mockResolvedValue("/Copy");
+  vi.mocked(native.prepareSdImport).mockResolvedValue({
+    id: "intake",
+    status: "new",
+    recognizedPatch: null,
+    nativeVerified: false,
+    candidates: [],
+    audio: {
+      imported: 1,
+      recognized: 0,
+      failed: 0,
+      complete: true,
+      samples: [],
+      results: [],
+    },
+    draft: {
+      id: "draft",
+      name: "Copy",
+      selectedKit: "",
+      kits: [],
+      bpm: 120,
+      voices: [],
+      importedSd: {
+        intakeId: "intake",
+        copyComplete: true,
+        fingerprint: "hash",
+        files: [],
+        issues: [],
+        unassigned: [],
+        native: {
+          verifiedFirmware: "2.00",
+          defaultLayerMode: "manual",
+          issues: [
+            "No _save folder was found, so no native settings were read. Layer modes use your Default Layer mode.",
+          ],
+          kits: [
+            {
+              bank: "B",
+              number: 3,
+              source: "appDefault",
+              voices: [],
+              issues: [],
+            },
+          ],
+        },
+      },
+    },
+  });
+  render(<SdImport onClose={() => {}} onImported={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose SD folder…" }));
+  expect(await screen.findByText(/No _save folder was found/)).toBeTruthy();
+  expect(screen.queryByText(/never saved with STORE/)).toBeNull();
+  expect(
+    screen.getByText(
+      /1 Kit\(s\) without a stored Kit file use your default Layer mode/,
+    ),
+  ).toBeTruthy();
 });

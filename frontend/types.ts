@@ -420,6 +420,8 @@ export interface NativeReading {
     voices: { modeRestored: boolean; selectionRestored: boolean }[];
     issues: string[];
   }[];
+  /** Problems with the source as a whole, such as a missing `_save` folder. */
+  issues?: string[];
 }
 export interface SdImportReview {
   id: string;

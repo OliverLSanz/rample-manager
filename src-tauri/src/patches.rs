@@ -455,7 +455,7 @@ impl AppState {
                     // Native settings are read-only (ADR 0007): only report
                     // what Import could not restore, never a pending write.
                     Some(native) => {
-                        for issue in native.kits.iter().flat_map(|kit| &kit.issues) {
+                        for issue in native.all_issues() {
                             validation.push(format!("{}: {issue}", patch.name));
                         }
                     }
