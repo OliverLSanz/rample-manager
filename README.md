@@ -128,8 +128,10 @@ a name or tag for every word, and the tag buttons under it combine like the
 Library's tag filters. ↑/↓ browse and, with **Hear while browsing**, play each Sample as
 the Rample will (mono preparation, independently of the mixer); Enter,
 double-click or **+** adds it as the Voice's last Layer. The panel stays open,
-so you can keep auditioning and adding, also while switching Kits. Drag any row
-onto a voice card to add it there. Long Libraries show 150 matches at a time.
+so you can keep auditioning and adding, also while switching Kits. Shift- and
+Cmd/Ctrl-click, Shift+↑/↓ or Cmd/Ctrl+A select several Samples: Enter or
+**Add N to Voice** adds them in list order. Drag any row onto a voice card to
+add it there; dragging a selected row carries the whole selection. Long Libraries show 150 matches at a time.
 
 Select a Layer and click the sliders button beside **Audition** to edit its complete Original. Trim,
 gain, varispeed pitch, EQ, echo and reverb are saved as reversible Sample Edits;
@@ -205,7 +207,9 @@ preview plays it. Files are named `<Voice>_<position>_<name>.wav`, for example
 `A0/1_01_Warm_kick.wav` and `A0/1_02_Snare.wav`, so the Rample's
 numerical/alphabetical sort keeps the intended Layer order; Library names are
 unchanged. Build first checks Voice 1, the 12-Layer limit and all audio,
-listing every problem.
+listing every problem. While it reviews and builds, a progress bar shows each
+stage (reading the destination, preparing audio, backing up, writing and
+verifying) and the file being handled, so a large card visibly advances.
 
 Before anything is written, Build shows a review of the destination: files to
 add, files to replace, files to remove and files already up to date. Build
