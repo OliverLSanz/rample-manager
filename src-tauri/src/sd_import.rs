@@ -141,6 +141,13 @@ pub(super) fn is_system_entry(name: &str) -> bool {
             | "$RECYCLE.BIN"
     ) || name.starts_with("._")
 }
+/// Whether a file name or path has a `.wav` extension, in any letter case.
+/// The Rample plays and numbers only these files.
+pub(crate) fn is_wav(path: impl AsRef<Path>) -> bool {
+    path.as_ref()
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
+}
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -476,11 +483,7 @@ impl ManagedLibrary {
                 .flatten();
             // The device numbers only WAV files; keep failed ones so a stored
             // Layer position never silently shifts onto a different file.
-            let device_layer = assignment.clone().filter(|_| {
-                Path::new(path)
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
-            });
+            let device_layer = assignment.clone().filter(|_| is_wav(path));
             if let Some(sample_id) = &file.sample_id {
                 if managed::fingerprint(source).ok().as_deref() != Some(&file.sha256) {
                     state.copy_complete = false;

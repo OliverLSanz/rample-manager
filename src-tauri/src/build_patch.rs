@@ -65,11 +65,6 @@ fn canonical_kit(name: &str) -> bool {
             .parse::<u8>()
             .is_ok_and(|n| format!("{}{n}", &name[..1]) == name)
 }
-fn is_wav(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("wav"))
-}
 fn read_error(e: std::io::Error) -> String {
     format!("Could not read the destination: {e}")
 }
@@ -180,7 +175,7 @@ fn scan(destination: &Path) -> Result<Scan, String> {
             if sd_import::is_system_entry(&file) {
                 continue;
             }
-            if is_wav(&file) && item.file_type().map_err(read_error)?.is_file() {
+            if sd_import::is_wav(&file) && item.file_type().map_err(read_error)?.is_file() {
                 scan.files.push(DestinationFile {
                     path: format!("{name}/{file}"),
                     sha256: managed::fingerprint(&item.path())
@@ -283,6 +278,18 @@ impl Manifest {
         sync_directory(folder);
         Ok(())
     }
+    /// Destination paths whose backup copy in `folder` is missing or no
+    /// longer holds the recorded bytes.
+    fn damaged_copies(&self, folder: &Path) -> Vec<&str> {
+        self.backed_up
+            .iter()
+            .chain(&self.metadata)
+            .filter(|b| {
+                managed::fingerprint(&folder.join(&b.file)).ok().as_ref() != Some(&b.sha256)
+            })
+            .map(|b| b.path.as_str())
+            .collect()
+    }
     fn summary(&self, folder: &Path) -> BuildBackup {
         let written: HashSet<_> = self.written.iter().map(|f| f.path.as_str()).collect();
         let backed: HashSet<_> = self.backed_up.iter().map(|f| f.path.as_str()).collect();
@@ -362,7 +369,7 @@ impl ManagedLibrary {
         kits.sort_by(|a, b| (&a.bank, a.number).cmp(&(&b.bank, b.number)));
         let mut files = vec![];
         for kit in &kits {
-            let folder = format!("{}{}", kit.bank, kit.number);
+            let folder = kit.address();
             for (voice, arrangement) in kit.voices.iter().enumerate() {
                 for (layer, occurrence) in arrangement.layers.iter().enumerate() {
                     let name = names
@@ -385,10 +392,7 @@ impl ManagedLibrary {
                 }
             }
         }
-        let kits: Vec<String> = kits
-            .iter()
-            .map(|k| format!("{}{}", k.bank, k.number))
-            .collect();
+        let kits: Vec<String> = kits.iter().map(|k| k.address()).collect();
         let found = scan(destination)?;
         let mut conflicts = found.conflicts.clone();
         for kit in &kits {
@@ -729,17 +733,8 @@ fn back_up(
     sync_directory(&folder.join("files"));
     sync_directory(&folder.join("metadata"));
     // Verify the complete backup by reading every copy back.
-    for backed in manifest.backed_up.iter().chain(&manifest.metadata) {
-        if managed::fingerprint(&folder.join(&backed.file))
-            .ok()
-            .as_ref()
-            != Some(&backed.sha256)
-        {
-            return Err(format!(
-                "The backup of {} could not be verified.",
-                backed.path
-            ));
-        }
+    if let Some(path) = manifest.damaged_copies(folder).first() {
+        return Err(format!("The backup of {path} could not be verified."));
     }
     manifest
         .save(folder)
@@ -927,13 +922,7 @@ fn restore_build(backups: &Path, id: &str, destination: &Path) -> Result<Restore
     if !destination.is_dir() {
         return Err("Choose the existing folder or card to restore.".into());
     }
-    let damaged: Vec<&str> = manifest
-        .backed_up
-        .iter()
-        .chain(&manifest.metadata)
-        .filter(|b| managed::fingerprint(&folder.join(&b.file)).ok().as_ref() != Some(&b.sha256))
-        .map(|b| b.path.as_str())
-        .collect();
+    let damaged = manifest.damaged_copies(&folder);
     if !damaged.is_empty() {
         return Err(format!(
             "The destination backup is damaged and cannot restore {}. Nothing was changed.",
@@ -1998,7 +1987,7 @@ mod tests {
                 .iter()
                 .map(|k| {
                     (
-                        format!("{}{}", k.bank, k.number),
+                        k.address(),
                         k.voices
                             .iter()
                             .map(|v| v.layers.iter().map(|l| l.sample_id.clone()).collect())

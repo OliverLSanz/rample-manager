@@ -36,6 +36,12 @@ pub struct PatchKit {
     pub number: u8,
     pub voices: Vec<PatchVoice>,
 }
+impl PatchKit {
+    /// The Bank/Kit address, which is also its folder name, such as `A0`.
+    pub fn address(&self) -> String {
+        format!("{}{}", self.bank, self.number)
+    }
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchVoice {
@@ -203,7 +209,7 @@ fn valid_address(patch: &Patch, bank: &str, number: u8, except: &str) -> Result<
 pub(super) fn kit_issues(patch: &Patch) -> Vec<String> {
     let mut issues = vec![];
     for kit in &patch.kits {
-        let address = format!("{}{}", kit.bank, kit.number);
+        let address = kit.address();
         if !catalog::is_kit_name(&address) || kit.number > 99 {
             issues.push(format!(
                 "{address}: Use a Bank from A to Z and a Kit number from 0 to 99."
