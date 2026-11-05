@@ -363,6 +363,14 @@ export type PatchAction =
   | { type: "undoDelete" }
   | { type: "selectKit"; kit: string }
   | { type: "addLayer"; channel: number; sample: string }
+  /** Adds to any Kit of any Patch without changing the open one. */
+  | {
+      type: "addLayerTo";
+      patch: string;
+      kit: string;
+      channel: number;
+      sample: string;
+    }
   | { type: "removeLayer" | "selectLayer"; channel: number; layer: string }
   | { type: "moveLayer"; channel: number; layer: string; to: number }
   | { type: "musical"; action: Action };

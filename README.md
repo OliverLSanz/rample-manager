@@ -21,7 +21,8 @@ installation while keeping preferences and sample libraries.
 
 ## Use
 
-Open **Library samples…** to import mono or stereo WAV, AIFF, FLAC and MP3 files
+The **Samples** view (next to **Kit** at the top) is the Library. **Import audio
+files…** and **Import folder…** bring mono or stereo WAV, AIFF, FLAC and MP3 files
 into the app's private Library. Folder import includes nested folders and does
 not require Rample kit names or voice prefixes. Each Sample gets a stable identity
 and an initial name from its source filename. Identical file bytes are recognized
@@ -31,9 +32,20 @@ is reported explicitly. **Original** auditions the unchanged source channels
 independently of the kit mixer and sample editor. **Rample mono** auditions a
 separate target preparation: channel-average mono PCM16 WAV at 44.1 kHz, with
 band-limited resampling and dither where needed. Only audio shorter than 50 ms
-is padded. **Stop audition** stops either audition.
+is padded. The square button stops either audition. Clicking a row, or browsing
+with ↑/↓ while **Hear while browsing** is on, plays its Rample sound.
 
-Select a Sample in the Library to edit its descriptive name and tags (one tag per
+The filters show all Samples, those in the open Patch, those not in any Kit,
+the Trash, or one tag; sort by import order, name, duration or use. Each row
+shows where the Sample plays in the open Patch (such as `A0·V2`) and in how many
+other Patches. The details beside the list show its waveform and **Used in**:
+every Layer that plays it, across Patches; click one to open that Kit. **Add as
+Layer** adds it to the open Patch's Kit by default, or to any Kit and Voice of any
+Patch, without leaving the open one (Enter does the same). ⌘/Ctrl-click and
+Shift-click (or Shift+↑/↓) select several Samples to add as consecutive Layers,
+tag or move to Trash together.
+
+Select a Sample to edit its descriptive name and tags (one tag per
 line). Tags can contain spaces, punctuation and Unicode text. Search matches a
 literal, case-insensitive part of a name or tag. Renaming and tagging do not rename
 Original files or change Sample identity. Reimporting known audio retains this

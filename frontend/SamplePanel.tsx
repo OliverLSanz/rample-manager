@@ -6,7 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import { Check, Plus, Search, Volume2, X } from "lucide-react";
-import * as native from "./native";
+import { useSampleAudition } from "./audition";
 import { colors } from "./Sequencer";
 import type { LibrarySample } from "./types";
 
@@ -53,9 +53,7 @@ export function SamplePanel({
   const [preview, setPreview] = useState(true);
   const [limit, setLimit] = useState(page);
   const [added, setAdded] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const session = useRef<string | null>(null);
-  const alive = useRef(true);
+  const audition = useSampleAudition();
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const matches = useMemo(
@@ -63,16 +61,7 @@ export function SamplePanel({
     [samples, query],
   );
   const shown = matches.slice(0, limit);
-  useEffect(() => {
-    alive.current = true;
-    search.current?.focus();
-    return () => {
-      alive.current = false;
-      const owner = session.current;
-      session.current = null;
-      if (owner) void native.stopSampleAudition(owner, true).catch(() => {});
-    };
-  }, []);
+  useEffect(() => search.current?.focus(), []);
   useEffect(() => setLimit(page), [query]);
   useEffect(() => {
     if (!added) return;
@@ -80,22 +69,9 @@ export function SamplePanel({
     return () => clearTimeout(timer);
   }, [added]);
 
-  /** Plays the Rample preparation; reopens the audition if another view took it. */
-  async function hear(sample: LibrarySample) {
-    if (!sample.readable) return;
-    setError(null);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        if (!session.current)
-          session.current = await native.openSampleAudition();
-        if (!alive.current) return;
-        await native.auditionSample(sample.id, session.current, true);
-        return;
-      } catch (e) {
-        session.current = null;
-        if (attempt === 1 && alive.current) setError(String(e));
-      }
-    }
+  /** Plays the Sample as the Rample will. */
+  function hear(sample: LibrarySample) {
+    if (sample.readable) void audition.hear(sample.id, true);
   }
   function select(sample: LibrarySample, play: boolean) {
     setActive(sample.id);
@@ -277,13 +253,13 @@ export function SamplePanel({
           <p className="panel-empty">
             {samples.length
               ? "No Samples match."
-              : "No Samples yet. Import audio from Library samples…"}
+              : "No Samples yet. Import audio in the Samples view."}
           </p>
         )}
       </div>
       <footer>
-        {error ? (
-          <span role="alert">{error}</span>
+        {audition.error ? (
+          <span role="alert">{audition.error}</span>
         ) : added ? (
           <span role="status" className="panel-added">
             <Check size={12} /> Added {added} to Voice {channel + 1}

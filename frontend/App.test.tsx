@@ -37,6 +37,7 @@ vi.mock("./native", () => ({
   querySamples: vi.fn(),
   openSampleAudition: vi.fn(),
   auditionSample: vi.fn(),
+  sampleWaveform: vi.fn(),
   stopSampleAudition: vi.fn(),
   openManagedEditor: vi.fn(),
   prepareSdImport: vi.fn(),
@@ -940,6 +941,54 @@ describe("Library", () => {
   });
 });
 
+describe("Samples view", () => {
+  it("switches between the Kit and the Library, and opens a Kit from where a Sample is used", async () => {
+    vi.mocked(native.listSamples).mockResolvedValue([sample, snare]);
+    vi.mocked(native.sampleWaveform).mockResolvedValue(Array(100).fill(0.4));
+    await openApp();
+    fireEvent.click(screen.getByRole("tab", { name: /Samples/ }));
+    expect(screen.queryByRole("region", { name: "Voice 1" })).toBeNull();
+    const library = await screen.findByRole("listbox", {
+      name: "Library Samples",
+    });
+    fireEvent.click(within(library).getByRole("option", { name: "Warm kick" }));
+    const used = screen.getByRole("region", { name: "Used in" });
+    // Warm kick plays in Live set's A0 (Layer 1) and B12.
+    expect(
+      within(used)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual([
+      "Open Live set A0 · Voice 1 · Layer 1",
+      "Open Live set B12 · Voice 1 · Layer 1",
+    ]);
+    fireEvent.click(
+      within(used).getByRole("button", {
+        name: "Open Live set B12 · Voice 1 · Layer 1",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "selectKit",
+        kit: "other-kit",
+      }),
+    );
+    expect(await screen.findByRole("region", { name: "Voice 1" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: /Kit/ }).getAttribute("aria-selected"),
+    ).toBe("true");
+  });
+
+  it("returns to the Kit view when a Kit is chosen in the sidebar", async () => {
+    vi.mocked(native.listSamples).mockResolvedValue([sample]);
+    await openApp();
+    fireEvent.click(screen.getByRole("tab", { name: /Samples/ }));
+    await screen.findByRole("listbox", { name: "Library Samples" });
+    fireEvent.click(screen.getByRole("button", { name: "Load kit B12" }));
+    expect(await screen.findByRole("region", { name: "Voice 1" })).toBeTruthy();
+  });
+});
+
 describe("keyboard", () => {
   it("plays with Space and auditions with 1–4, but not from focused controls", async () => {
     const user = userEvent.setup();
@@ -970,11 +1019,12 @@ describe("keyboard", () => {
     });
   });
 
-  it("keeps shortcuts suspended while a Library view is open", async () => {
+  it("keeps shortcuts suspended while a Library dialog is open", async () => {
+    vi.mocked(native.libraryRecoverySnapshots).mockResolvedValue([]);
     const user = userEvent.setup();
     await openApp();
-    await user.click(screen.getByRole("button", { name: "Library samples…" }));
-    await screen.findByRole("searchbox");
+    await user.click(screen.getByRole("button", { name: /Library backup/ }));
+    await screen.findByRole("button", { name: "Restore Library…" });
     (document.activeElement as HTMLElement).blur();
     const calls = vi.mocked(native.patchAction).mock.calls.length;
     await user.keyboard(" 1");

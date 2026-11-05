@@ -31,6 +31,9 @@ export const chooseSampleExport = (name: string) =>
     defaultPath: `${name}.wav`,
     filters: [{ name: "WAV", extensions: ["wav"] }],
   });
+/** Normalized peaks of a Sample's current Rample sound. */
+export const sampleWaveform = (id: string) =>
+  invoke<number[]>("sample_waveform", { id });
 export const exportSample = (id: string, destination: string) =>
   invoke<void>("export_sample", { id, destination });
 export const openSampleAudition = () => invoke<string>("open_sample_audition");

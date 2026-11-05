@@ -19,7 +19,7 @@ import * as native from "./native";
 import { Modal } from "./Modal";
 import { SampleEditor } from "./SampleEditor";
 import { SdImport } from "./SdImport";
-import { LibrarySamples } from "./LibrarySamples";
+import { SamplesScreen } from "./SamplesScreen";
 import { LibrarySnapshots } from "./LibrarySnapshots";
 import { LibraryMigration } from "./LibraryMigration";
 import {
@@ -169,7 +169,8 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [sdImport, setSdImport] = useState(false);
-  const [library, setLibrary] = useState(false);
+  // The main window shows the Kit or the Library's Samples.
+  const [screen, setScreen] = useState<"kit" | "samples">("kit");
   // The Voice that the Add Samples panel adds to; null while it is closed.
   const [adding, setAdding] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState(false);
@@ -308,7 +309,7 @@ export default function App() {
     };
   }, []);
 
-  const overlay = sdImport || library || snapshots || !!editor || !!velocity;
+  const overlay = sdImport || snapshots || !!editor || !!velocity;
   useEffect(() => {
     function key(e: KeyboardEvent) {
       if (overlay || !view) return;
@@ -424,7 +425,9 @@ export default function App() {
     ) ?? []),
   ];
   return (
-    <div className={`app-shell ${adding !== null && kit ? "with-panel" : ""}`}>
+    <div
+      className={`app-shell ${adding !== null && kit && screen === "kit" ? "with-panel" : ""}`}
+    >
       <aside className="sidebar">
         <div className="sidebar-drag" data-tauri-drag-region />
         <div className="brand">
@@ -440,19 +443,13 @@ export default function App() {
           patch={patch}
           issues={issues}
           samples={samples}
-          onPatch={act}
+          onPatch={(action) => {
+            if (action.type === "selectKit") setScreen("kit");
+            return act(action);
+          }}
           onDelete={(kit) => void remove({ type: "deleteKit", kit })}
         />
         <div className="sidebar-bottom">
-          <button
-            className="folder-button"
-            onClick={() => {
-              setAdding(null);
-              setLibrary(true);
-            }}
-          >
-            <AudioLines size={15} /> Library samples…
-          </button>
           <button
             className="folder-button"
             onClick={() => {
@@ -474,6 +471,25 @@ export default function App() {
             onImport={() => setSdImport(true)}
             onDelete={(patch) => void remove({ type: "deletePatch", patch })}
           />
+          <div className="view-switch" role="tablist" aria-label="View">
+            <button
+              role="tab"
+              aria-selected={screen === "kit"}
+              onClick={() => setScreen("kit")}
+            >
+              <Grid2X2 size={13} /> Kit
+            </button>
+            <button
+              role="tab"
+              aria-selected={screen === "samples"}
+              onClick={() => {
+                setAdding(null);
+                setScreen("samples");
+              }}
+            >
+              <AudioLines size={13} /> Samples
+            </button>
+          </div>
           <div className="header-actions">
             <span className="live-state">
               <i />
@@ -499,7 +515,9 @@ export default function App() {
             </button>
           </div>
         </header>
-        <div className="workspace">
+        <div
+          className={`workspace ${screen === "samples" ? "samples-mode" : ""}`}
+        >
           {!legacy.managed && !legacy.isDemo && !migrationHidden && (
             <div className="migration">
               <LibraryMigration
@@ -546,7 +564,24 @@ export default function App() {
               onClose={() => setBackups(null)}
             />
           )}
-          {!patch ? (
+          {screen === "samples" ? (
+            <SamplesScreen
+              view={view}
+              onPatch={act}
+              onChanged={() => void act({ type: "open" })}
+              onOpen={(usage) => {
+                void (async () => {
+                  if (usage.patch !== view.graph.selectedPatch)
+                    if (
+                      !(await act({ type: "selectPatch", patch: usage.patch }))
+                    )
+                      return;
+                  if (await act({ type: "selectKit", kit: usage.kit }))
+                    setScreen("kit");
+                })();
+              }}
+            />
+          ) : !patch ? (
             <FirstPatch
               onCreate={(name) => act({ type: "createPatch", name })}
               onImport={() => setSdImport(true)}
@@ -728,20 +763,22 @@ export default function App() {
               )}
             </>
           )}
-          <footer>
-            <div>
-              <Keyboard size={13} />
-              <span>Space: play / stop</span>
-              <b>·</b>
-              <span>1–4: audition voice</span>
-            </div>
-            <span title="Build to SD writes Bank/Kit folders and prepared audio. It never writes native Rample settings (_save).">
-              Drafts are saved on this computer · Build never writes _save
-            </span>
-          </footer>
+          {screen === "kit" && (
+            <footer>
+              <div>
+                <Keyboard size={13} />
+                <span>Space: play / stop</span>
+                <b>·</b>
+                <span>1–4: audition voice</span>
+              </div>
+              <span title="Build to SD writes Bank/Kit folders and prepared audio. It never writes native Rample settings (_save).">
+                Drafts are saved on this computer · Build never writes _save
+              </span>
+            </footer>
+          )}
         </div>
       </main>
-      {adding !== null && kit && (
+      {adding !== null && kit && screen === "kit" && (
         <SamplePanel
           samples={view.samples}
           channel={adding}
@@ -792,14 +829,6 @@ export default function App() {
           }}
         />
       )}
-      {library && (
-        <LibrarySamples
-          onClose={() => {
-            setLibrary(false);
-            void act({ type: "open" });
-          }}
-        />
-      )}
       {snapshots && (
         <LibrarySnapshots
           managed={legacy.managed}
@@ -808,7 +837,6 @@ export default function App() {
             requestVersion.current++;
             setEditor(null);
             setAdding(null);
-            setLibrary(false);
             setSdImport(false);
             setVelocity(null);
             setReview(null);

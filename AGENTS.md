@@ -40,7 +40,8 @@ The main window is the open Patch (ADR 0008,
 `docs/adr/0008-make-the-open-patch-the-main-screen.md`): Kits in the sidebar
 (`KitList`), the Patch switcher at the top (`PatchMenu`), Layers on the voice
 cards (`VoiceCard`), the Add Samples side panel (`SamplePanel`) and the Patch
-sequencer. The window sets `dragDropEnabled: false` so HTML5 drag and drop
+sequencer. The **Samples** view (`SamplesScreen`) replaces it in the main area
+for the Library; Library audition goes through `useSampleAudition`. The window sets `dragDropEnabled: false` so HTML5 drag and drop
 (Samples onto voices, Layer reordering) works in WebView2; the app takes no
 file drops. Keep one Kit workspace: Patch,
 Kit and Layer management belong on this screen, never in a second dialog that

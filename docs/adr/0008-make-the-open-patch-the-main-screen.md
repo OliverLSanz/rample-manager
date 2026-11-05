@@ -34,7 +34,9 @@ Consequences:
 - Library backup and restore still require a completed folder migration, so a
   Library that only ever held the demo cannot be backed up yet. This needs its
   own decision.
-- Library samples stays a dialog until a full Samples screen replaces it.
+- The Library is a **Samples** view beside the Kit view, not a dialog. It shows
+  where each Sample plays across Patches and adds Samples to any Kit of any
+  Patch without changing the open one.
 - Kits and Patches are deleted at once with an in-memory Undo instead of a
   confirmation. Deleting a Patch also unlinks the SD intakes that recognized
   it, in the same transaction, and Undo relinks them. The migration marker may

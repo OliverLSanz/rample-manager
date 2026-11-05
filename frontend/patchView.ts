@@ -84,3 +84,36 @@ export function heardLayer(voice: PatchVoice, active: number) {
     voice.layers.find((l) => l.id === voice.selectedLayer) ?? voice.layers[0]
   );
 }
+
+/** One Layer that plays a Sample. */
+export interface Usage {
+  patch: string;
+  patchName: string;
+  kit: string;
+  address: string;
+  channel: number;
+  /** One-based position in the Voice. */
+  position: number;
+}
+
+/** Every Layer of every Patch, by Sample ID, in Patch and Rample Kit order. */
+export function sampleUsage(graph: PatchSnapshot["graph"]) {
+  const usage = new Map<string, Usage[]>();
+  for (const patch of graph.patches)
+    for (const kit of sortedKits(patch))
+      kit.voices.forEach((voice, channel) =>
+        voice.layers.forEach((layer, index) => {
+          const list = usage.get(layer.sampleId) ?? [];
+          list.push({
+            patch: patch.id,
+            patchName: patch.name,
+            kit: kit.id,
+            address: kitAddress(kit),
+            channel,
+            position: index + 1,
+          });
+          usage.set(layer.sampleId, list);
+        }),
+      );
+  return usage;
+}
