@@ -138,7 +138,9 @@ fn relative(root: &Path, path: &Path) -> Result<String, String> {
         .collect::<Result<Vec<_>, String>>()
         .map(|parts| parts.join("/"))
 }
-fn address(name: &str) -> Option<(String, u8)> {
+/// The Bank and Kit number SD Import reads from a root folder name. Leading
+/// zeros are accepted, so `A05` is Kit A5.
+pub(crate) fn address(name: &str) -> Option<(String, u8)> {
     if !catalog::is_kit_name(name) {
         return None;
     }

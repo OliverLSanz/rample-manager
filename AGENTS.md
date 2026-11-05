@@ -132,7 +132,9 @@ tests use generated fixtures. BPM and sequencer steps remain app-only.
 Build owns only WAV files directly inside canonical Kit folders (`A0`–`Z99`, no
 leading zeros). Everything else, including `_save`, firmware, other files in Kit
 folders and names such as `A05`, is never written, removed or backed up; OS
-metadata is ignored. Case-insensitive name collisions block the review. A file
+metadata is ignored. Case-insensitive name collisions block the review, as does
+a non-canonical folder that SD Import's `address()` reads as a Patch Kit or a
+kept Kit (`A05` next to `A5`); unrelated non-canonical folders get a notice. A file
 is unchanged only when its hash is a recognized export of the same Sample and
 current Revision. Apply recomputes the review and refuses any difference in the
 Patch output or the owned destination state. Then it renders every changed Layer

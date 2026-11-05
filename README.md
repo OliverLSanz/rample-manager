@@ -132,7 +132,9 @@ audio and their folder is removed when nothing else is left in it. Native
 settings (`_save`), firmware, other files and folders, and non-canonical names
 such as `A05` are never changed or backed up. Names that would collide on a
 card that ignores letter case (for example an `a0` folder) block the build
-until you move them. **Apply Build** first rechecks that the Patch and the
+until you move them, and so does a non-canonical folder that **Import Rample
+SD…** would read as a built or kept Kit (for example `A05` when the Patch
+builds `A5`), because reimporting the card would keep only one of them. **Apply Build** first rechecks that the Patch and the
 reviewed Kit audio are unchanged; if anything changed, nothing is written and
 you review again. It then renders every Layer, copies every file it will
 replace or remove into `Patch build backups` in the application support

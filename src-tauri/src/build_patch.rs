@@ -140,6 +140,9 @@ struct Scan {
     others: HashMap<String, Vec<String>>,
     /// Every non-metadata name at the destination root.
     entries: Vec<String>,
+    /// Non-canonical folders that SD Import reads as a Kit, such as `A05`,
+    /// with the canonical Kit folder name it reads them as.
+    aliases: Vec<(String, String)>,
     conflicts: Vec<String>,
     notices: Vec<String>,
 }
@@ -153,7 +156,10 @@ fn scan(destination: &Path) -> Result<Scan, String> {
         }
         scan.entries.push(name.clone());
         if !canonical_kit(&name) {
-            if catalog::is_kit_name(&name.to_ascii_uppercase()) {
+            let folder = entry.file_type().map_err(read_error)?.is_dir();
+            if let Some((bank, number)) = sd_import::address(&name).filter(|_| folder) {
+                scan.aliases.push((name, format!("{bank}{number}")));
+            } else if catalog::is_kit_name(&name.to_ascii_uppercase()) {
                 scan.notices.push(format!(
                     "{name} is not a Kit folder name Build Patch uses (A0 to Z99), so it is left untouched."
                 ));
@@ -190,6 +196,7 @@ fn scan(destination: &Path) -> Result<Scan, String> {
     scan.folders.sort_by(|a, b| natord::compare(a, b));
     scan.files.sort_by(|a, b| natord::compare(&a.path, &b.path));
     scan.entries.sort();
+    scan.aliases.sort();
     scan.notices.sort();
     Ok(scan)
 }
@@ -418,12 +425,26 @@ impl ManagedLibrary {
             .cloned()
             .collect();
         let mut notices = found.notices.clone();
+        let mut kept = vec![];
         for kit in &removed_kits {
             let others = &found.others[kit];
             if !others.is_empty() {
+                kept.push(kit);
                 notices.push(format!(
                     "{kit} is not in the Patch. Its audio is removed, but the folder is kept because it also contains {}.",
                     others.join(", ")
+                ));
+            }
+        }
+        // SD Import reads `A05` as Kit A5 and keeps only one folder per Kit,
+        // so an alias next to a built or kept Kit folder would replace or hide
+        // it when this destination is imported again.
+        for (alias, kit) in &found.aliases {
+            if kits.contains(kit) || kept.contains(&kit) {
+                conflicts.push(format!("{alias} is read as Kit {kit} by SD Import, so it would collide with the Kit folder {kit} when this destination is imported. Move or rename {alias} before building onto this destination."));
+            } else {
+                notices.push(format!(
+                    "{alias} is not a Kit folder name Build Patch uses (A0 to Z99), so it is left untouched."
                 ));
             }
         }
@@ -1549,6 +1570,50 @@ mod tests {
         let error = state.apply_patch_build(review).unwrap_err();
         assert!(error.contains("Nothing was written"), "{error}");
         assert_eq!(contents(&card), before);
+    }
+
+    #[test]
+    fn leading_zero_kit_folders_that_import_as_a_built_or_kept_kit_block_the_build() {
+        let (temp, state, _) = fixture();
+        let (patch, _, _) = live_patch(&state, temp.path());
+        let destination = temp.path().join("Card");
+        populated_card(&destination);
+        // SD Import reads B01 as Kit B1 and C04 as Kit C4 (kept for info.txt).
+        foreign_wav(&destination, "B01/1_Stale.wav", 800);
+        foreign_wav(&destination, "C04/1_Stale.wav", 900);
+        let before = contents(&destination);
+
+        let review = state
+            .review_patch_build(patch.clone(), destination.clone())
+            .unwrap();
+
+        assert_eq!(review.conflicts.len(), 2, "{:?}", review.conflicts);
+        assert!(review.conflicts[0].starts_with("B01 is read as Kit B1"));
+        assert!(review.conflicts[1].starts_with("C04 is read as Kit C4"));
+        // A05 maps to A5, which is neither built nor kept: only a notice.
+        assert!(review.notices.iter().any(|n| n.starts_with("A05 ")));
+        let error = state.apply_patch_build(review).unwrap_err();
+        assert!(error.contains("Nothing was written"), "{error}");
+        assert_eq!(contents(&destination), before);
+
+        // Once the stale folders are moved away, reimporting the Build finds
+        // every built Kit, with no duplicate Bank/Kit address.
+        fs::remove_dir_all(destination.join("B01")).unwrap();
+        fs::remove_dir_all(destination.join("C04")).unwrap();
+        state.build_patch(patch, destination.clone()).unwrap();
+        let reimport = state.prepare_sd_import(destination).unwrap();
+        let issues = &reimport.draft.imported_sd.as_ref().unwrap().issues;
+        assert!(
+            !issues.iter().any(|i| i.contains("Duplicate")),
+            "{issues:?}"
+        );
+        let b1 = reimport
+            .draft
+            .kits
+            .iter()
+            .find(|k| k.bank == "B" && k.number == 1)
+            .unwrap();
+        assert_eq!(b1.voices[0].layers.len(), 1);
     }
 
     #[cfg(unix)]
