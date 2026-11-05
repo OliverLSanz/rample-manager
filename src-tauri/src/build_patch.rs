@@ -85,7 +85,7 @@ fn sync_directory(path: &Path) {
 fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or_default()
 }
 /// Copies `source` to a new file at `target` and returns the SHA-256 of the bytes
@@ -245,6 +245,9 @@ struct Manifest {
     written: Vec<DestinationFile>,
     /// Original bytes of every replaced or removed file.
     backed_up: Vec<BackedUpFile>,
+    /// Removable-media metadata of obsolete Kit folders the build removes.
+    #[serde(default)]
+    metadata: Vec<BackedUpFile>,
     /// Kit folders that did not exist before the build.
     new_folders: Vec<String>,
     /// Kit folders not in the Patch when it was built.
@@ -300,13 +303,14 @@ impl Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct BuildBackup {
     pub id: String,
-    /// Seconds since the Unix epoch.
+    /// Milliseconds since the Unix epoch.
     pub created: u64,
     pub patch_name: String,
     pub destination: String,
     /// `applying` (interrupted), `complete` or `incomplete`.
     pub status: String,
     pub error: Option<String>,
+    /// When the destination was last restored from this backup.
     pub restored: Option<u64>,
     pub folder: String,
     pub added: Vec<String>,
@@ -576,6 +580,7 @@ impl ManagedLibrary {
                 })
                 .collect(),
             backed_up: vec![],
+            metadata: vec![],
             new_folders: review
                 .kits
                 .iter()
@@ -603,7 +608,7 @@ impl ManagedLibrary {
         }
         let mut done = 0;
         let total = writes.len() + review.removals.len();
-        let published = publish(review, &writes, staged, destination, &mut done);
+        let published = publish(review, &manifest, &writes, staged, destination, &mut done);
         manifest.status = if published.is_ok() {
             "complete"
         } else {
@@ -662,9 +667,39 @@ fn back_up(
             file,
         });
     }
+    // Obsolete Kit folders left with only metadata are removed, so their
+    // metadata files are affected content too.
+    create(&folder.join("metadata"))?;
+    let removals: HashSet<&str> = review.removals.iter().map(String::as_str).collect();
+    for kit in &review.removed_kits {
+        let mut metadata = vec![];
+        let mut removable = true;
+        for entry in fs::read_dir(destination.join(kit)).map_err(read_error)? {
+            let entry = entry.map_err(read_error)?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = format!("{kit}/{name}");
+            if !sd_import::is_system_entry(&name) {
+                removable &= removals.contains(path.as_str());
+            } else if entry.file_type().map_err(read_error)?.is_file() {
+                metadata.push(path);
+            } else {
+                removable = false;
+            }
+        }
+        if !removable {
+            continue;
+        }
+        for path in metadata {
+            let file = format!("metadata/{:04}", manifest.metadata.len() + 1);
+            let sha256 = copy_hashed(&destination.join(&path), &folder.join(&file))
+                .map_err(|e| format!("Could not back up {path}: {e}."))?;
+            manifest.metadata.push(BackedUpFile { path, sha256, file });
+        }
+    }
     sync_directory(&folder.join("files"));
+    sync_directory(&folder.join("metadata"));
     // Verify the complete backup by reading every copy back.
-    for backed in &manifest.backed_up {
+    for backed in manifest.backed_up.iter().chain(&manifest.metadata) {
         if managed::fingerprint(&folder.join(&backed.file))
             .ok()
             .as_ref()
@@ -684,6 +719,7 @@ fn back_up(
 /// left with only metadata and validates every published file.
 fn publish(
     review: &BuildReview,
+    manifest: &Manifest,
     writes: &[&BuiltFile],
     staged: Vec<StagedExport>,
     destination: &Path,
@@ -712,10 +748,21 @@ fn publish(
     }
     for kit in &review.removed_kits {
         let folder = destination.join(kit);
-        if only_metadata(&folder)? {
-            fs::remove_dir_all(&folder)
-                .map_err(|e| format!("Could not remove the empty Kit folder {kit}: {e}"))?;
+        if !only_metadata(&folder)? {
+            continue;
         }
+        let prefix = format!("{kit}/");
+        for backed in manifest
+            .metadata
+            .iter()
+            .filter(|m| m.path.starts_with(&prefix))
+        {
+            fs::remove_file(destination.join(&backed.path))
+                .map_err(|e| format!("Could not remove {}: {e}", backed.path))?;
+        }
+        // Not recursive: anything that was not backed up keeps the folder.
+        fs::remove_dir(&folder)
+            .map_err(|e| format!("Could not remove the empty Kit folder {kit}: {e}"))?;
     }
     for kit in &review.kits {
         sync_directory(&destination.join(kit));
@@ -729,6 +776,202 @@ fn publish(
         }
     }
     Ok(())
+}
+
+fn load_manifest(backups: &Path, id: &str) -> Result<(Manifest, PathBuf), String> {
+    Uuid::parse_str(id).map_err(|_| "This destination backup does not exist.")?;
+    let folder = backups.join(id);
+    let bytes = fs::read(folder.join(MANIFEST))
+        .map_err(|e| format!("Could not read the destination backup: {e}"))?;
+    let manifest: Manifest = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Could not read the destination backup: {e}"))?;
+    if manifest.version != 1 || manifest.id != id {
+        return Err("This destination backup has an unsupported format.".into());
+    }
+    Ok((manifest, folder))
+}
+/// Every readable destination backup, newest first.
+fn list_backups(backups: &Path) -> Result<Vec<BuildBackup>, String> {
+    let entries = match fs::read_dir(backups) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(format!("Could not read the destination backups: {e}")),
+    };
+    let mut found = vec![];
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Could not read the destination backups: {e}"))?;
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if let Ok((manifest, folder)) = load_manifest(backups, &id) {
+            found.push(manifest.summary(&folder));
+        }
+    }
+    found.sort_by(|a, b| b.created.cmp(&a.created).then(b.id.cmp(&a.id)));
+    Ok(found)
+}
+/// The current SHA-256 of a destination file, or `None` when it is absent.
+fn current_hash(destination: &Path, path: &str) -> Result<Option<String>, String> {
+    let target = destination.join(path);
+    match fs::symlink_metadata(&target) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(read_error(e)),
+        Ok(meta) if meta.is_file() => managed::fingerprint(&target)
+            .map(Some)
+            .map_err(|e| format!("Could not read {path}: {e}")),
+        Ok(_) => Err(format!("{path} is not a file.")),
+    }
+}
+fn restore_file(backup: &Path, destination: &Path, path: &str) -> Result<(), String> {
+    let target = destination.join(path);
+    let parent = target.parent().ok_or("Invalid destination path.")?;
+    fs::create_dir_all(parent).map_err(|e| format!("Could not restore {path}: {e}"))?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".rample-restore-")
+        .tempfile_in(parent)
+        .map_err(|e| format!("Could not restore {path}: {e}"))?;
+    let mut input = File::open(backup).map_err(|e| format!("Could not restore {path}: {e}"))?;
+    std::io::copy(&mut input, temporary.as_file_mut())
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|e| format!("Could not restore {path}: {e}"))?;
+    temporary
+        .persist(&target)
+        .map_err(|e| format!("Could not restore {path}: {}", e.error))?;
+    Ok(())
+}
+enum Step<'a> {
+    Restore(&'a BackedUpFile),
+    Remove(&'a str),
+}
+/// Returns a destination to its state before one Build: files it added are
+/// removed and files it replaced or removed get their backed-up bytes back.
+/// Only files that still hold that Build's output, or are absent, are changed.
+fn restore_build(backups: &Path, id: &str, destination: &Path) -> Result<RestoreReply, String> {
+    let (mut manifest, folder) = load_manifest(backups, id)?;
+    if !destination.is_dir() {
+        return Err("Choose the existing folder or card to restore.".into());
+    }
+    let damaged: Vec<&str> = manifest
+        .backed_up
+        .iter()
+        .chain(&manifest.metadata)
+        .filter(|b| managed::fingerprint(&folder.join(&b.file)).ok().as_ref() != Some(&b.sha256))
+        .map(|b| b.path.as_str())
+        .collect();
+    if !damaged.is_empty() {
+        return Err(format!(
+            "The destination backup is damaged and cannot restore {}. Nothing was changed.",
+            damaged.join(", ")
+        ));
+    }
+    let originals: HashMap<&str, &BackedUpFile> = manifest
+        .backed_up
+        .iter()
+        .map(|b| (b.path.as_str(), b))
+        .collect();
+    let written: HashMap<&str, &str> = manifest
+        .written
+        .iter()
+        .map(|f| (f.path.as_str(), f.sha256.as_str()))
+        .collect();
+    let mut paths: Vec<&str> = originals.keys().chain(written.keys()).copied().collect();
+    paths.sort_by(|a, b| natord::compare(a, b));
+    paths.dedup();
+    let mut steps = vec![];
+    let mut conflicts = vec![];
+    for path in paths {
+        let current = match current_hash(destination, path) {
+            Ok(current) => current,
+            Err(error) => {
+                conflicts.push(error);
+                continue;
+            }
+        };
+        let original = originals.get(path);
+        if current.is_some() && current.as_deref() == original.map(|b| b.sha256.as_str()) {
+            continue;
+        }
+        if current.is_some() && current.as_deref() != written.get(path).copied() {
+            conflicts.push(format!("{path} changed after this Build."));
+            continue;
+        }
+        match (original, current) {
+            (Some(backed), _) => steps.push(Step::Restore(backed)),
+            (None, Some(_)) => steps.push(Step::Remove(path)),
+            (None, None) => {}
+        }
+    }
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "Restore would overwrite files that changed after this Build. Nothing was changed. Move them away, or restore the newer Build that changed them first.\n{}",
+            conflicts.join("\n")
+        ));
+    }
+    let total = steps.len();
+    let (mut restored, mut removed) = (0, 0);
+    let applied = (|| {
+        for step in &steps {
+            match step {
+                Step::Restore(backed) => {
+                    restore_file(&folder.join(&backed.file), destination, &backed.path)?;
+                    restored += 1;
+                }
+                Step::Remove(path) => {
+                    fs::remove_file(destination.join(path))
+                        .map_err(|e| format!("Could not remove {path}: {e}"))?;
+                    removed += 1;
+                }
+            }
+        }
+        for backed in &manifest.metadata {
+            if current_hash(destination, &backed.path)?.is_none() {
+                restore_file(&folder.join(&backed.file), destination, &backed.path)?;
+            }
+        }
+        for kit in &manifest.new_folders {
+            let path = destination.join(kit);
+            if path.is_dir() && only_metadata(&path)? {
+                fs::remove_dir_all(&path)
+                    .map_err(|e| format!("Could not remove the Kit folder {kit}: {e}"))?;
+            }
+        }
+        sync_directory(destination);
+        for backed in &manifest.backed_up {
+            if current_hash(destination, &backed.path)?.as_ref() != Some(&backed.sha256) {
+                return Err(format!("{} could not be verified", backed.path));
+            }
+        }
+        Ok::<_, String>(())
+    })();
+    if let Err(error) = applied {
+        return Err(format!(
+            "Restore did not complete: {error}. {} of {total} file changes were made. Restore again to finish; files already restored are skipped.",
+            restored + removed
+        ));
+    }
+    let mut notices = vec![];
+    manifest.restored = Some(now());
+    if let Err(error) = manifest.save(&folder) {
+        notices.push(format!(
+            "The destination was restored, but its backup record could not be updated: {error}."
+        ));
+    }
+    Ok(RestoreReply {
+        destination: destination.to_string_lossy().into_owned(),
+        restored,
+        removed,
+        backup: manifest.summary(&folder),
+        notices,
+    })
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReply {
+    pub destination: String,
+    /// Files that got their backed-up bytes back.
+    pub restored: usize,
+    /// Files the Build had added that were removed.
+    pub removed: usize,
+    pub backup: BuildBackup,
+    pub notices: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -787,6 +1030,19 @@ impl AppState {
             .map_err(|_| "Library is unavailable")?
             .apply_build(&review, &backups)
     }
+    pub fn patch_build_backups(&self) -> Result<Vec<BuildBackup>, String> {
+        list_backups(&self.support()?.join(BACKUPS))
+    }
+    pub fn restore_patch_build(
+        &self,
+        id: String,
+        destination: PathBuf,
+    ) -> Result<RestoreReply, String> {
+        let backups = self.support()?.join(BACKUPS);
+        // Serialized with builds, which hold the same lock.
+        let _library = self.managed.lock().map_err(|_| "Library is unavailable")?;
+        restore_build(&backups, &id, &destination)
+    }
     /// Reviews and applies in one step, failing on an incomplete Build.
     #[cfg(test)]
     pub fn build_patch(&self, patch: String, destination: PathBuf) -> Result<BuildReply, String> {
@@ -818,6 +1074,30 @@ pub async fn apply_patch_build(
     tauri::async_runtime::spawn_blocking(move || state.apply_patch_build(review))
         .await
         .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn patch_build_backups(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<BuildBackup>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.patch_build_backups())
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn restore_patch_build(
+    id: String,
+    destination: PathBuf,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<RestoreReply, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.restore_patch_build(id, destination))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub fn show_patch_build_backups(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+    super::open_backup_folder(&state, BACKUPS)
 }
 
 #[cfg(test)]
@@ -1280,6 +1560,7 @@ mod tests {
         let card = temp.path().join("Card");
         populated_card(&card);
         foreign_wav(&card, "B1/1_01_Snare.wav", 700);
+        let before = contents(&card);
         let review = state.review_patch_build(patch, card.clone()).unwrap();
         fs::set_permissions(card.join("B1"), fs::Permissions::from_mode(0o555)).unwrap();
 
@@ -1302,6 +1583,108 @@ mod tests {
             backup.replaced,
             vec!["A0/1_01_Kick.wav", "B1/1_01_Snare.wav"]
         );
+        assert_eq!(state.patch_build_backups().unwrap()[0].status, "incomplete");
+
+        // The partly updated card is restored to its reviewed state.
+        let restored = state.restore_patch_build(backup.id, card.clone()).unwrap();
+        assert_eq!((restored.restored, restored.removed), (4, 1));
+        assert_eq!(contents(&card), before);
+    }
+
+    #[test]
+    fn restoring_a_destination_backup_returns_the_card_to_its_reviewed_state() {
+        let (temp, state, _) = fixture();
+        let (patch, kick, _) = live_patch(&state, temp.path());
+        let card = temp.path().join("Card");
+        populated_card(&card);
+        let original = contents(&card);
+        let first = state.build_patch(patch.clone(), card.clone()).unwrap();
+        let first_card = contents(&card);
+        // A second Build adds D2 and replaces the Kick its first Build wrote.
+        kit(&state, "D", 2);
+        add(&state, 0, &kick);
+        let editor = state.open_managed_editor(0).unwrap();
+        let mut settings = editor.settings.clone();
+        settings.gain_db = -6.;
+        let saved = state
+            .save_managed_editor(editor.id, settings, None)
+            .unwrap();
+        state.close_editor(saved.editor.id).unwrap();
+        let second = state.build_patch(patch.clone(), card.clone()).unwrap();
+        assert_eq!((second.added, second.replaced), (1, 1));
+        let listed = state.patch_build_backups().unwrap();
+        assert_eq!(
+            listed.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+            vec![
+                second.backup.clone().unwrap().id,
+                first.backup.clone().unwrap().id
+            ]
+        );
+        assert_eq!(listed[1].patch_name, "Live");
+        assert_eq!(listed[1].status, "complete");
+
+        // The older Build's files were changed by the newer one: never overwritten.
+        let blocked = state
+            .restore_patch_build(first.backup.clone().unwrap().id, card.clone())
+            .unwrap_err();
+        assert!(blocked.contains("changed after this Build"), "{blocked}");
+        assert!(blocked.contains("Nothing was changed"), "{blocked}");
+
+        let newer = state
+            .restore_patch_build(second.backup.unwrap().id, card.clone())
+            .unwrap();
+        assert_eq!((newer.restored, newer.removed), (1, 1));
+        assert_eq!(contents(&card), first_card);
+        let older = state
+            .restore_patch_build(first.backup.clone().unwrap().id, card.clone())
+            .unwrap();
+        assert_eq!((older.restored, older.removed), (4, 2));
+        assert_eq!(contents(&card), original);
+        assert!(older.backup.restored.is_some());
+        // Restoring again is harmless.
+        state
+            .restore_patch_build(first.backup.unwrap().id, card.clone())
+            .unwrap();
+        assert_eq!(contents(&card), original);
+    }
+
+    #[test]
+    fn restore_refuses_files_changed_since_the_build_and_damaged_backups() {
+        let (temp, state, _) = fixture();
+        let (patch, _, _) = live_patch(&state, temp.path());
+        let card = temp.path().join("Card");
+        populated_card(&card);
+        let built = state.build_patch(patch, card.clone()).unwrap();
+        let backup = built.backup.unwrap();
+        foreign_wav(&card, "B1/1_01_Snare.wav", 900);
+        let edited = contents(&card);
+
+        let error = state
+            .restore_patch_build(backup.id.clone(), card.clone())
+            .unwrap_err();
+
+        assert!(
+            error.contains("B1/1_01_Snare.wav changed after this Build"),
+            "{error}"
+        );
+        assert_eq!(contents(&card), edited);
+        fs::remove_file(card.join("B1/1_01_Snare.wav")).unwrap();
+        let copy = fs::read_dir(Path::new(&backup.folder).join("files"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        fs::write(copy, b"damaged").unwrap();
+        let damaged = contents(&card);
+        let error = state
+            .restore_patch_build(backup.id, card.clone())
+            .unwrap_err();
+        assert!(error.contains("damaged"), "{error}");
+        assert_eq!(contents(&card), damaged);
+        assert!(state
+            .restore_patch_build("../escape".into(), card.clone())
+            .is_err());
     }
 
     #[test]

@@ -346,13 +346,14 @@ export interface BuildReview {
 /** Recoverable record of one applied Build Patch. */
 export interface BuildBackup {
   id: string;
-  /** Seconds since the Unix epoch. */
+  /** Milliseconds since the Unix epoch. */
   created: number;
   patchName: string;
   destination: string;
   /** `applying` means the Build was interrupted. */
   status: "applying" | "complete" | "incomplete";
   error: string | null;
+  /** When the destination was last restored from this backup (ms). */
   restored: number | null;
   folder: string;
   added: string[];
@@ -371,6 +372,15 @@ export interface BuildReply {
   backup: BuildBackup | null;
   /** Set when publication started but did not complete. */
   error: string | null;
+}
+export interface RestoreReply {
+  destination: string;
+  /** Files that got their backed-up bytes back. */
+  restored: number;
+  /** Files the Build had added that were removed. */
+  removed: number;
+  backup: BuildBackup;
+  notices: string[];
 }
 export type PatchAction =
   | { type: "open" }

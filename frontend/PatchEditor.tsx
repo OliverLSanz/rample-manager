@@ -2,7 +2,11 @@ import { LibrarySnapshots } from "./LibrarySnapshots";
 import { SdImport } from "./SdImport";
 import { useEffect, useRef, useState } from "react";
 import { SampleEditor } from "./SampleEditor";
-import { BuildResult, BuildReviewPanel } from "./BuildPatch";
+import {
+  BuildResult,
+  BuildReviewPanel,
+  DestinationBackups,
+} from "./BuildPatch";
 import { Modal } from "./Modal";
 import { LibrarySamples } from "./LibrarySamples";
 import { SequencerRow, TransportBar } from "./Sequencer";
@@ -45,6 +49,7 @@ export function PatchEditor({
   const [building, setBuilding] = useState<string | null>(null);
   const [review, setReview] = useState<BuildReview | null>(null);
   const [built, setBuilt] = useState<BuildReply | null>(null);
+  const [backups, setBackups] = useState<{ focus: string | null } | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [velocity, setVelocity] = useState<{
     channel: number;
@@ -310,6 +315,9 @@ export function PatchEditor({
             <button disabled={busy || !patch} onClick={() => void build()}>
               Build Patch…
             </button>
+            <button disabled={busy} onClick={() => setBackups({ focus: null })}>
+              Destination backups…
+            </button>
             <button disabled={busy} onClick={() => void act({ type: "open" })}>
               Refresh preview
             </button>
@@ -351,7 +359,18 @@ export function PatchEditor({
           />
         )}
         {built && (
-          <BuildResult built={built} onDismiss={() => setBuilt(null)} />
+          <BuildResult
+            built={built}
+            onRestore={(backup) => setBackups({ focus: backup })}
+            onDismiss={() => setBuilt(null)}
+          />
+        )}
+        {backups && (
+          <DestinationBackups
+            key={backups.focus ?? ""}
+            focus={backups.focus}
+            onClose={() => setBackups(null)}
+          />
         )}
         <fieldset disabled={busy} className="patch-settings">
           <label>

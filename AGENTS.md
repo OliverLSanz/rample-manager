@@ -141,7 +141,13 @@ through `stage_export`, copies and verifies every replaced or removed file under
 publication, then `complete` or `incomplete`), registers the exports and only
 then removes, writes and validates. Errors before publication must say nothing
 was written; failures after it return an incomplete reply with its backup and
-progress, never success. Layer files are `<Voice>_<two-digit position>_<safe
+progress, never success. Metadata files (`.DS_Store`) of obsolete Kit folders
+that Build removes are backed up too. `restore_patch_build(id, destination)`
+undoes one Build: it verifies the backup copies, refuses (changing nothing)
+when any affected file holds neither that Build's output, its original bytes nor
+is absent, then removes added files, restores originals via temp file + rename,
+restores metadata and removes Kit folders the Build created. It is idempotent.
+Layer files are `<Voice>_<two-digit position>_<safe
 suffix>.wav`, so natural and byte order agree; user-facing Sample names are
 never changed. Never write `_save`, Layer modes, selections, BPM or sequencer
 state.

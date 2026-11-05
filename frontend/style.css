@@ -1557,6 +1557,14 @@ footer > span {
   border: 1px solid #d9735555;
   border-radius: 6px;
 }
+.patch-build ul.patch-build-backups {
+  list-style: none;
+  padding: 0;
+}
+.patch-build-backups li {
+  padding: 8px 0;
+  border-top: 1px solid #ffffff1a;
+}
 .patch-build-actions {
   display: flex;
   gap: 8px;

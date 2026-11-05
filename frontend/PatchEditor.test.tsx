@@ -17,6 +17,9 @@ vi.mock("./native", () => ({
   patchAction: vi.fn(),
   reviewPatchBuild: vi.fn(),
   applyPatchBuild: vi.fn(),
+  patchBuildBackups: vi.fn(),
+  restorePatchBuild: vi.fn(),
+  showPatchBuildBackups: vi.fn(),
   closePatch: vi.fn(),
   listSamples: vi.fn(),
   querySamples: vi.fn(),
@@ -596,4 +599,145 @@ it("reports a blocked review without claiming output and ignores a cancelled fol
   expect(
     screen.queryByRole("region", { name: "Build Patch review" }),
   ).toBeNull();
+});
+
+it("lists destination backups and restores one after confirmation", async () => {
+  vi.mocked(native.patchAction).mockResolvedValue(view());
+  const interrupted = {
+    ...backup,
+    id: "backup-2",
+    patchName: "Old set",
+    status: "applying" as const,
+    added: [],
+    replaced: [],
+    removed: ["B1/1_Old.wav"],
+  };
+  vi.mocked(native.patchBuildBackups).mockResolvedValue([backup, interrupted]);
+  vi.mocked(native.restorePatchBuild).mockResolvedValue({
+    destination: "/Volumes/RAMPLE",
+    restored: 3,
+    removed: 1,
+    backup: { ...backup, restored: 1_800_000_100_000 },
+    notices: [],
+  });
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  await screen.findByDisplayValue("Live set");
+  fireEvent.click(screen.getByRole("button", { name: "Destination backups…" }));
+  const panel = await screen.findByRole("region", {
+    name: "Destination backups",
+  });
+  const first = within(panel).getByRole("listitem", {
+    name: "Live set → /Volumes/RAMPLE",
+  });
+  expect(
+    within(first).getByText("Added 1, replaced 1 and removed 2 files."),
+  ).toBeTruthy();
+  expect(within(first).getByText("Complete")).toBeTruthy();
+  const second = within(panel).getByRole("listitem", {
+    name: "Old set → /Volumes/RAMPLE",
+  });
+  expect(
+    within(second).getByText(
+      "Interrupted: the destination may be only partly updated.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(within(first).getByRole("button", { name: "Restore…" }));
+  expect(
+    within(first).getByText(/Files this Build added are removed/),
+  ).toBeTruthy();
+  expect(native.restorePatchBuild).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(first).getByRole("button", { name: "Restore destination" }),
+  );
+  await vi.waitFor(() =>
+    expect(native.restorePatchBuild).toHaveBeenCalledWith(
+      "backup-1",
+      "/Volumes/RAMPLE",
+    ),
+  );
+  expect(
+    await within(panel).findByText(
+      "Restored /Volumes/RAMPLE: 3 files put back and 1 removed.",
+    ),
+  ).toBeTruthy();
+  expect(native.patchBuildBackups).toHaveBeenCalledTimes(2);
+
+  vi.mocked(native.restorePatchBuild).mockRejectedValue(
+    "Restore would overwrite files that changed after this Build. Nothing was changed.\nB1/1_Old.wav changed after this Build.",
+  );
+  const again = within(panel).getByRole("listitem", {
+    name: "Old set → /Volumes/RAMPLE",
+  });
+  fireEvent.click(within(again).getByRole("button", { name: "Restore…" }));
+  fireEvent.click(
+    within(again).getByRole("button", { name: "Restore destination" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(
+    within(alert).getByText("B1/1_Old.wav changed after this Build."),
+  ).toBeTruthy();
+});
+
+it("offers restoring the destination of an incomplete Build, including at another folder", async () => {
+  vi.mocked(native.patchAction).mockResolvedValue(view());
+  vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/RAMPLE");
+  vi.mocked(native.reviewPatchBuild).mockResolvedValue(buildReview());
+  const error = "Build Patch did not complete: Could not write B1.";
+  const incomplete = { ...backup, status: "incomplete" as const, error };
+  vi.mocked(native.applyPatchBuild).mockResolvedValue({
+    destination: "/Volumes/RAMPLE",
+    kits: ["A0"],
+    files: builtFiles,
+    notices: [],
+    added: 1,
+    replaced: 1,
+    removed: 2,
+    unchanged: 0,
+    backup: incomplete,
+    error,
+  });
+  vi.mocked(native.patchBuildBackups).mockResolvedValue([incomplete]);
+  vi.mocked(native.restorePatchBuild).mockResolvedValue({
+    destination: "/Volumes/OTHER",
+    restored: 3,
+    removed: 1,
+    backup: incomplete,
+    notices: [],
+  });
+  render(<PatchEditor managed transport={idleTransport} onClose={() => {}} />);
+  await screen.findByDisplayValue("Live set");
+  fireEvent.click(screen.getByRole("button", { name: "Build Patch…" }));
+  fireEvent.click(
+    within(
+      await screen.findByRole("region", { name: "Build Patch review" }),
+    ).getByRole("button", { name: "Apply Build" }),
+  );
+  const result = await screen.findByRole("region", {
+    name: "Build Patch result",
+  });
+  fireEvent.click(
+    within(result).getByRole("button", { name: "Restore destination…" }),
+  );
+  const panel = await screen.findByRole("region", {
+    name: "Destination backups",
+  });
+  const item = within(panel).getByRole("listitem", {
+    name: "Live set → /Volumes/RAMPLE",
+  });
+  expect(within(item).getByText(`Incomplete: ${error}`)).toBeTruthy();
+  vi.mocked(native.chooseFolder).mockResolvedValue("/Volumes/OTHER");
+  fireEvent.click(
+    within(item).getByRole("button", { name: "Restore another folder…" }),
+  );
+  await vi.waitFor(() =>
+    expect(native.restorePatchBuild).toHaveBeenCalledWith(
+      "backup-1",
+      "/Volumes/OTHER",
+    ),
+  );
+  expect(
+    await within(panel).findByText(
+      "Restored /Volumes/OTHER: 3 files put back and 1 removed.",
+    ),
+  ).toBeTruthy();
 });

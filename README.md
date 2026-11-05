@@ -147,6 +147,18 @@ edits instead of adding new Originals. Build never writes `_save`, Layer modes,
 selected Layers, BPM or patterns: set modes on the Rample and STORE. Settings
 stored on the device that no longer match its files are yours to update there.
 
+**Destination backups…** lists every Build that changed a folder or card, with
+its Patch, destination, time and status (complete, incomplete or interrupted);
+a Build's result links straight to its backup. **Restore…** asks for
+confirmation, then returns that destination to its state before the Build:
+files the Build added are removed, files it replaced or removed get their
+backed-up bytes back (verified by SHA-256), and Kit folders it created or
+removed are undone. Use **Restore another folder…** when the card mounts
+elsewhere. Restore only changes files that still hold that Build's output or
+are missing; if anything changed since, nothing is changed and the files are
+listed. To step back several Builds, restore the newest first. Restoring again
+is harmless. `_save` and all other content stay untouched.
+
 Existing folder sessions show **Move current folder into Library**. Migration copies
 and validates audio in bounded chunks, backs up the saved session byte for byte as
 `session-before-managed.backup.json`, and preserves Kits, selected filenames,

@@ -123,6 +123,15 @@ export const reviewPatchBuild = (patch: string, destination: string) =>
   });
 export const applyPatchBuild = (review: import("./types").BuildReview) =>
   invoke<import("./types").BuildReply>("apply_patch_build", { review });
+export const patchBuildBackups = () =>
+  invoke<import("./types").BuildBackup[]>("patch_build_backups");
+export const restorePatchBuild = (id: string, destination: string) =>
+  invoke<import("./types").RestoreReply>("restore_patch_build", {
+    id,
+    destination,
+  });
+export const showPatchBuildBackups = () =>
+  invoke<void>("show_patch_build_backups");
 
 export const openManagedEditor = (channel: number) =>
   invoke<EditorInfo>("open_managed_editor", { channel });
