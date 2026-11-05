@@ -1527,6 +1527,21 @@ footer > span {
   margin: 8px 0 0;
   padding-left: 18px;
 }
+.patch-build {
+  padding: 12px 16px;
+  background: #7fbf8a12;
+  border: 1px solid #7fbf8a55;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.patch-build p {
+  margin: 0 0 8px;
+}
+.patch-build ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
 .patch-voices {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

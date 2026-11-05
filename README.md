@@ -114,6 +114,22 @@ workspace and which also applies to new Kits. The Rample's global LAYER setting
 is not read. Unverified or unreadable values use that default and are listed
 in the review.
 
+**Build Patch…** writes the selected Patch to an empty folder or freshly
+formatted card (operating-system metadata such as `.Spotlight-V100` is ignored;
+updating a populated card is not supported yet). Every Kit and every ordered
+Layer, including repeated occurrences, becomes a Bank/Kit folder and a mono
+PCM16 44.1 kHz WAV of at least 50 ms rendered from its Original and saved
+Sample Edits, exactly as Kit preview plays it. Files are named
+`<Voice>_<position>_<name>.wav`, for example `A0/1_01_Warm_kick.wav` and
+`A0/1_02_Snare.wav`, so the Rample's numerical/alphabetical sort keeps the
+intended Layer order; Library names are unchanged. Build first checks Voice 1,
+the 12-Layer limit and all audio, listing every problem; nothing is written
+until everything is ready, and a failed build removes its partial output.
+Originals are never modified. Built files are recognized by **Import Rample
+SD…** and **Import samples**, so reimporting a build keeps Samples and their
+edits instead of adding new Originals. Build never writes `_save`, Layer modes,
+selected Layers, BPM or patterns: set modes on the Rample and STORE.
+
 Existing folder sessions show **Move current folder into Library**. Migration copies
 and validates audio in bounded chunks, backs up the saved session byte for byte as
 `session-before-managed.backup.json`, and preserves Kits, selected filenames,

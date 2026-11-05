@@ -310,6 +310,21 @@ export interface PatchSnapshot {
   validation: string[];
   playing: boolean;
 }
+export interface BuiltFile {
+  /** Destination-relative path with `/` separators. */
+  path: string;
+  kit: string;
+  voice: number;
+  layer: number;
+  sampleId: string;
+  sampleName: string;
+}
+export interface BuildReply {
+  destination: string;
+  kits: string[];
+  files: BuiltFile[];
+  notices: string[];
+}
 export type PatchAction =
   | { type: "open" }
   | { type: "createPatch" | "renamePatch"; name: string }

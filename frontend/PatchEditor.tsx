@@ -9,6 +9,7 @@ import * as native from "./native";
 import {
   modes,
   type Action,
+  type BuildReply,
   type EditorInfo,
   type LayerMode,
   type PatchAction,
@@ -39,6 +40,8 @@ export function PatchEditor({
   const [bank, setBank] = useState("A");
   const [number, setNumber] = useState(0);
   const [editor, setEditor] = useState<EditorInfo | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [built, setBuilt] = useState<BuildReply | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [velocity, setVelocity] = useState<{
     channel: number;
@@ -107,6 +110,29 @@ export function PatchEditor({
   }
   async function musical(action: Action) {
     await act({ type: "musical", action });
+  }
+  async function build() {
+    if (!patch || busy) return;
+    const destination = await native.chooseFolder(
+      "Choose an empty folder or SD card for Build Patch",
+    );
+    if (!destination || !alive.current) return;
+    setBusy(true);
+    setBuilding(true);
+    setBuilt(null);
+    setError(null);
+    try {
+      await queue.current.catch(() => {});
+      const reply = await native.buildPatch(patch.id, destination);
+      if (alive.current) setBuilt(reply);
+    } catch (e) {
+      if (alive.current) setError(String(e));
+    } finally {
+      if (alive.current) {
+        setBuilding(false);
+        setBusy(false);
+      }
+    }
   }
   async function close() {
     if (busy || managed) return;
@@ -258,6 +284,9 @@ export function PatchEditor({
             <button disabled={busy} onClick={() => setSdImport(true)}>
               Import Rample SD…
             </button>
+            <button disabled={busy || !patch} onClick={() => void build()}>
+              Build Patch…
+            </button>
             <button disabled={busy} onClick={() => void act({ type: "open" })}>
               Refresh preview
             </button>
@@ -280,8 +309,52 @@ export function PatchEditor({
             )}
           </div>
         </header>
-        {error && <p role="alert">{error}</p>}
-        {busy && <p role="status">Saving and preparing preview…</p>}
+        {error && (
+          <div role="alert">
+            {error.split("\n").map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </div>
+        )}
+        {busy && (
+          <p role="status">
+            {building ? "Building Patch…" : "Saving and preparing preview…"}
+          </p>
+        )}
+        {built && (
+          <section className="patch-build" aria-label="Build Patch result">
+            <p>
+              Built {built.kits.length}{" "}
+              {built.kits.length === 1 ? "Kit" : "Kits"} and{" "}
+              {built.files.length}{" "}
+              {built.files.length === 1 ? "audio file" : "audio files"} into{" "}
+              {built.destination}.
+            </p>
+            <p>
+              Only Bank/Kit folders and prepared audio were written. Layer modes
+              and selections are preview settings in this app: set them on the
+              Rample and STORE.
+            </p>
+            {built.notices.length > 0 && (
+              <ul>
+                {built.notices.map((notice, i) => (
+                  <li key={i}>{notice}</li>
+                ))}
+              </ul>
+            )}
+            <details>
+              <summary>Built files in Layer order</summary>
+              <ul>
+                {built.files.map((file) => (
+                  <li key={file.path}>
+                    {`${file.path} · Voice ${file.voice}, Layer ${file.layer}: ${file.sampleName}`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+            <button onClick={() => setBuilt(null)}>Dismiss</button>
+          </section>
+        )}
         <fieldset disabled={busy} className="patch-settings">
           <label>
             Selected Patch
@@ -661,8 +734,9 @@ export function PatchEditor({
           </>
         )}
         <p className="patch-native-note">
-          Drafts are saved on this computer. Native SD settings and Build Patch
-          are pending device verification.
+          Drafts are saved on this computer. Build Patch writes Bank/Kit folders
+          and prepared audio to an empty folder or card; it never writes native
+          SD settings (_save).
         </p>
       </div>
     </Modal>
