@@ -181,6 +181,8 @@ export default function App() {
   const [built, setBuilt] = useState<BuildReply | null>(null);
   const [backups, setBackups] = useState<{ focus: string | null } | null>(null);
   const [migrationHidden, setMigrationHidden] = useState(false);
+  // Counts deletions so each one restarts the Undo offer; 0 hides it.
+  const [undoOffer, setUndoOffer] = useState(0);
   const alive = useRef(true);
   const queue = useRef(Promise.resolve());
   // Bumped when a Library restore replaces every Patch: older replies are stale.
@@ -219,6 +221,22 @@ export default function App() {
     [act],
   );
   const onPatch = useCallback((action: PatchAction) => void act(action), [act]);
+  /** Deletes a Kit or Patch, then offers Undo for a few seconds. */
+  const remove = useCallback(
+    async (action: PatchAction) => {
+      if (await act(action)) setUndoOffer((n) => n + 1);
+    },
+    [act],
+  );
+  const undo = useCallback(() => {
+    setUndoOffer(0);
+    void act({ type: "undoDelete" });
+  }, [act]);
+  useEffect(() => {
+    if (!undoOffer) return;
+    const timer = setTimeout(() => setUndoOffer(0), 10000);
+    return () => clearTimeout(timer);
+  }, [undoOffer]);
   const onMode = useCallback(
     (channel: number, mode: LayerMode) =>
       void musical({ type: "setMode", channel, mode }),
@@ -294,6 +312,20 @@ export default function App() {
     function key(e: KeyboardEvent) {
       if (overlay || !view) return;
       if (
+        undoOffer &&
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "z" &&
+        !(
+          e.target instanceof Element &&
+          e.target.closest('input,textarea,[contenteditable="true"]')
+        )
+      ) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (
         e.target instanceof Element &&
         e.target.closest(
           'button,a[href],input,textarea,select,[role="button"],[contenteditable="true"]',
@@ -311,7 +343,7 @@ export default function App() {
     }
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [overlay, view, musical]);
+  }, [overlay, view, musical, undoOffer, undo]);
 
   const samples = useMemo(
     () => new Map<string, LibrarySample>(view?.samples.map((s) => [s.id, s])),
@@ -407,6 +439,7 @@ export default function App() {
           issues={issues}
           samples={samples}
           onPatch={act}
+          onDelete={(kit) => void remove({ type: "deleteKit", kit })}
         />
         <div className="sidebar-bottom">
           <button className="folder-button" onClick={() => setLibrary(true)}>
@@ -431,6 +464,7 @@ export default function App() {
             patch={patch}
             onPatch={act}
             onImport={() => setSdImport(true)}
+            onDelete={(patch) => void remove({ type: "deletePatch", patch })}
           />
           <div className="header-actions">
             <span className="live-state">
@@ -698,22 +732,36 @@ export default function App() {
           </footer>
         </div>
       </main>
-      {error && (
-        <div className="toast" role="alert">
-          <TriangleAlert size={17} />
-          <span>
-            {error.split("\n").map((line, i) => (
-              <span key={i}>
-                {i > 0 && <br />}
-                {line}
-              </span>
-            ))}
-          </span>
-          <button aria-label="Dismiss error" onClick={() => setError(null)}>
-            <X size={15} />
-          </button>
-        </div>
-      )}
+      <div className="toasts">
+        {undoOffer > 0 && view.undo && (
+          <div className="toast undo-toast" role="status">
+            <span>Deleted {view.undo}</span>
+            <button className="undo-button" onClick={undo}>
+              Undo{" "}
+              <kbd>{/Mac/i.test(navigator.platform) ? "⌘Z" : "Ctrl+Z"}</kbd>
+            </button>
+            <button aria-label="Dismiss" onClick={() => setUndoOffer(0)}>
+              <X size={15} />
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="toast" role="alert">
+            <TriangleAlert size={17} />
+            <span>
+              {error.split("\n").map((line, i) => (
+                <span key={i}>
+                  {i > 0 && <br />}
+                  {line}
+                </span>
+              ))}
+            </span>
+            <button aria-label="Dismiss error" onClick={() => setError(null)}>
+              <X size={15} />
+            </button>
+          </div>
+        )}
+      </div>
       {sdImport && (
         <SdImport
           onClose={() => setSdImport(false)}

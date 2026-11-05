@@ -270,6 +270,8 @@ export interface PatchSnapshot {
   waveforms?: Record<string, number[]>;
   validation: string[];
   playing: boolean;
+  /** What undoDelete would restore, such as "Kit A3". */
+  undo?: string | null;
 }
 export interface BuiltFile {
   /** Destination-relative path with `/` separators. */
@@ -351,7 +353,14 @@ export type PatchAction =
   | { type: "createPatch" | "renamePatch"; name: string }
   | { type: "selectPatch"; patch: string }
   | { type: "setDefaultMode"; mode: LayerMode }
-  | { type: "createKit" | "addressKit"; bank: string; number: number }
+  | { type: "createKit"; bank: string; number: number }
+  /** Moves `kit`, or the selected Kit when absent. */
+  | { type: "addressKit"; bank: string; number: number; kit?: string }
+  | { type: "duplicateKit"; kit: string; bank: string; number: number }
+  | { type: "deleteKit"; kit: string }
+  | { type: "duplicatePatch"; patch: string; name: string }
+  | { type: "deletePatch"; patch: string }
+  | { type: "undoDelete" }
   | { type: "selectKit"; kit: string }
   | { type: "addLayer"; channel: number; sample: string }
   | { type: "removeLayer" | "selectLayer"; channel: number; layer: string }

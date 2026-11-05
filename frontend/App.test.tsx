@@ -265,10 +265,14 @@ describe("Patch-first main screen", () => {
     );
   });
 
-  it("changes the selected Kit's address and keeps the form open on failure", async () => {
+  it("changes a Kit's address from its menu and keeps the form open on failure", async () => {
     await openApp();
+    fireEvent.click(screen.getByRole("button", { name: "Kit A0 actions" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Change address of Kit A0" }),
+      within(screen.getByRole("menu", { name: "Kit A0 actions" })).getByRole(
+        "menuitem",
+        { name: /Change address/ },
+      ),
     );
     const form = screen.getByRole("form", {
       name: "Change address of Kit A0",
@@ -292,6 +296,7 @@ describe("Patch-first main screen", () => {
       type: "addressKit",
       bank: "A",
       number: 4,
+      kit: "kit",
     });
     expect(
       screen.getByRole("form", { name: "Change address of Kit A0" }),
@@ -303,6 +308,113 @@ describe("Patch-first main screen", () => {
     expect(
       screen.queryByRole("form", { name: "Change address of Kit A0" }),
     ).toBeNull();
+  });
+
+  it("groups Kits by Bank and folds a Bank unless it holds the selected Kit", async () => {
+    await openApp();
+    const kits = screen.getByRole("navigation", { name: "Sample kits" });
+    const a = within(kits).getByRole("button", { name: /BANK A/ });
+    const b = within(kits).getByRole("button", { name: /BANK B/ });
+    fireEvent.click(b);
+    expect(b.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      within(kits).queryByRole("button", { name: "Load kit B12" }),
+    ).toBeNull();
+    // The selected Kit stays visible.
+    fireEvent.click(a);
+    expect(
+      within(kits).getByRole("button", { name: "Load kit A0" }),
+    ).toBeTruthy();
+    // Searching shows every match, even in a folded Bank.
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Search kits or samples" }),
+      { target: { value: "b12" } },
+    );
+    expect(
+      within(kits).getByRole("button", { name: "Load kit B12" }),
+    ).toBeTruthy();
+  });
+
+  it("duplicates a Kit to the next free address in its Bank", async () => {
+    await openApp();
+    fireEvent.click(screen.getByRole("button", { name: "Kit B12 actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Duplicate/ }));
+    const form = screen.getByRole("form", { name: "Duplicate Kit B12" });
+    expect(
+      (
+        within(form).getByRole("combobox", {
+          name: "Bank",
+        }) as HTMLSelectElement
+      ).value,
+    ).toBe("B");
+    expect(
+      (
+        within(form).getByRole("textbox", {
+          name: "Kit number",
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("0");
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Duplicate Kit" }),
+    );
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "duplicateKit",
+        kit: "other-kit",
+        bank: "B",
+        number: 0,
+      }),
+    );
+  });
+
+  it("deletes a Kit at once and offers Undo, also with the keyboard", async () => {
+    const user = userEvent.setup();
+    await openApp();
+    const deleted = view();
+    deleted.graph.patches[0].kits.shift();
+    deleted.undo = "Kit B12";
+    vi.mocked(native.patchAction).mockResolvedValueOnce(deleted);
+    await user.click(screen.getByRole("button", { name: "Kit B12 actions" }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete Kit/ }));
+    expect(native.patchAction).toHaveBeenLastCalledWith({
+      type: "deleteKit",
+      kit: "other-kit",
+    });
+    const toast = (await screen.findByText("Deleted Kit B12")).closest(
+      ".toast",
+    ) as HTMLElement;
+    expect(toast.getAttribute("role")).toBe("status");
+    await user.click(within(toast).getByRole("button", { name: /Undo/ }));
+    expect(native.patchAction).toHaveBeenLastCalledWith({ type: "undoDelete" });
+    expect(screen.queryByText("Deleted Kit B12")).toBeNull();
+
+    // Arrow keys move between Kits; Delete removes the focused one.
+    screen.getByRole("button", { name: "Load kit A0" }).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(native.patchAction).toHaveBeenLastCalledWith({
+      type: "selectKit",
+      kit: "other-kit",
+    });
+    // Focus follows the selection, so the arrows keep walking the list.
+    await vi.waitFor(() =>
+      expect(document.activeElement?.getAttribute("aria-label")).toBe(
+        "Load kit B12",
+      ),
+    );
+    vi.mocked(native.patchAction).mockResolvedValueOnce({
+      ...view(),
+      undo: "Kit A0",
+    });
+    screen.getByRole("button", { name: "Load kit A0" }).focus();
+    await user.keyboard("{Delete}");
+    expect(native.patchAction).toHaveBeenLastCalledWith({
+      type: "deleteKit",
+      kit: "kit",
+    });
+    await screen.findByText("Deleted Kit A0");
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard("{Meta>}z{/Meta}");
+    expect(native.patchAction).toHaveBeenLastCalledWith({ type: "undoDelete" });
   });
 
   it("manages each Voice's ordered Layers from its card", async () => {
@@ -475,7 +587,7 @@ describe("Patch switcher", () => {
         .getByRole("button", { name: /Live set/, pressed: true })
         .getAttribute("aria-pressed"),
     ).toBe("true");
-    fireEvent.click(within(menu).getByRole("button", { name: /Studio/ }));
+    fireEvent.click(within(menu).getByRole("button", { name: /^Studio/ }));
     await vi.waitFor(() =>
       expect(native.patchAction).toHaveBeenLastCalledWith({
         type: "selectPatch",
@@ -516,6 +628,39 @@ describe("Patch switcher", () => {
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Patches" })).toBeNull();
+  });
+
+  it("duplicates and deletes Patches, offering Undo for the deletion", async () => {
+    await openApp();
+    fireEvent.click(screen.getByRole("button", { name: "Patch Live set" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Duplicate Patch Live set" }),
+    );
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "duplicatePatch",
+        patch: "patch",
+        name: "Live set copy",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Patches" })).toBeNull(),
+    );
+    const deleted = view();
+    deleted.graph.patches.pop();
+    deleted.undo = "Patch Studio";
+    vi.mocked(native.patchAction).mockResolvedValue(deleted);
+    fireEvent.click(screen.getByRole("button", { name: "Patch Live set" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete Patch Studio" }),
+    );
+    await vi.waitFor(() =>
+      expect(native.patchAction).toHaveBeenLastCalledWith({
+        type: "deletePatch",
+        patch: "studio",
+      }),
+    );
+    expect(await screen.findByText("Deleted Patch Studio")).toBeTruthy();
   });
 
   it("sets the Library default Layer mode used for new and never-stored Kits", async () => {

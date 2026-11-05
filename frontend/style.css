@@ -213,17 +213,6 @@ svg {
 .search button {
   padding: 0;
 }
-.bank-filter {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 22px 13px;
-  color: #a1a8b3;
-  font-size: 11px;
-}
-.bank-filter select {
-  flex: 1;
-}
 .kit-list {
   overflow-y: auto;
   flex: 1;
@@ -277,12 +266,6 @@ svg {
 .kit-warning {
   display: flex;
   color: #d1a963;
-}
-.kit-edit {
-  padding: 8px;
-  margin-right: 5px;
-  color: var(--muted);
-  border-radius: 5px;
 }
 .library-heading {
   align-items: center;
@@ -904,11 +887,20 @@ footer > span {
   text-align: right;
   line-height: 1.4;
 }
-.toast {
+.toasts {
   position: fixed;
   bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -1725,4 +1717,105 @@ footer > span {
 .empty-state .secondary {
   display: inline-flex;
   gap: 7px;
+}
+
+/* Kit groups and actions */
+.bank-group + .bank-group {
+  margin-top: 6px;
+}
+.bank-heading {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 8px 6px 6px;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1.4px;
+  color: var(--muted);
+}
+.bank-heading:disabled {
+  opacity: 1;
+}
+.bank-heading > svg {
+  transition: transform 0.12s;
+}
+.bank-heading[aria-expanded="false"] > svg {
+  transform: rotate(-90deg);
+}
+.bank-heading small {
+  margin-left: auto;
+  font: 10px var(--mono);
+  letter-spacing: 0;
+}
+.kit {
+  position: relative;
+}
+.kit-more {
+  padding: 8px;
+  margin-right: 4px;
+  color: var(--muted);
+  border-radius: 5px;
+  opacity: 0;
+}
+.kit:hover .kit-more,
+.kit.selected .kit-more,
+.kit.menu-open .kit-more,
+.kit-more:focus-visible {
+  opacity: 1;
+}
+.kit:hover:not(.selected) {
+  background: #ffffff05;
+}
+.kit-menu {
+  position: absolute;
+  top: calc(100% - 6px);
+  right: 4px;
+  z-index: 5;
+  min-width: 170px;
+  padding: 5px;
+  border: 1px solid #ffffff15;
+  border-radius: 9px;
+  background: #22272e;
+  box-shadow: 0 12px 40px #0009;
+  display: flex;
+  flex-direction: column;
+}
+.kit-menu button {
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.kit-menu button:hover,
+.kit-menu button:focus-visible {
+  background: #ffffff0a;
+  outline: none;
+}
+.kit-menu .danger,
+.patch-actions .danger:hover {
+  color: #f3a394;
+}
+.patch-actions {
+  display: flex;
+  opacity: 0;
+}
+.patch-popover li:hover .patch-actions,
+.patch-popover li:focus-within .patch-actions {
+  opacity: 1;
+}
+.undo-toast {
+  border-color: #ffffff20;
+  background: #262b31;
+  padding: 11px 12px 11px 16px;
+}
+.undo-button {
+  color: var(--accent);
+  font-weight: 650;
+  font-size: 12px;
+  margin-left: 6px;
+}
+.undo-button kbd {
+  font-size: 9px;
+  color: var(--muted);
 }

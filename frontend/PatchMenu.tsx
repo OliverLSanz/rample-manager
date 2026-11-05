@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
+  Copy,
   Disc3,
   HardDriveDownload,
   Pencil,
   Plus,
+  Trash2,
 } from "lucide-react";
 import {
   modes,
@@ -16,19 +18,22 @@ import {
 } from "./types";
 
 /**
- * The open Patch and the way to another one. Choosing, creating or importing a
- * Patch returns to the Kit view with that Patch loaded.
+ * The open Patch and the way to another one. Choosing, creating, duplicating
+ * or importing a Patch returns to the Kit view with that Patch loaded.
  */
 export function PatchMenu({
   view,
   patch,
   onPatch,
   onImport,
+  onDelete,
 }: {
   view: PatchSnapshot;
   patch: Patch | undefined;
   onPatch: (action: PatchAction) => Promise<boolean>;
   onImport: () => void;
+  /** Deletes a Patch and offers to undo it. */
+  onDelete: (patch: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -134,19 +139,43 @@ export function PatchMenu({
                         </span>
                         {current && <Check size={13} />}
                       </button>
-                      {current && (
+                      <span className="patch-actions">
+                        {current && (
+                          <button
+                            className="icon-button"
+                            aria-label={`Rename Patch ${p.name}`}
+                            title="Rename"
+                            onClick={() => {
+                              setName(p.name);
+                              setRenaming(true);
+                            }}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
                         <button
                           className="icon-button"
-                          aria-label={`Rename Patch ${p.name}`}
-                          title="Rename"
-                          onClick={() => {
-                            setName(p.name);
-                            setRenaming(true);
-                          }}
+                          aria-label={`Duplicate Patch ${p.name}`}
+                          title="Duplicate"
+                          onClick={() =>
+                            void onPatch({
+                              type: "duplicatePatch",
+                              patch: p.id,
+                              name: `${p.name} copy`,
+                            }).then((ok) => ok && close())
+                          }
                         >
-                          <Pencil size={12} />
+                          <Copy size={12} />
                         </button>
-                      )}
+                        <button
+                          className="icon-button danger"
+                          aria-label={`Delete Patch ${p.name}`}
+                          title="Delete (can be undone)"
+                          onClick={() => onDelete(p.id)}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </span>
                     </>
                   )}
                 </li>

@@ -35,5 +35,7 @@ Consequences:
   Library that only ever held the demo cannot be backed up yet. This needs its
   own decision.
 - Library samples stays a dialog until a full Samples screen replaces it.
-- Deleting and duplicating Kits and Patches are not available yet; they need
-  new Patch actions with undo.
+- Kits and Patches are deleted at once with an in-memory Undo instead of a
+  confirmation. Deleting a Patch also unlinks the SD intakes that recognized
+  it, in the same transaction, and Undo relinks them. The migration marker may
+  name a deleted Patch: it only records that the folder session migrated.

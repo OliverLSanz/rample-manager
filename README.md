@@ -59,16 +59,26 @@ cannot be completely decoded are reported individually.
 
 The main window always shows the open Patch
 ([ADR 0008](docs/adr/0008-make-the-open-patch-the-main-screen.md)). Its name
-at the top opens the Patch switcher: choose another Patch, create or rename one,
-or **Import Rample SD…**. Each choice returns to the main window with that Patch
-loaded. All Patches share the Library's Samples.
+at the top opens the Patch switcher: choose another Patch, create, rename,
+duplicate or delete one, or **Import Rample SD…**. Each choice returns to the
+main window with that Patch loaded. All Patches share the Library's Samples.
 
-The sidebar lists the open Patch's Kits in Rample order (A0, A1 … Z99). Search
+The sidebar lists the open Patch's Kits in Rample order (A0, A1 … Z99), grouped
+by Bank; click a Bank to fold it (the selected Kit's Bank stays open). Search
 matches a Kit address or the name of any Sample in it, and a warning marks a Kit
 that Build would refuse. **+** creates a Kit at the next free address; change the
-Bank letter or Kit number before confirming. The pencil beside the selected Kit
-moves it to another address without copying any audio. Used addresses are
-refused as you type.
+Bank letter or Kit number before confirming. A Kit's **⋯** menu changes its
+address without copying any audio, duplicates it to another address (new Layer
+occurrences of the same Samples, same modes and selections) or deletes it. Used
+addresses are refused as you type. With a Kit focused, ↑/↓ select the previous or
+next Kit and Delete removes it.
+
+Deleting a Kit or Patch happens at once and shows **Undo** (also Cmd/Ctrl+Z) for
+ten seconds. Undo restores it exactly, with the same identities, even after
+other edits, until the next deletion, a Library restore or quitting the app.
+A deleted imported Patch stops being recognized when its card is imported
+again; undo restores that recognition. A duplicated Patch starts without the
+original's SD Import report.
 
 Each voice card lists its Voice's ordered Layers. Click a Layer to select it;
 hover it to move it up or down, **repeat** it (intentionally adding another
