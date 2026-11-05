@@ -212,12 +212,15 @@ impl Reader<'_> {
 
 /// Encodes with shortest-form arguments, preserving map order and float widths.
 /// Device files observed so far re-encode byte for byte; callers that need the
-/// original bytes must keep them rather than rely on this.
+/// original bytes must keep them rather than rely on this. Only tests and
+/// generated fixtures encode: the app never writes native settings (ADR 0007).
+#[cfg(any(test, feature = "test-support"))]
 pub fn encode(value: &Value) -> Vec<u8> {
     let mut out = vec![];
     write(&mut out, value);
     out
 }
+#[cfg(any(test, feature = "test-support"))]
 fn head(out: &mut Vec<u8>, major: u8, n: u64) {
     let m = major << 5;
     match n {
@@ -237,6 +240,7 @@ fn head(out: &mut Vec<u8>, major: u8, n: u64) {
         }
     }
 }
+#[cfg(any(test, feature = "test-support"))]
 fn write(out: &mut Vec<u8>, value: &Value) {
     match value {
         Value::Unsigned(n) => head(out, 0, *n),
