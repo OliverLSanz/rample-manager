@@ -127,6 +127,9 @@ pub struct PatchSnapshot {
     pub graph: PatchGraph,
     pub session: Option<Session>,
     pub samples: Vec<managed::LibrarySample>,
+    /// Normalized peaks of each prepared Layer of the playing Voices, by Layer ID.
+    /// They describe the audio actually auditioned, including saved Sample Edits.
+    pub waveforms: BTreeMap<String, Vec<f32>>,
     pub validation: Vec<String>,
     pub playing: bool,
 }
@@ -570,10 +573,17 @@ impl AppState {
         if let Some(channel) = trigger {
             self.audio.send(Command::Audition(channel))?;
         }
+        let waveforms = preview
+            .ready
+            .iter()
+            .flatten()
+            .map(|layer| (layer.id.clone(), layer.sample.waveform.clone()))
+            .collect();
         Ok(PatchSnapshot {
             graph,
             session,
             samples: preview.samples,
+            waveforms,
             validation,
             playing: legacy.playing,
         })
@@ -662,6 +672,12 @@ mod tests {
             .unwrap();
         assert!(changed.validation.is_empty());
         assert!(changed.session.unwrap().voices[0].muted);
+        let layer = changed.graph.current().unwrap().kit().unwrap().voices[0].layers[0]
+            .id
+            .clone();
+        // Musical controls reuse the prepared peaks instead of reading audio again.
+        assert_eq!(changed.waveforms[&layer].len(), 100);
+        assert!(changed.waveforms[&layer].iter().any(|peak| *peak > 0.99));
         let refreshed = state.patch_action(PatchAction::Open).unwrap();
         assert!(refreshed
             .validation
