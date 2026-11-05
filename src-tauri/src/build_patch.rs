@@ -754,8 +754,8 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         wav::write_pcm16(&path, &[level; 4410], 44100).unwrap();
     }
-    /// A hand-made card: Kits A0, C3 and C4, native settings, firmware and notes.
-    fn populated_card(root: &Path) {
+    /// A hand-made SD destination: Kits A0, C3 and C4, native settings, firmware and notes.
+    fn populated_destination(root: &Path) {
         foreign_wav(root, "A0/1_01_Kick.wav", 100);
         foreign_wav(root, "A0/1_Old.wav", 200);
         write(root, "A0/notes.txt", b"my notes");
@@ -789,14 +789,17 @@ mod tests {
     }
 
     #[test]
-    fn reviewing_a_populated_card_lists_additions_replacements_and_removals_without_writing() {
+    fn reviewing_a_populated_destination_lists_additions_replacements_and_removals_without_writing()
+    {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
-        let before = contents(&card);
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        let before = contents(&destination);
 
-        let review = state.review_patch_build(patch, card.clone()).unwrap();
+        let review = state
+            .review_patch_build(patch, destination.clone())
+            .unwrap();
 
         assert_eq!(
             review.additions,
@@ -823,7 +826,7 @@ mod tests {
             "{:?}",
             review.notices
         );
-        assert_eq!(contents(&card), before);
+        assert_eq!(contents(&destination), before);
     }
 
     #[test]
@@ -952,14 +955,15 @@ mod tests {
     }
 
     #[test]
-    fn applying_a_review_reconciles_the_card_and_backs_up_every_affected_file() {
+    fn applying_a_review_reconciles_the_destination_and_makes_a_destination_backup_of_every_affected_file(
+    ) {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
-        let before = contents(&card);
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        let before = contents(&destination);
         let review = state
-            .review_patch_build(patch.clone(), card.clone())
+            .review_patch_build(patch.clone(), destination.clone())
             .unwrap();
 
         let reply = state.apply_patch_build(review).unwrap();
@@ -969,7 +973,7 @@ mod tests {
             (reply.added, reply.replaced, reply.removed, reply.unchanged),
             (2, 1, 3, 0)
         );
-        let after = contents(&card);
+        let after = contents(&destination);
         assert_eq!(
             after.keys().cloned().collect::<Vec<_>>(),
             vec![
@@ -1027,16 +1031,16 @@ mod tests {
         assert_eq!(saved, expected);
         assert!(Path::new(&backup.folder).join("restore.json").is_file());
 
-        // The rebuilt card already matches the Patch: nothing changes or is backed up.
+        // The rebuilt destination already matches the Patch: nothing changes or is backed up.
         let again = state
-            .review_patch_build(patch.clone(), card.clone())
+            .review_patch_build(patch.clone(), destination.clone())
             .unwrap();
         assert!(again.additions.is_empty() && again.replacements.is_empty());
         assert!(again.removals.is_empty() && again.removed_kits == vec!["C4"]);
         assert_eq!(again.unchanged.len(), 3);
         let unchanged = state.apply_patch_build(again).unwrap();
         assert!(unchanged.backup.is_none());
-        assert_eq!(contents(&card), after);
+        assert_eq!(contents(&destination), after);
         assert_eq!(backups(temp.path()).len(), 1);
 
         assert!(state
@@ -1049,82 +1053,86 @@ mod tests {
     fn changes_after_review_are_refused_and_nothing_is_written() {
         let (temp, state, _) = fixture();
         let (patch, kick, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
 
         // Native settings and other unrelated content may change: they are not reviewed.
         let review = state
-            .review_patch_build(patch.clone(), card.clone())
+            .review_patch_build(patch.clone(), destination.clone())
             .unwrap();
-        write(&card, "_save/A0.rpl", b"stored again on the Rample");
-        let before = contents(&card);
+        write(&destination, "_save/A0.rpl", b"stored again on the Rample");
+        let before = contents(&destination);
         let review_again = state
-            .review_patch_build(patch.clone(), card.clone())
+            .review_patch_build(patch.clone(), destination.clone())
             .unwrap();
         assert_eq!(review, review_again);
 
-        foreign_wav(&card, "C3/1_Old.wav", 301);
-        let changed = contents(&card);
+        foreign_wav(&destination, "C3/1_Old.wav", 301);
+        let changed = contents(&destination);
         let error = state.apply_patch_build(review.clone()).unwrap_err();
         assert!(error.contains("destination changed"), "{error}");
         assert!(error.contains("Nothing was written"), "{error}");
-        assert_eq!(contents(&card), changed);
+        assert_eq!(contents(&destination), changed);
 
         fs::write(
-            card.join("C3/1_Old.wav"),
+            destination.join("C3/1_Old.wav"),
             before["C3/1_Old.wav"].as_ref().unwrap(),
         )
         .unwrap();
-        foreign_wav(&card, "D9/1_New.wav", 600);
+        foreign_wav(&destination, "D9/1_New.wav", 600);
         let error = state.apply_patch_build(review.clone()).unwrap_err();
         assert!(error.contains("destination changed"), "{error}");
-        fs::remove_dir_all(card.join("D9")).unwrap();
+        fs::remove_dir_all(destination.join("D9")).unwrap();
 
         add(&state, 2, &kick);
         let error = state.apply_patch_build(review).unwrap_err();
         assert!(error.contains("Patch changed"), "{error}");
-        assert_eq!(contents(&card), before);
+        assert_eq!(contents(&destination), before);
         assert!(backups(temp.path()).is_empty());
     }
 
     #[test]
-    fn a_backup_that_cannot_be_created_leaves_the_card_unchanged() {
+    fn a_destination_backup_that_cannot_be_created_leaves_the_destination_unchanged() {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
-        let before = contents(&card);
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        let before = contents(&destination);
         write(
             &temp.path().join("support"),
             crate::destination_backups::BACKUPS,
             b"not a folder",
         );
-        let review = state.review_patch_build(patch, card.clone()).unwrap();
+        let review = state
+            .review_patch_build(patch, destination.clone())
+            .unwrap();
 
         let error = state.apply_patch_build(review).unwrap_err();
 
         assert!(error.contains("destination backup"), "{error}");
         assert!(error.contains("Nothing was written"), "{error}");
-        assert_eq!(contents(&card), before);
+        assert_eq!(contents(&destination), before);
     }
 
     #[test]
     fn names_that_collide_by_letter_case_block_the_build() {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        foreign_wav(&card, "a0/1_Kick.wav", 100);
-        fs::create_dir_all(card.join("B1/1_01_Snare.wav")).unwrap();
-        let before = contents(&card);
+        let destination = temp.path().join("Card");
+        foreign_wav(&destination, "a0/1_Kick.wav", 100);
+        fs::create_dir_all(destination.join("B1/1_01_Snare.wav")).unwrap();
+        let before = contents(&destination);
 
-        let review = state.review_patch_build(patch, card.clone()).unwrap();
+        let review = state
+            .review_patch_build(patch, destination.clone())
+            .unwrap();
 
         assert_eq!(review.conflicts.len(), 2, "{:?}", review.conflicts);
         assert!(review.conflicts[0].starts_with("a0 has the same name as Kit folder A0"));
         assert!(review.conflicts[1].starts_with("B1/1_01_Snare.wav is not an audio file"));
         let error = state.apply_patch_build(review).unwrap_err();
         assert!(error.contains("Nothing was written"), "{error}");
-        assert_eq!(contents(&card), before);
+        assert_eq!(contents(&destination), before);
     }
 
     #[test]
@@ -1132,7 +1140,7 @@ mod tests {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
         let destination = temp.path().join("Card");
-        populated_card(&destination);
+        populated_destination(&destination);
         // SD Import reads B01 as Kit B1 and C04 as Kit C4 (kept for info.txt).
         foreign_wav(&destination, "B01/1_Stale.wav", 800);
         foreign_wav(&destination, "C04/1_Stale.wav", 900);
@@ -1173,20 +1181,22 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_failed_write_reports_an_incomplete_build_with_its_backup() {
+    fn a_failed_write_reports_an_incomplete_build_with_its_destination_backup() {
         use std::os::unix::fs::PermissionsExt;
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
-        foreign_wav(&card, "B1/1_01_Snare.wav", 700);
-        let before = contents(&card);
-        let review = state.review_patch_build(patch, card.clone()).unwrap();
-        fs::set_permissions(card.join("B1"), fs::Permissions::from_mode(0o555)).unwrap();
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        foreign_wav(&destination, "B1/1_01_Snare.wav", 700);
+        let before = contents(&destination);
+        let review = state
+            .review_patch_build(patch, destination.clone())
+            .unwrap();
+        fs::set_permissions(destination.join("B1"), fs::Permissions::from_mode(0o555)).unwrap();
 
         let reply = state.apply_patch_build(review).unwrap();
 
-        fs::set_permissions(card.join("B1"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(destination.join("B1"), fs::Permissions::from_mode(0o755)).unwrap();
         let error = reply.error.unwrap();
         assert!(
             error.starts_with("Build Patch did not complete: Could not write B1/1_01_Snare.wav"),
@@ -1208,12 +1218,12 @@ mod tests {
             super::BuildStatus::Incomplete
         );
 
-        // The partly updated card is restored to its reviewed state.
+        // The partly updated destination is restored to its reviewed state.
         let restored = state
-            .restore_patch_build(backup.record.id, card.clone())
+            .restore_patch_build(backup.record.id, destination.clone())
             .unwrap();
         assert_eq!((restored.restored, restored.removed), (4, 1));
-        assert_eq!(contents(&card), before);
+        assert_eq!(contents(&destination), before);
     }
 
     /// Runs `hook` before each destination change of this thread's Builds.
@@ -1227,7 +1237,7 @@ mod tests {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
         let destination = temp.path().join("Card");
-        populated_card(&destination);
+        populated_destination(&destination);
         foreign_wav(&destination, "B1/1_01_Snare.wav", 700);
         let before = contents(&destination);
         let review = state
@@ -1277,7 +1287,7 @@ mod tests {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
         let destination = temp.path().join("Card");
-        populated_card(&destination);
+        populated_destination(&destination);
         let review = state
             .review_patch_build(patch, destination.clone())
             .unwrap();
@@ -1316,14 +1326,16 @@ mod tests {
     }
 
     #[test]
-    fn restoring_a_destination_backup_returns_the_card_to_its_reviewed_state() {
+    fn restoring_a_destination_backup_returns_the_destination_to_its_reviewed_state() {
         let (temp, state, _) = fixture();
         let (patch, kick, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
-        let original = contents(&card);
-        let first = state.build_patch(patch.clone(), card.clone()).unwrap();
-        let first_card = contents(&card);
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        let original = contents(&destination);
+        let first = state
+            .build_patch(patch.clone(), destination.clone())
+            .unwrap();
+        let after_first_build = contents(&destination);
         // A second Build adds D2 and replaces the Kick its first Build wrote.
         kit(&state, "D", 2);
         add(&state, 0, &kick);
@@ -1334,7 +1346,9 @@ mod tests {
             .save_managed_editor(editor.id, settings, None)
             .unwrap();
         state.close_editor(saved.editor.id).unwrap();
-        let second = state.build_patch(patch.clone(), card.clone()).unwrap();
+        let second = state
+            .build_patch(patch.clone(), destination.clone())
+            .unwrap();
         assert_eq!((second.added, second.replaced), (1, 1));
         let listed = state.patch_build_backups().unwrap();
         assert_eq!(
@@ -1352,27 +1366,27 @@ mod tests {
 
         // The older Build's files were changed by the newer one: never overwritten.
         let blocked = state
-            .restore_patch_build(first.backup.clone().unwrap().record.id, card.clone())
+            .restore_patch_build(first.backup.clone().unwrap().record.id, destination.clone())
             .unwrap_err();
         assert!(blocked.contains("changed after this Build"), "{blocked}");
         assert!(blocked.contains("Nothing was changed"), "{blocked}");
 
         let newer = state
-            .restore_patch_build(second.backup.unwrap().record.id, card.clone())
+            .restore_patch_build(second.backup.unwrap().record.id, destination.clone())
             .unwrap();
         assert_eq!((newer.restored, newer.removed), (1, 1));
-        assert_eq!(contents(&card), first_card);
+        assert_eq!(contents(&destination), after_first_build);
         let older = state
-            .restore_patch_build(first.backup.clone().unwrap().record.id, card.clone())
+            .restore_patch_build(first.backup.clone().unwrap().record.id, destination.clone())
             .unwrap();
         assert_eq!((older.restored, older.removed), (4, 2));
-        assert_eq!(contents(&card), original);
+        assert_eq!(contents(&destination), original);
         assert!(older.backup.record.restored.is_some());
         // Restoring again is harmless.
         state
-            .restore_patch_build(first.backup.unwrap().record.id, card.clone())
+            .restore_patch_build(first.backup.unwrap().record.id, destination.clone())
             .unwrap();
-        assert_eq!(contents(&card), original);
+        assert_eq!(contents(&destination), original);
     }
 
     #[test]
@@ -1380,7 +1394,7 @@ mod tests {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
         let destination = temp.path().join("Card");
-        populated_card(&destination);
+        populated_destination(&destination);
         let before = contents(&destination);
         let backup = state
             .build_patch(patch.clone(), destination.clone())
@@ -1409,23 +1423,23 @@ mod tests {
     fn restore_refuses_files_changed_since_the_build_and_damaged_backups() {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
-        let card = temp.path().join("Card");
-        populated_card(&card);
-        let built = state.build_patch(patch, card.clone()).unwrap();
+        let destination = temp.path().join("Card");
+        populated_destination(&destination);
+        let built = state.build_patch(patch, destination.clone()).unwrap();
         let backup = built.backup.unwrap();
-        foreign_wav(&card, "B1/1_01_Snare.wav", 900);
-        let edited = contents(&card);
+        foreign_wav(&destination, "B1/1_01_Snare.wav", 900);
+        let edited = contents(&destination);
 
         let error = state
-            .restore_patch_build(backup.record.id.clone(), card.clone())
+            .restore_patch_build(backup.record.id.clone(), destination.clone())
             .unwrap_err();
 
         assert!(
             error.contains("B1/1_01_Snare.wav changed after this Build"),
             "{error}"
         );
-        assert_eq!(contents(&card), edited);
-        fs::remove_file(card.join("B1/1_01_Snare.wav")).unwrap();
+        assert_eq!(contents(&destination), edited);
+        fs::remove_file(destination.join("B1/1_01_Snare.wav")).unwrap();
         let copy = fs::read_dir(Path::new(&backup.folder).join("files"))
             .unwrap()
             .next()
@@ -1433,14 +1447,14 @@ mod tests {
             .unwrap()
             .path();
         fs::write(copy, b"damaged").unwrap();
-        let damaged = contents(&card);
+        let damaged = contents(&destination);
         let error = state
-            .restore_patch_build(backup.record.id, card.clone())
+            .restore_patch_build(backup.record.id, destination.clone())
             .unwrap_err();
         assert!(error.contains("damaged"), "{error}");
-        assert_eq!(contents(&card), damaged);
+        assert_eq!(contents(&destination), damaged);
         assert!(state
-            .restore_patch_build("../escape".into(), card.clone())
+            .restore_patch_build("../escape".into(), destination.clone())
             .is_err());
     }
 
@@ -1604,7 +1618,7 @@ mod tests {
         let (temp, state, _) = fixture();
         let (patch, _, _) = live_patch(&state, temp.path());
         let destination = temp.path().join("Card");
-        populated_card(&destination);
+        populated_destination(&destination);
         let review = state
             .review_patch_build(patch, destination.clone())
             .unwrap();
