@@ -35,6 +35,14 @@ pub struct ImportResult {
     #[serde(skip)]
     pub(super) copied_hash: Option<String>,
 }
+/// How an Import treats a file whose Original has Samples only in Trash.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TrashedOriginal {
+    /// Report the trashed Sample (SD Import assigns it and offers Restore).
+    Recognize,
+    /// Bring the sound back as if it were imported for the first time.
+    Revive,
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportReply {
@@ -202,7 +210,7 @@ impl ManagedLibrary {
             .collect())
     }
     fn find_sample(&self, predicate: &str, value: &str) -> Result<Option<LibrarySample>, String> {
-        // Predicate is one of the two fixed indexed lookups below, never external input.
+        // Predicate is one of the fixed indexed lookups in this file, never external input.
         self.db
             .query_row(
                 &format!(
@@ -468,7 +476,11 @@ impl ManagedLibrary {
             render,
         })
     }
-    fn import_file(&mut self, source: &Path) -> Result<(LibrarySample, bool, String), String> {
+    fn import_file(
+        &mut self,
+        source: &Path,
+        trashed: TrashedOriginal,
+    ) -> Result<(LibrarySample, bool, String), String> {
         if !fs::metadata(source).map_err(|e| e.to_string())?.is_file() {
             return Err("Choose a regular supported audio file".into());
         }
@@ -519,17 +531,26 @@ impl ManagedLibrary {
         if let Some(sample) = self.recognize_export(&sha256)? {
             return Ok((sample, false, sha256));
         }
+        let name = source
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if trashed == TrashedOriginal::Revive {
+            if let Some(sample) = self.find_sample("o.sha256=?1 AND s.retired=0", &sha256)? {
+                self.prepare(&sample.id)?;
+                return Ok((sample, false, sha256));
+            }
+            if let Some(sample) = self.find_sample("o.sha256=?1", &sha256)? {
+                return Ok((self.revive(&sample.original_id, &name)?, true, sha256));
+            }
+        }
         if let Some(sample) = self.find_sample("o.sha256=?1", &sha256)? {
             self.prepare(&sample.id)?;
             return Ok((sample, false, sha256));
         }
         let original_id = Uuid::new_v4().to_string();
         let sample_id = Uuid::new_v4().to_string();
-        let name = source
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
         let target = self.original_path(&original_id);
         let original = staged
             .persist_noclobber(&target)
@@ -589,12 +610,68 @@ impl ManagedLibrary {
             sha256,
         ))
     }
+    /// Brings back an Original whose Samples are all in Trash as a fresh
+    /// import: the file's name, no tags, no Sample Edits and no Layers. A
+    /// trashed Sample that no Layer uses leaves Trash with its ID; when Layers
+    /// still play every one of them, they stay in Trash and a new Sample
+    /// shares the Original.
+    fn revive(&mut self, original_id: &str, name: &str) -> Result<LibrarySample, String> {
+        let graph = self.load_patches()?;
+        let used: HashSet<&str> = graph
+            .patches
+            .iter()
+            .flat_map(|p| &p.kits)
+            .flat_map(|k| &k.voices)
+            .flat_map(|v| &v.layers)
+            .map(|l| l.sample_id.as_str())
+            .collect();
+        let trashed = {
+            let mut query = self
+                .db
+                .prepare("SELECT id FROM samples WHERE original_id=?1 AND retired=1 ORDER BY rowid")
+                .map_err(|e| e.to_string())?;
+            let ids = query
+                .query_map([original_id], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            ids
+        };
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        let id = match trashed.into_iter().find(|id| !used.contains(id.as_str())) {
+            Some(id) => {
+                tx.execute(
+                    "UPDATE samples SET retired=0, name=?2, tags='[]' WHERE id=?1",
+                    params![id, name],
+                )
+                .map_err(|e| e.to_string())?;
+                // Saved Revisions stay in its history; the current sound is the Original.
+                tx.execute("DELETE FROM sample_current WHERE sample_id=?1", [&id])
+                    .map_err(|e| e.to_string())?;
+                id
+            }
+            None => {
+                let id = Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO samples (id, original_id, name) VALUES (?1,?2,?3)",
+                    params![id, original_id, name],
+                )
+                .map_err(|e| e.to_string())?;
+                id
+            }
+        };
+        tx.commit().map_err(|e| e.to_string())?;
+        self.sample_edits(&id)?;
+        self.find_sample("s.id=?1", &id)?
+            .ok_or_else(|| "Sample no longer exists.".into())
+    }
     pub fn import(&mut self, paths: Vec<PathBuf>) -> Result<ImportReply, String> {
-        self.import_progress(paths, |_, _, _| {})
+        self.import_progress(paths, TrashedOriginal::Revive, |_, _, _| {})
     }
     pub(super) fn import_progress(
         &mut self,
         paths: Vec<PathBuf>,
+        trashed: TrashedOriginal,
         mut progress: impl FnMut(usize, usize, &Path),
     ) -> Result<ImportReply, String> {
         let mut inputs = vec![];
@@ -631,7 +708,7 @@ impl ManagedLibrary {
             progress(index, total, &source);
             let outcome = match prior_error {
                 Some(error) => Err(error),
-                None => self.import_file(&source),
+                None => self.import_file(&source, trashed),
             };
             let (sample, status, error, copied_hash) = match outcome {
                 Ok((sample, added, hash)) => (
@@ -1086,11 +1163,20 @@ mod tests {
                 sample: sample.id.clone()
             })
             .is_err());
+        // Its Layer still plays the trashed Sample, so reimport brings the
+        // sound back as a new Sample sharing the Original and leaves Trash alone.
         let reply = state.import_samples(vec![source.clone()]).unwrap();
-        assert_eq!((reply.imported, reply.recognized), (0, 1));
-        assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
-        assert!(reply.results[0].sample.as_ref().unwrap().retired);
-        assert_eq!(reply.samples.len(), 1);
+        assert_eq!((reply.imported, reply.recognized), (1, 0));
+        let fresh = reply.results[0].sample.clone().unwrap();
+        assert_ne!(fresh.id, sample.id);
+        assert_eq!(fresh.original_id, sample.original_id);
+        assert_eq!((fresh.name.as_str(), fresh.retired), ("Kick", false));
+        assert!(fresh.tags.is_empty());
+        assert_eq!(reply.samples.len(), 2);
+        assert_eq!(state.list_trashed_samples().unwrap()[0].id, sample.id);
+        let again = state.import_samples(vec![source.clone()]).unwrap();
+        assert_eq!((again.imported, again.recognized), (0, 1));
+        assert_eq!(again.results[0].sample.as_ref().unwrap().id, fresh.id);
         fs::remove_file(source).unwrap();
         drop(state);
         let (state, _) = crate::tests::fixture_state(temp.path().join("support"));
@@ -1134,6 +1220,66 @@ mod tests {
             original.path
         );
         assert_eq!(fs::read(&original.path).unwrap(), original_bytes);
+    }
+
+    #[test]
+    fn importing_an_unused_trashed_sample_restores_it_as_a_fresh_import() {
+        use rusqlite::params;
+        use std::fs;
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("Snare.wav");
+        wav::write_pcm16(&source, &[4096; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source.clone()]).unwrap().samples[0].clone();
+        state
+            .update_sample_metadata(sample.id.clone(), "Old snare".into(), vec!["dusty".into()])
+            .unwrap();
+        let original = {
+            let store = state.managed.lock().unwrap();
+            let original = store.sample_edits(&sample.id).unwrap();
+            let mut settings = original.settings.clone();
+            settings.gain_db = -6.;
+            store
+                .db
+                .execute(
+                    "INSERT INTO sample_revisions(id,sample_id,settings) VALUES ('edited',?1,?2)",
+                    params![sample.id, serde_json::to_string(&settings).unwrap()],
+                )
+                .unwrap();
+            store
+                .db
+                .execute(
+                    "UPDATE sample_current SET revision_id='edited' WHERE sample_id=?1",
+                    [&sample.id],
+                )
+                .unwrap();
+            original
+        };
+        state.retire_sample(sample.id.clone()).unwrap();
+        let renamed = temp.path().join("Fresh snare.wav");
+        fs::rename(&source, &renamed).unwrap();
+
+        let reply = state.import_samples(vec![renamed]).unwrap();
+        assert_eq!((reply.imported, reply.recognized), (1, 0));
+        assert_eq!(reply.results[0].status, "imported");
+        let restored = reply.results[0].sample.clone().unwrap();
+        assert_eq!(restored.id, sample.id);
+        assert_eq!(restored.original_id, sample.original_id);
+        assert_eq!(
+            (restored.name.as_str(), restored.retired),
+            ("Fresh snare", false)
+        );
+        assert!(restored.tags.is_empty());
+        assert_eq!(reply.samples.len(), 1);
+        assert!(state.list_trashed_samples().unwrap().is_empty());
+        let store = state.managed.lock().unwrap();
+        let current = store.sample_edits(&sample.id).unwrap();
+        assert_eq!(current.id, original.id);
+        assert_eq!(current.settings.gain_db, original.settings.gain_db);
+        assert!(store
+            .revisions(&sample.id)
+            .unwrap()
+            .iter()
+            .any(|r| r.id == "edited"));
     }
 
     #[test]

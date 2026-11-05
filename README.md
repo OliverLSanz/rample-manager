@@ -56,9 +56,14 @@ separate entries; selecting or auditioning a row always uses its Sample ID.
 Samples panel. Open **Trash** to audition or **Restore** it. Existing Layers keep their
 Sample identity and saved sound, including after restarting. Restore makes the
 same Sample available again without copying audio or changing its Kit references.
-Reimporting known retired audio reports the existing Trash entry and offers
-**Restore Sample**. Retirement retains Originals and saved history; permanent
-purge is not available.
+Importing an Original again from the Samples view while all its Samples are in
+Trash brings it back as a fresh import: the source filename as its name, no
+tags, no Sample Edits and no Layers. A trashed Sample that no Layer uses leaves
+Trash with its identity (its saved Revisions stay in its history); when Layers
+still play every one, they stay in Trash and a new Sample shares the Original.
+Reimporting an exported, edited sound of a retired Sample, and **Import Rample
+SD…**, report the existing Trash entry and offer **Restore Sample** instead.
+Retirement retains Originals and saved history; permanent purge is not available.
 
 Completed imports preserve all Original bytes privately and work after removing
 the source. WAV playback reads its Original directly. Other supported formats

@@ -492,6 +492,7 @@ impl ManagedLibrary {
         audio_paths.sort_by(|a, b| natord::compare(&a.0, &b.0));
         let audio = self.import_progress(
             audio_paths.iter().map(|(_, path)| path.clone()).collect(),
+            managed::TrashedOriginal::Recognize,
             progress,
         )?;
         state.copy_complete &= audio.complete;
