@@ -9,12 +9,14 @@ import {
   ArrowUpRight,
   Download,
   FolderInput,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
   Square,
   Trash2,
   Volume2,
+  X,
 } from "lucide-react";
 import * as native from "./native";
 import { useSampleAudition } from "./audition";
@@ -44,6 +46,10 @@ interface Target {
   channel: number;
 }
 const page = 200;
+/** The tag lists a tag change replaced, so Undo can put them back. */
+interface TagUndo {
+  changes: { id: string; tags: string[] }[];
+}
 
 function format(sample: LibrarySample) {
   return [
@@ -205,6 +211,9 @@ export function SamplesScreen({
   const [message, setMessage] = useState<string | null>(null);
   const [report, setReport] = useState<LibraryImportReply | null>(null);
   const [newTag, setNewTag] = useState("");
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameTo, setRenameTo] = useState("");
+  const [tagUndo, setTagUndo] = useState<TagUndo | null>(null);
   const [waveforms, setWaveforms] = useState<Record<string, number[]>>({});
   const open = currentPatch(view);
   const [target, setTarget] = useState<Target>({
@@ -281,6 +290,12 @@ export function SamplesScreen({
     .map((id) => rows.find((s) => s.id === id))
     .filter((s): s is LibrarySample => !!s);
   const single = picked.length === 1 ? picked[0] : null;
+  const selectionTags = (() => {
+    const all = new Map<string, number>();
+    for (const s of picked)
+      for (const t of new Set(s.tags)) all.set(t, (all.get(t) ?? 0) + 1);
+    return [...all].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  })();
 
   useEffect(() => {
     if (!single?.readable || waveforms[single.id]) return;
@@ -301,10 +316,51 @@ export function SamplesScreen({
       (all ?? []).map((row) => changed.find((s) => s.id === row.id) ?? row),
     );
   }
+  /**
+   * Removes a tag from `ids`, or deletes or renames it everywhere (ids null),
+   * then offers Undo with the tag lists it replaced.
+   */
+  async function changeTag(
+    from: string,
+    to: string | null,
+    ids: string[] | null,
+    done: (changed: number) => string,
+  ) {
+    const before = new Map(rows.map((s) => [s.id, s.tags]));
+    const changed = await run(() => native.replaceSampleTag(from, to, ids));
+    if (!changed || !alive.current) return false;
+    replace(changed);
+    // A Library-wide rename or delete carries the tag filter with it.
+    if (!ids && tag === from) setTag(to);
+    setMessage(done(changed.length));
+    if (changed.length)
+      setTagUndo({
+        changes: changed.map((s) => ({ id: s.id, tags: before.get(s.id)! })),
+      });
+    onChanged();
+    return true;
+  }
+  async function undoTagChange(undo: TagUndo) {
+    const restored = await run(() => native.setSampleTags(undo.changes));
+    if (!restored || !alive.current) return;
+    replace(restored);
+    setMessage("Tag change undone.");
+    onChanged();
+  }
+  async function renameTag(from: string) {
+    const to = renameTo.trim();
+    setRenaming(null);
+    if (!to || to === from) return;
+    const merge = rows.some((s) => s.tags.includes(to));
+    await changeTag(from, to, null, () =>
+      merge ? `Merged #${from} into #${to}.` : `Renamed #${from} to #${to}.`,
+    );
+  }
   async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setTagUndo(null);
     try {
       return await task();
     } catch (e) {
@@ -535,17 +591,72 @@ export function SamplesScreen({
             </button>
           ))}
           {tags.length > 0 && <h3>Tags</h3>}
-          {tags.slice(0, 40).map(([name, count]) => (
-            <button
-              key={name}
-              className="tag-filter"
-              aria-pressed={tag === name}
-              onClick={() => setTag(tag === name ? null : name)}
-            >
-              <span>#{name}</span>
-              <small>{count}</small>
-            </button>
-          ))}
+          {tags.slice(0, 40).map(([name, count]) =>
+            renaming === name ? (
+              <form
+                key={name}
+                className="tag-rename"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void renameTag(name);
+                }}
+              >
+                <input
+                  aria-label={`New name for #${name}`}
+                  value={renameTo}
+                  autoFocus
+                  onChange={(e) => setRenameTo(e.target.value)}
+                  onBlur={() => setRenaming(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.stopPropagation();
+                      setRenaming(null);
+                    }
+                  }}
+                />
+              </form>
+            ) : (
+              <div key={name} className="tag-row">
+                <button
+                  className="tag-filter"
+                  aria-pressed={tag === name}
+                  onClick={() => setTag(tag === name ? null : name)}
+                >
+                  <span>#{name}</span>
+                  <small>{count}</small>
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Rename tag #${name}`}
+                  title="Rename; an existing name merges both tags"
+                  disabled={busy}
+                  onClick={() => {
+                    setRenameTo(name);
+                    setRenaming(name);
+                  }}
+                >
+                  <Pencil size={11} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Delete tag #${name}`}
+                  title="Remove this tag from every Sample"
+                  disabled={busy}
+                  onClick={() =>
+                    void changeTag(
+                      name,
+                      null,
+                      null,
+                      (n) =>
+                        `Deleted #${name} from ${n} ${n === 1 ? "Sample" : "Samples"}.`,
+                    )
+                  }
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ),
+          )}
         </nav>
         <div
           className="samples-list"
@@ -824,6 +935,38 @@ export function SamplesScreen({
                     />
                     <button disabled={busy || !newTag.trim()}>Add tag</button>
                   </form>
+                  {selectionTags.length > 0 && (
+                    <ul
+                      className="selection-tags"
+                      aria-label="Tags in selection"
+                    >
+                      {selectionTags.map(([name, count]) => (
+                        <li key={name}>
+                          <span>#{name}</span>
+                          <small>
+                            {count} of {picked.length}
+                          </small>
+                          <button
+                            className="icon-button"
+                            disabled={busy}
+                            aria-label={`Remove #${name} from ${count} selected Samples`}
+                            title="Remove from the selected Samples"
+                            onClick={() =>
+                              void changeTag(
+                                name,
+                                null,
+                                picked.map((s) => s.id),
+                                (n) =>
+                                  `Removed #${name} from ${n} ${n === 1 ? "Sample" : "Samples"}.`,
+                              )
+                            }
+                          >
+                            <X size={11} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </>
               )}
               <div className="detail-actions">
@@ -853,6 +996,15 @@ export function SamplesScreen({
           {message && (
             <p role="status" className="detail-message">
               {message}
+              {tagUndo && (
+                <button
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => void undoTagChange(tagUndo)}
+                >
+                  Undo
+                </button>
+              )}
             </p>
           )}
           {(error || audition.error) && (

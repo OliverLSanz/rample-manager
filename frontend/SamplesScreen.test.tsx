@@ -17,6 +17,8 @@ vi.mock("./native", () => ({
   retireSample: vi.fn(),
   restoreSample: vi.fn(),
   updateSampleMetadata: vi.fn(),
+  replaceSampleTag: vi.fn(),
+  setSampleTags: vi.fn(),
   openSampleAudition: vi.fn(),
   chooseSampleSources: vi.fn(),
   importSamples: vi.fn(),
@@ -277,7 +279,7 @@ it("edits a Sample's name and tags, searches them and keeps duplicates apart by 
     screen.getByRole("searchbox", { name: "Search Samples by name or tag" }),
     { target: { value: "" } },
   );
-  fireEvent.click(screen.getByRole("button", { name: /#dry/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^#dry/ }));
   expect(names()).toEqual(["Same name"]);
 });
 
@@ -544,6 +546,113 @@ it("selects several Samples to add, tag or retire them together", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Move 2 to Trash" }));
   await waitFor(() => expect(names()).toEqual(["B"]));
   expect(native.retireSample).toHaveBeenCalledTimes(2);
+});
+
+it("removes a tag from selected Samples and offers Undo", async () => {
+  const rows = [
+    sample("a", "A", { tags: ["kick", "dry"] }),
+    sample("b", "B", { tags: ["kick"] }),
+    sample("c", "C", { tags: ["kick"] }),
+  ];
+  vi.mocked(native.replaceSampleTag).mockResolvedValue([
+    { ...rows[0], tags: ["dry"] },
+    { ...rows[1], tags: [] },
+  ]);
+  vi.mocked(native.setSampleTags).mockResolvedValue(rows.slice(0, 2));
+  show(rows);
+  fireEvent.click(await screen.findByRole("option", { name: "A" }));
+  fireEvent.click(screen.getByRole("option", { name: "B" }), {
+    shiftKey: true,
+  });
+  const inSelection = screen.getByRole("list", { name: "Tags in selection" });
+  expect(within(inSelection).getByText("2 of 2")).toBeTruthy();
+  expect(within(inSelection).getByText("1 of 2")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Remove #kick from 2 selected Samples",
+    }),
+  );
+  await screen.findByText("Removed #kick from 2 Samples.");
+  expect(native.replaceSampleTag).toHaveBeenCalledWith("kick", null, [
+    "a",
+    "b",
+  ]);
+  // C keeps the tag, so the filter still counts it.
+  const filters = screen.getByRole("navigation", { name: "Sample filters" });
+  expect(within(filters).getByRole("button", { name: "#kick 1" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await screen.findByText("Tag change undone.");
+  expect(native.setSampleTags).toHaveBeenCalledWith([
+    { id: "a", tags: ["kick", "dry"] },
+    { id: "b", tags: ["kick"] },
+  ]);
+  expect(within(filters).getByRole("button", { name: "#kick 3" })).toBeTruthy();
+});
+
+it("renames, merges and deletes a tag across the Library from its filter", async () => {
+  const user = userEvent.setup();
+  const rows = [
+    sample("a", "A", { tags: ["kick"] }),
+    sample("b", "B", { tags: ["Kick", "kick"] }),
+    sample("c", "C", { tags: ["snare"] }),
+  ];
+  show(rows);
+  const filters = await screen.findByRole("navigation", {
+    name: "Sample filters",
+  });
+  fireEvent.click(within(filters).getByRole("button", { name: "#kick 2" }));
+  expect(names()).toEqual(["A", "B"]);
+
+  vi.mocked(native.replaceSampleTag).mockResolvedValueOnce([
+    { ...rows[0], tags: ["Kick"] },
+    { ...rows[1], tags: ["Kick"] },
+  ]);
+  await user.click(screen.getByRole("button", { name: "Rename tag #kick" }));
+  const input = screen.getByRole("textbox", { name: "New name for #kick" });
+  await user.clear(input);
+  await user.type(input, "Kick{Enter}");
+  await screen.findByText("Merged #kick into #Kick.");
+  expect(native.replaceSampleTag).toHaveBeenLastCalledWith(
+    "kick",
+    "Kick",
+    null,
+  );
+  // The filter follows the merged tag.
+  expect(
+    within(filters)
+      .getByRole("button", { name: "#Kick 2" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(names()).toEqual(["A", "B"]);
+
+  // Escape cancels a rename without calling the Library.
+  await user.click(screen.getByRole("button", { name: "Rename tag #snare" }));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("textbox", { name: "New name for #snare" })).toBe(
+    null,
+  );
+  expect(native.replaceSampleTag).toHaveBeenCalledTimes(1);
+
+  vi.mocked(native.replaceSampleTag).mockResolvedValueOnce([
+    { ...rows[2], tags: ["hat"] },
+  ]);
+  await user.click(screen.getByRole("button", { name: "Rename tag #snare" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "New name for #snare" }),
+    "{Control>}a{/Control}{Backspace}hat{Enter}",
+  );
+  await screen.findByText("Renamed #snare to #hat.");
+
+  vi.mocked(native.replaceSampleTag).mockResolvedValueOnce([
+    { ...rows[0], tags: [] },
+    { ...rows[1], tags: [] },
+  ]);
+  await user.click(screen.getByRole("button", { name: "Delete tag #Kick" }));
+  await screen.findByText("Deleted #Kick from 2 Samples.");
+  expect(native.replaceSampleTag).toHaveBeenLastCalledWith("Kick", null, null);
+  expect(within(filters).queryByRole("button", { name: /#Kick/ })).toBe(null);
+  expect(names()).toEqual(["A", "B", "C"]);
+  expect(onChanged).toHaveBeenCalledTimes(3);
 });
 
 it("browses with the arrow keys, hearing each Sample, and adds with Enter", async () => {

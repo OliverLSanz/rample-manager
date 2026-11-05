@@ -25,6 +25,12 @@ pub struct LibrarySample {
     pub readable: bool,
     pub error: Option<String>,
 }
+/// A Sample's complete tag list, as Undo of a tag change restores it.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleTags {
+    pub id: String,
+    pub tags: Vec<String>,
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
@@ -263,6 +269,97 @@ impl ManagedLibrary {
         }
         self.find_sample("s.id=?1", id)?
             .ok_or_else(|| "Sample no longer exists".into())
+    }
+    /// Removes `tag` from the Samples in `only`, or from every Sample in the
+    /// Library and Trash when `only` is `None`, writing `replacement` in its
+    /// place. A Sample that already has the replacement keeps a single copy at
+    /// its first position, so renaming onto an existing tag merges both. Tags
+    /// match exactly. One transaction; returns the Samples that changed.
+    pub fn replace_tag(
+        &mut self,
+        tag: &str,
+        replacement: Option<&str>,
+        only: Option<&[String]>,
+    ) -> Result<Vec<LibrarySample>, String> {
+        let replacement = match replacement.map(str::trim) {
+            Some("") => return Err("Tag name cannot be empty.".into()),
+            Some(name) if name == tag => return Ok(vec![]),
+            other => other,
+        };
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        let rows = {
+            let mut query = tx
+                .prepare("SELECT id, tags FROM samples ORDER BY rowid")
+                .map_err(|e| e.to_string())?;
+            let rows: Vec<(String, String)> = query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<_, _>>()
+                .map_err(|e| e.to_string())?;
+            rows
+        };
+        let mut changed = vec![];
+        for (id, tags) in rows {
+            if only.is_some_and(|ids| !ids.contains(&id)) {
+                continue;
+            }
+            let tags: Vec<String> = serde_json::from_str(&tags).map_err(|e| e.to_string())?;
+            if !tags.iter().any(|t| t == tag) {
+                continue;
+            }
+            let mut next: Vec<String> = Vec::with_capacity(tags.len());
+            for t in tags {
+                let t = if t == tag {
+                    match replacement {
+                        Some(name) => name.to_owned(),
+                        None => continue,
+                    }
+                } else {
+                    t
+                };
+                if replacement == Some(t.as_str()) && next.contains(&t) {
+                    continue;
+                }
+                next.push(t);
+            }
+            tx.execute(
+                "UPDATE samples SET tags=?2 WHERE id=?1",
+                params![id, serde_json::to_string(&next).map_err(|e| e.to_string())?],
+            )
+            .map_err(|e| e.to_string())?;
+            changed.push(id);
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        self.samples_by_id(&changed)
+    }
+    /// Restores complete tag lists in one transaction (Undo of a tag change).
+    pub fn set_tags(&mut self, changes: &[SampleTags]) -> Result<Vec<LibrarySample>, String> {
+        let tx = self.db.transaction().map_err(|e| e.to_string())?;
+        for change in changes {
+            let updated = tx
+                .execute(
+                    "UPDATE samples SET tags=?2 WHERE id=?1",
+                    params![
+                        change.id,
+                        serde_json::to_string(&change.tags).map_err(|e| e.to_string())?
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            if updated == 0 {
+                return Err("Sample no longer exists.".into());
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        let ids: Vec<_> = changes.iter().map(|c| c.id.clone()).collect();
+        self.samples_by_id(&ids)
+    }
+    fn samples_by_id(&self, ids: &[String]) -> Result<Vec<LibrarySample>, String> {
+        ids.iter()
+            .map(|id| {
+                self.find_sample("s.id=?1", id)?
+                    .ok_or_else(|| "Sample no longer exists.".into())
+            })
+            .collect()
     }
     pub fn prepare(&self, id: &str) -> Result<Arc<PreparedSample>, String> {
         self.prepare_target(id, false)
@@ -897,6 +994,23 @@ impl AppState {
             .map_err(|_| "Library is unavailable")?
             .update_metadata(&id, name, tags)
     }
+    pub fn replace_sample_tag(
+        &self,
+        tag: String,
+        replacement: Option<String>,
+        ids: Option<Vec<String>>,
+    ) -> Result<Vec<LibrarySample>, String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .replace_tag(&tag, replacement.as_deref(), ids.as_deref())
+    }
+    pub fn set_sample_tags(&self, changes: Vec<SampleTags>) -> Result<Vec<LibrarySample>, String> {
+        self.managed
+            .lock()
+            .map_err(|_| "Library is unavailable")?
+            .set_tags(&changes)
+    }
     pub fn open_sample_audition(&self) -> Result<String, String> {
         let mut current = self
             .original_audition
@@ -1042,6 +1156,30 @@ pub(super) async fn update_sample_metadata(
 ) -> Result<LibrarySample, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || state.update_sample_metadata(id, name, tags))
+        .await
+        .map_err(|e| e.to_string())?
+}
+/// Removes a tag from the given Samples, or deletes or renames it (merging
+/// into an existing tag of the same name) across the whole Library.
+#[tauri::command]
+pub(super) async fn replace_sample_tag(
+    tag: String,
+    replacement: Option<String>,
+    ids: Option<Vec<String>>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<LibrarySample>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.replace_sample_tag(tag, replacement, ids))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(super) async fn set_sample_tags(
+    changes: Vec<SampleTags>,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<LibrarySample>, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.set_sample_tags(changes))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1491,6 +1629,78 @@ mod tests {
                 bytes
             );
         }
+    }
+
+    #[test]
+    fn tags_are_removed_from_a_selection_deleted_or_renamed_with_merge_and_undone() {
+        let (temp, state, _) = fixture();
+        let paths: Vec<_> = ["A", "B", "C"]
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let path = temp.path().join(format!("{name}.wav"));
+                wav::write_pcm16(&path, &[1024 * (i as i16 + 1); 4410], 44100).unwrap();
+                path
+            })
+            .collect();
+        let samples = state.import_samples(paths).unwrap().samples;
+        let ids: Vec<_> = samples.iter().map(|s| s.id.clone()).collect();
+        let tag = |i: usize, tags: &[&str]| {
+            state
+                .update_sample_metadata(
+                    ids[i].clone(),
+                    samples[i].name.clone(),
+                    tags.iter().map(|t| t.to_string()).collect(),
+                )
+                .unwrap()
+        };
+        tag(0, &["kick", "Kick", "dry"]);
+        tag(1, &["dry", "kick"]);
+        tag(2, &["kick"]);
+        state.retire_sample(ids[2].clone()).unwrap();
+        let tags = |i: usize| {
+            let all = state.managed.lock().unwrap().list().unwrap();
+            all.into_iter().find(|s| s.id == ids[i]).unwrap().tags
+        };
+
+        // Removing from a selection leaves other Samples and other tags alone.
+        let removed = state
+            .replace_sample_tag("dry".into(), None, Some(vec![ids[0].clone()]))
+            .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(tags(0), ["kick", "Kick"]);
+        assert_eq!(tags(1), ["dry", "kick"]);
+
+        // Renaming onto an existing tag merges it, Trash included; tags match exactly.
+        let renamed = state
+            .replace_sample_tag("kick".into(), Some(" Kick ".into()), None)
+            .unwrap();
+        assert_eq!(renamed.len(), 3);
+        assert_eq!(tags(0), ["Kick"]);
+        assert_eq!(tags(1), ["dry", "Kick"]);
+        assert_eq!(tags(2), ["Kick"]);
+        assert!(state
+            .replace_sample_tag("Kick".into(), Some("Kick".into()), None)
+            .unwrap()
+            .is_empty());
+        assert!(state
+            .replace_sample_tag("Kick".into(), Some("  ".into()), None)
+            .is_err());
+
+        // Deleting removes it everywhere; restoring the previous lists undoes it.
+        let before: Vec<_> = (0..3).map(tags).collect();
+        let deleted = state.replace_sample_tag("Kick".into(), None, None).unwrap();
+        assert_eq!(deleted.len(), 3);
+        assert!(tags(0).is_empty() && tags(2).is_empty());
+        assert_eq!(tags(1), ["dry"]);
+        let undo: Vec<_> = (0..3)
+            .map(|i| super::SampleTags {
+                id: ids[i].clone(),
+                tags: before[i].clone(),
+            })
+            .collect();
+        state.set_sample_tags(undo).unwrap();
+        assert_eq!((0..3).map(tags).collect::<Vec<_>>(), before);
     }
 
     #[test]

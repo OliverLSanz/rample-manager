@@ -21,6 +21,19 @@ export const updateSampleMetadata = (
   name: string,
   tags: string[],
 ) => invoke<LibrarySample>("update_sample_metadata", { id, name, tags });
+/**
+ * Removes `tag` from the Samples in `ids`, or from every Sample (Trash too)
+ * when `ids` is null, writing `replacement` in its place. Renaming onto an
+ * existing tag merges both. Returns the Samples that changed.
+ */
+export const replaceSampleTag = (
+  tag: string,
+  replacement: string | null,
+  ids: string[] | null,
+) => invoke<LibrarySample[]>("replace_sample_tag", { tag, replacement, ids });
+/** Restores complete tag lists: Undo of a tag change. */
+export const setSampleTags = (changes: { id: string; tags: string[] }[]) =>
+  invoke<LibrarySample[]>("set_sample_tags", { changes });
 export const importSamples = (paths: string[]) =>
   invoke<LibraryImportReply>("import_samples", { paths });
 export const chooseSampleExport = (name: string) =>

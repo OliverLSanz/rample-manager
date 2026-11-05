@@ -43,7 +43,14 @@ every Layer that plays it, across Patches; click one to open that Kit. **Add as
 Layer** adds it to the open Patch's Kit by default, or to any Kit and Voice of any
 Patch, without leaving the open one (Enter does the same). ⌘/Ctrl-click and
 Shift-click (or Shift+↑/↓) select several Samples to add as consecutive Layers,
-tag or move to Trash together.
+tag or move to Trash together. The selection lists the tags its Samples carry;
+× removes one from all of them.
+
+Hovering a tag filter shows **Rename** and **Delete**. Both apply to every
+Sample, including those in Trash. Renaming onto an existing tag merges the two
+(each Sample keeps one copy); tags match exactly, so `kick` and `Kick` are
+different tags. Removing, renaming and deleting tags happen at once and offer
+**Undo** until the next change.
 
 Select a Sample to edit its descriptive name and tags (one tag per
 line). Tags can contain spaces, punctuation and Unicode text. Search matches a

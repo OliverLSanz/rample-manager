@@ -173,6 +173,8 @@ fn main() {
             managed::list_samples,
             managed::query_samples,
             managed::update_sample_metadata,
+            managed::replace_sample_tag,
+            managed::set_sample_tags,
             managed::import_samples,
             managed::list_trashed_samples,
             managed::retire_sample,
