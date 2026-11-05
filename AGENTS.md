@@ -26,7 +26,8 @@ Do not add features there or use its installer for normal updates.
 ## Git workflow
 
 Keep every user-facing string in English, including menus, accessibility labels,
-tooltips and errors. Preserve user sample filenames.
+tooltips and errors. Preserve user sample filenames (Build Patch, below, is the
+reviewed exception for its own Layer files).
 
 Commit each atomic functional change separately, with its relevant tests and docs.
 Push each completed commit to the private GitHub repository; do not leave finished
@@ -55,6 +56,10 @@ the editor: validate the reviewed fingerprint,
 back up the original under the app support folder, validate the complete output,
 recheck the source bytes and only then replace it. Never overwrite a different
 existing destination WAV. Export copies to a new kit and never overwrites one.
+The explicit exception is **Build Patch** (ADR 0005, below): after the user
+applies its reviewed difference, it may replace, remove and rename owned WAVs
+in canonical Kit folders of the destination, only once every affected file is
+backed up and verified as a Destination backup.
 
 ## Sample validation and conversion
 
