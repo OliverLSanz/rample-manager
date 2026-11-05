@@ -91,7 +91,12 @@ it("keeps copied audio and draft errors visible while requiring an explicit chan
   expect(screen.getByText(/Truncated WAV/)).toBeTruthy();
   expect(
     screen.getByText(
-      /restored for 1 Kit\(s\) saved with STORE \(firmware 2\.00\)\. 1 Kit\(s\) without a stored Kit file use your default Layer mode \(Velocity\)/,
+      /restored for 1 Kit\(s\) saved with STORE\. 1 Kit\(s\) without a stored Kit file use your default Layer mode \(Velocity\)/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "These mappings were verified on Rample firmware 2.00. The firmware of this card is not detected.",
     ),
   ).toBeTruthy();
   expect(screen.getByText(/1 native file\(s\) preserved exactly/)).toBeTruthy();

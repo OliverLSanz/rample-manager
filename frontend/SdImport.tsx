@@ -301,9 +301,11 @@ function NativeSummary({
     <div>
       <p>
         Native settings: Layer modes and selected Layers restored for{" "}
-        {count("store")} Kit(s) saved with STORE (firmware{" "}
-        {reading.verifiedFirmware}). {count("appDefault")} Kit(s) without a
-        stored Kit file use your default Layer mode ({fallback}).
+        {count("store")} Kit(s) saved with STORE. {count("appDefault")} Kit(s)
+        without a stored Kit file use your default Layer mode ({fallback}).
+      </p>
+      <p>
+        {`These mappings were verified on Rample firmware ${reading.verifiedFirmware}. The firmware of this card is not detected.`}
       </p>
       <p>
         {preserved} native file(s) preserved exactly. The app never writes
