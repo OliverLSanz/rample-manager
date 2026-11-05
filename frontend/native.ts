@@ -1,11 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
-  Snapshot,
   Transport,
   EditSettings,
   EditorInfo,
-  EditorSaveReply,
   LibrarySample,
   LibraryImportReply,
 } from "./types";
@@ -71,7 +69,6 @@ export async function chooseSampleSources(folder: boolean) {
   });
   return result === null ? [] : typeof result === "string" ? [result] : result;
 }
-export const getSnapshot = () => invoke<Snapshot>("get_snapshot");
 export const getTransport = () => invoke<Transport>("get_transport");
 export async function chooseFolder(
   title = "Open your Rample SD or sample library",
@@ -92,12 +89,9 @@ export const previewEditor = (
     settings,
     enabled,
   });
-export const saveEditor = (id: string, settings: EditSettings) =>
-  invoke<EditorSaveReply>("save_editor", { id, settings });
 export const closeEditor = (id: string) => invoke<void>("close_editor", { id });
 export const auditionEditor = (id: string) =>
   invoke<void>("audition_editor", { id });
-export const showEditBackups = () => invoke<void>("show_edit_backups");
 
 export const patchAction = (action: import("./types").PatchAction) =>
   invoke<import("./types").PatchSnapshot>("patch_action", { action });
@@ -137,11 +131,6 @@ export const finishSdImport = (
   choice: import("./types").SdImportChoice,
 ) =>
   invoke<import("./types").PatchSnapshot>("finish_sd_import", { id, choice });
-
-export const migrationStatus = () =>
-  invoke<import("./types").MigrationStatus>("migration_status");
-export const migrateLegacy = () =>
-  invoke<import("./types").MigrationStatus>("migrate_legacy");
 
 export const chooseLibraryBackup = () =>
   save({

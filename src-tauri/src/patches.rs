@@ -23,7 +23,7 @@ pub struct Patch {
     pub selected_kit: String,
     pub kits: Vec<PatchKit>,
     pub bpm: f64,
-    /// Sequencer/mixer memory is shared between Kits, as in the folder workflow.
+    /// Sequencer/mixer memory is shared between the Kits of a Patch.
     pub voices: Vec<Voice>,
     #[serde(default)]
     pub voice_kits: Vec<String>,
@@ -421,15 +421,18 @@ pub(super) fn kit_issues(patch: &Patch) -> Vec<String> {
 }
 impl AppState {
     pub fn patch_action(&self, action: PatchAction) -> Result<PatchSnapshot, String> {
-        // Same lock order as legacy application commands, including workspace handoff.
-        let mut legacy = self.library.lock().map_err(|_| "Library is unavailable")?;
+        // Lock order: workspace, then Library, as in every other command.
+        let mut workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| "Library is unavailable")?;
         let store = self.managed.lock().map_err(|_| "Library is unavailable")?;
-        self.patch_action_locked(action, &mut legacy, &store)
+        self.patch_action_locked(action, &mut workspace, &store)
     }
     pub(super) fn patch_action_locked(
         &self,
         action: PatchAction,
-        legacy: &mut Library,
+        workspace: &mut Workspace,
         store: &managed::ManagedLibrary,
     ) -> Result<PatchSnapshot, String> {
         let mut graph = store.load_patches()?;
@@ -447,7 +450,8 @@ impl AppState {
         let mut undone = false;
         // SD intakes whose recognized Patch changes with this action.
         let mut intake_links: Vec<(String, Option<String>)> = vec![];
-        let mut reset = !self.patch_active.load(Ordering::Relaxed);
+        // The first action after startup or a Library restore loads every bank.
+        let mut reset = workspace.patch_preview.is_none();
         match action {
             PatchAction::Open => {}
             PatchAction::CreatePatch { name } => {
@@ -617,7 +621,11 @@ impl AppState {
                 });
             }
             PatchAction::UndoDelete => {
-                match legacy.deleted.clone().ok_or("There is nothing to undo.")? {
+                match workspace
+                    .deleted
+                    .clone()
+                    .ok_or("There is nothing to undo.")?
+                {
                     Deleted::Kit {
                         patch,
                         index,
@@ -794,7 +802,7 @@ impl AppState {
                     Action::AdjustBpm { delta } if delta.is_finite() => {
                         patch.bpm = (patch.bpm + delta).clamp(30., 300.)
                     }
-                    Action::TogglePlayback => transport = Some(!legacy.playing),
+                    Action::TogglePlayback => transport = Some(!workspace.playing),
                     Action::Stop => transport = Some(false),
                     Action::Audition { channel } if channel < 4 => trigger = Some(channel),
                     Action::BasicPattern => {
@@ -818,7 +826,7 @@ impl AppState {
                             | Action::SetVolume { channel, .. }
                             | Action::ToggleMute { channel }
                             | Action::ToggleSolo { channel } => *channel,
-                            _ => return Err("This action belongs to the folder workflow.".into()),
+                            _ => return Err("Invalid musical control.".into()),
                         };
                         let voice = patch.voices.get_mut(channel).ok_or("Invalid Voice.")?;
                         match action {
@@ -848,9 +856,9 @@ impl AppState {
             }
         }
         if deleted.is_some() {
-            legacy.deleted = deleted;
+            workspace.deleted = deleted;
         } else if undone {
-            legacy.deleted = None;
+            workspace.deleted = None;
         }
         let mut validation = vec![];
         for patch in &graph.patches {
@@ -893,7 +901,7 @@ impl AppState {
         }))
         .map_err(|e| e.to_string())?;
         let reload = refresh
-            || legacy
+            || workspace
                 .patch_preview
                 .as_ref()
                 .is_none_or(|cache| cache.key != key);
@@ -932,21 +940,14 @@ impl AppState {
                 ready,
             }
         } else {
-            legacy.patch_preview.as_ref().unwrap().clone()
+            workspace.patch_preview.as_ref().unwrap().clone()
         };
         validation.extend(preview.errors.clone());
         if reset {
             self.audio.send(Command::Stop)?;
             self.audio.send(Command::Edit(None))?;
-            legacy.playing = false;
+            workspace.playing = false;
         }
-        self.patch_active.store(true, Ordering::Relaxed);
-        // Managed playback has no continuing dependency on the folder source.
-        self.watching.store(false, Ordering::Relaxed);
-        self.watcher
-            .lock()
-            .map_err(|_| "File watcher is unavailable")?
-            .take();
         self.audio.send(Command::Settings(
             session
                 .as_ref()
@@ -959,14 +960,14 @@ impl AppState {
                 self.audio.send(Command::LayerBank(channel, bank.clone()))?;
             }
         }
-        legacy.patch_preview = Some(preview.clone());
+        workspace.patch_preview = Some(preview.clone());
         if let Some(playing) = transport {
             self.audio.send(if playing {
                 Command::Play
             } else {
                 Command::Stop
             })?;
-            legacy.playing = playing;
+            workspace.playing = playing;
         }
         if let Some(channel) = trigger {
             self.audio.send(Command::Audition(channel))?;
@@ -983,33 +984,9 @@ impl AppState {
             samples: preview.samples,
             waveforms,
             validation,
-            playing: legacy.playing,
-            undo: legacy.deleted.as_ref().map(Deleted::label),
+            playing: workspace.playing,
+            undo: workspace.deleted.as_ref().map(Deleted::label),
         })
-    }
-    pub fn close_patch(&self) -> Result<(), String> {
-        if self
-            .migration
-            .lock()
-            .map_err(|_| "Migration status unavailable")?
-            .status
-            == "complete"
-        {
-            return Ok(());
-        }
-        let mut legacy = self.library.lock().map_err(|_| "Library is unavailable")?;
-        self.audio.send(Command::Stop)?;
-        legacy.playing = false;
-        // Explicitly restore all banks, including empty ones, after workspace handoff.
-        for i in 0..4 {
-            self.audio.send(Command::Bank(i, vec![]))?;
-        }
-        legacy.banks = std::array::from_fn(|_| vec![]);
-        legacy.synchronize(&self.audio)?;
-        self.patch_active.store(false, Ordering::Relaxed);
-        drop(legacy);
-        self.watch();
-        Ok(())
     }
 }
 #[tauri::command]
@@ -1019,13 +996,6 @@ pub async fn patch_action(
 ) -> Result<PatchSnapshot, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || state.patch_action(action))
-        .await
-        .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub async fn close_patch(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.close_patch())
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1086,7 +1056,6 @@ mod tests {
     #[test]
     fn patches_share_samples_and_persist_duplicate_occurrences_selection_and_drafts() {
         let (temp, state, _) = fixture();
-        let legacy = state.snapshot().session;
         let source = temp.path().join("Kick.wav");
         wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
         let id = state.import_samples(vec![source.clone()]).unwrap().samples[0]
@@ -1178,8 +1147,6 @@ mod tests {
             patch: first_id.clone(),
         });
         assert_eq!(restored.kit().unwrap().voices[0].layers.len(), 13);
-        state.close_patch().unwrap();
-        assert_eq!(state.snapshot().session, legacy);
         let restarted = managed::ManagedLibrary::open(&temp.path().join("support")).unwrap();
         let graph = restarted.load_patches().unwrap();
         assert_eq!(graph.selected_patch, first_id);

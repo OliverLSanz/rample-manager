@@ -510,7 +510,7 @@ impl AppState {
     /// The folder holding every Destination backup.
     pub(crate) fn destination_backups(&self) -> Result<PathBuf, String> {
         Ok(self
-            .library
+            .workspace
             .lock()
             .map_err(|_| "Library is unavailable")?
             .support

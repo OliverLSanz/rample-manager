@@ -16,10 +16,10 @@ bytes retain the imported format, including stereo and compressed audio. User na
 tags and source-relative SD evidence remain in the database. The complete saved
 state includes Samples, Trash, shared Originals, saved and historical Revisions,
 Variants, every Patch and occurrence, musical controls and selection, opaque native
-blobs, pending SD intake drafts, recognition history and the managed migration
-marker. Musical session state is authoritative in the managed Patch graph. The
-marker records that the folder session migrated; the Patch it created may have
-been deleted since, so it is not required to exist.
+blobs, pending SD intake drafts and recognition history. Musical session state
+is authoritative in the managed Patch graph. The retired `legacy_migration`
+table stays in the schema, possibly empty, and is not read
+([ADR 0009](adr/0009-remove-the-folder-library.md)).
 
 Playing transport, unsaved editor previews, Derived caches, abandoned Incoming
 files, audio-device settings, the old folder session and its external paths are not

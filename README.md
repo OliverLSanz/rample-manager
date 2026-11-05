@@ -224,28 +224,11 @@ are missing; if anything changed since, nothing is changed and the files are
 listed. To step back several Builds, restore the newest first. Restoring again
 is harmless. `_save` and all other content stay untouched.
 
-A folder session from an earlier version is offered on the main window as
-**Move current folder into Library** (hide it with ×; it returns on the next launch). Migration copies
-and validates audio in bounded chunks, backs up the saved session byte for byte as
-`session-before-managed.backup.json`, and preserves Kits, selected filenames,
-all five modes, each Kit's remembered choices, mixed source Kits across Voices,
-BPM, patterns, velocities and mixer state. External audio and native configuration
-stay untouched. Previously baked audio becomes an unedited Original with its current
-sound; transient old editor controls cannot be reconstructed.
-
-Progress shows the current file and file count. A failed copy, missing selected
-filename or failed activation leaves the folder session usable, reports the problem,
-and retains verified copies for retry. Restore a missing selected file before retrying;
-migration never silently chooses another Layer. After success, its Kits are a
-Patch like any other. Restart uses private audio without scanning or watching
-the source, which can be disconnected.
-
 Use **Library backup…** in the sidebar to create a complete
 portable snapshot, or replace the Library with a verified snapshot from another
 machine. Restore first creates a recoverable snapshot of the current Library and
 shows its location, including on later failures. **Restore recovery snapshot…**
-returns to that saved state. Complete folder migration first so its musical state
-is included. See [portable Library snapshots](docs/library-snapshots.md) for the
+returns to that saved state. See [portable Library snapshots](docs/library-snapshots.md) for the
 format, validation and interruption/recovery behavior.
 
 ## Layer playback
@@ -283,8 +266,9 @@ reference only: no further device captures are planned.
 
 ## Session preservation
 
-The private Library lives in `Library/` under the same app support folder as the
-legacy session. After restore, its active store is selected from protected
+The private Library lives in `Library/` in the app support folder
+(`~/Library/Application Support/Rample Preview/` on macOS,
+`%APPDATA%/Rample Preview/` on Windows). After restore, its active store is selected from protected
 `Library/Generations/` by immutable activation records. `library.sqlite3` stores stable Sample/Original identities, names,
 audio metadata and SHA-256 recognition; Original locators are relative to this
 store, with no dependency on external source paths. SQLite is bundled on both
@@ -298,16 +282,14 @@ files. Removing these cache files does not remove Samples or Originals; the next
 preparation rebuilds them from the managed Original. The cache version and target
 are part of its key; it is never used for Import identity.
 
-The legacy session remains separate:
-
-- macOS: `~/Library/Application Support/Rample Preview/session.json`
-- Windows: `%APPDATA%/Rample Preview/session.json`
-
-The same folder contains `Demo SD`. Swift 1.x sessions migrate automatically,
-keeping all selections, per-kit modes, patterns, velocity, tempo and mixer. The
-original JSON is backed up as `session-swift-1.1.0.backup.json` before migration.
-Installing/updating the app never deletes this folder. `RAMPLE_DATA_DIR` provides
-an isolated support directory for development and tests.
+Earlier versions worked on a folder of WAVs and kept a folder session
+(`session.json`), a `Demo SD`, sample reviews and conversion and edit backups in
+the same support folder. That workflow and its migration were removed
+([ADR 0009](docs/adr/0009-remove-the-folder-library.md)): the app no longer reads
+those files and never deletes them. Bring sounds in with **Import audio
+files…**, **Import folder…** or **Import Rample SD…**. Installing or updating the
+app never deletes the support folder. `RAMPLE_DATA_DIR` provides an isolated
+support directory for development and tests.
 
 ## Develop and build
 
@@ -347,8 +329,8 @@ computers. Windows installers are currently unsigned.
 
 `frontend/` holds the React UI and IPC: `App.tsx` is the Patch main screen,
 with `KitList`, `PatchMenu` and `VoiceCard`, and `patchView.ts` its pure view
-model. `crates/rample-core/` holds SD scanning, WAV validation, export,
-backwards-compatible session data, layer selection and the sample-clock
+model. `crates/rample-core/` holds audio decoding, Rample preparation, Sample
+Edit DSP, native `_save` reading, layer selection and the sample-clock
 renderer. `src-tauri/` integrates the Library, Patches, native dialogs and
 devices. CPAL outputs through CoreAudio on Mac and WASAPI on Windows.
 
@@ -359,7 +341,7 @@ the callback. Matched sample rates preserve PCM exactly; other rates use a
 32-tap windowed-sinc resampler. Device reconnection is retried automatically.
 
 Headless tests check actual PCM, trigger boundaries, modes, mute/solo, resampling,
-long-file streaming, migration, export, watcher events and UI behavior on both
+long-file streaming, Library snapshots, SD Import, Build Patch and UI behavior on both
 operating systems. Actual-device smoke testing is separate:
 
 ```sh
@@ -367,9 +349,9 @@ cargo run -p rample-core --example audio_smoke --features native-audio
 ```
 
 The Windows CI build verifies compilation, tests, packaging, native app startup,
-graceful close saving the first session, and a reinstall that preserves preferences
+graceful close, and a reinstall that leaves the Library unchanged
 (`scripts/smoke-windows.ps1`). Startup readiness uses the native window and Library
-store because opening the app does not rewrite an existing session. This
+store. This
 cannot replace a listening test on physical Windows audio hardware. The original Swift sources
 are archived under `legacy/swift` for reference and rollback.
 

@@ -37,7 +37,6 @@ pub struct SnapshotReply {
     pub location: Option<String>,
     pub recovery: Option<String>,
     pub error: Option<String>,
-    pub snapshot: Option<Snapshot>,
 }
 impl SnapshotReply {
     fn success(location: &Path) -> Self {
@@ -47,7 +46,6 @@ impl SnapshotReply {
             location: Some(location.to_string_lossy().into_owned()),
             recovery: None,
             error: None,
-            snapshot: None,
         }
     }
 }
@@ -476,7 +474,6 @@ fn validate_schema(path: &Path) -> Result<(), String> {
     }
     let reference = tempfile::tempdir().map_err(io)?;
     let known = ManagedLibrary::open(reference.path())?;
-    legacy_migration::initialize(&known)?;
     if schema(&db)? != schema(&known.db)? {
         return Err("Snapshot contains an unsupported database schema.".into());
     }
@@ -750,19 +747,6 @@ fn validate_store(store: &ManagedLibrary, manifest: &Manifest) -> Result<(), Str
             }
         }
     }
-    let marker: String = store
-        .db
-        .query_row(
-            "SELECT patch_id FROM legacy_migration WHERE id=1",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|_| "Snapshot has no complete managed musical workspace.".to_owned())?;
-    // The marker records that the folder session migrated. The Patch it created
-    // may have been deleted since, like any other Patch.
-    if marker.is_empty() {
-        return Err("Snapshot has no complete managed musical workspace.".into());
-    }
     Ok(())
 }
 fn stage_snapshot(source: &Path, generation: &Path) -> Result<ManagedLibrary, String> {
@@ -833,8 +817,8 @@ impl AppState {
         result
     }
     pub fn library_recovery_snapshots(&self) -> Result<Vec<String>, String> {
-        let legacy = self.library.lock().map_err(io)?;
-        let recovery = legacy.support.join("Library/Recovery");
+        let workspace = self.workspace.lock().map_err(io)?;
+        let recovery = workspace.support.join("Library/Recovery");
         if !recovery.exists() {
             return Ok(vec![]);
         }
@@ -867,8 +851,8 @@ impl AppState {
         Ok(snapshots.into_iter().map(|(_, path)| path).collect())
     }
     pub fn backup_library(&self, destination: PathBuf) -> Result<SnapshotReply, String> {
-        let legacy = self.library.lock().map_err(io)?;
-        let boundary = dunce::canonicalize(legacy.support.join("Library")).map_err(io)?;
+        let workspace = self.workspace.lock().map_err(io)?;
+        let boundary = dunce::canonicalize(workspace.support.join("Library")).map_err(io)?;
         let parent =
             dunce::canonicalize(destination.parent().ok_or("Choose a backup destination.")?)
                 .map_err(io)?;
@@ -880,21 +864,15 @@ impl AppState {
             return Err("Choose a backup destination outside the managed Library.".into());
         }
         let store = self.managed.lock().map_err(io)?;
-        if self.migration.lock().map_err(io)?.status != "complete" {
-            return Err("Move the folder session into the managed Library before creating a portable backup. This preserves its musical state.".into());
-        }
         capture(&store, &destination)?;
         Ok(SnapshotReply::success(&destination))
     }
     pub fn restore_library(&self, source: PathBuf) -> Result<SnapshotReply, String> {
-        let mut legacy = self.library.lock().map_err(io)?;
+        let mut workspace = self.workspace.lock().map_err(io)?;
         let mut current = self.managed.lock().map_err(io)?;
-        if self.migration.lock().map_err(io)?.status != "complete" {
-            return Err("Move the folder session into the managed Library before replacing it, so its recovery backup is portable.".into());
-        }
         plain_directory(&source)?;
         let source = dunce::canonicalize(&source).map_err(io)?;
-        let boundary = dunce::canonicalize(legacy.support.join("Library")).map_err(io)?;
+        let boundary = dunce::canonicalize(workspace.support.join("Library")).map_err(io)?;
         if boundary.starts_with(&source)
             || (source.starts_with(&boundary) && !source.starts_with(boundary.join("Recovery")))
         {
@@ -945,17 +923,10 @@ impl AppState {
             // audio/UI error must never be described as an unchanged Library.
             reply.activated = true;
             *current = staged;
-            legacy.editor = None;
-            legacy.patch_preview = None;
-            legacy.deleted = None;
-            legacy.prepared.clear();
-            legacy.banks = std::array::from_fn(|_| vec![]);
-            legacy.catalog = Catalog::default();
-            legacy.session = Session::default();
-            legacy.playing = false;
-            legacy.revision += 1;
-            self.patch_active.store(false, Ordering::Relaxed);
-            self.migration.lock().map_err(io)?.status = "complete".into();
+            workspace.editor = None;
+            workspace.patch_preview = None;
+            workspace.deleted = None;
+            workspace.playing = false;
             {
                 let mut audition = self.original_audition.lock().map_err(io)?;
                 audition.owner.clear();
@@ -969,7 +940,7 @@ impl AppState {
             for i in 0..4 {
                 self.audio.send(Command::LayerBank(i, vec![]))?;
             }
-            self.patch_action_locked(patches::PatchAction::Open, &mut legacy, &current)?;
+            self.patch_action_locked(patches::PatchAction::Open, &mut workspace, &current)?;
             Ok(())
         })();
         if let Err(error) = activate {
@@ -981,8 +952,7 @@ impl AppState {
             });
         }
         drop(current);
-        drop(legacy);
-        reply.snapshot = Some(self.snapshot());
+        drop(workspace);
         Ok(reply)
     }
 }
@@ -1022,6 +992,7 @@ mod tests {
     use super::*;
     use crate::tests::{fixture, fixture_state};
     use patches::PatchAction;
+    use std::time::Duration;
 
     fn alter_database(backup: &Path, change: impl FnOnce(&rusqlite::Connection)) {
         let db = rusqlite::Connection::open(backup.join("library.sqlite3")).unwrap();
@@ -1045,7 +1016,7 @@ mod tests {
     {
         use sd_import::SdImportChoice;
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let stereo_source = temp.path().join("Stereo.flac");
         let hex: String = include_str!("../../crates/rample-core/tests/fixtures/stereo-flac.hex")
             .split_whitespace()
@@ -1203,7 +1174,7 @@ mod tests {
         let mut other = Arc::try_unwrap(other).ok().unwrap();
         let (audio, mut renderer) = AudioHost::offline(44100);
         other.audio = audio;
-        other.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&other);
         let view = other.patch_action(PatchAction::Open).unwrap();
         let previous = view.graph.current().unwrap().kit().unwrap().voices[0].layers[0]
             .sample_id
@@ -1221,11 +1192,9 @@ mod tests {
             })
             .unwrap();
         renderer.render(&mut [0.; 256], 2);
-        let old_revision = other.snapshot().revision;
         let restored = other.restore_library(backup).unwrap();
         assert!(restored.complete && restored.activated);
-        assert!(restored.snapshot.unwrap().revision > old_revision);
-        assert!(!other.snapshot().playing);
+        assert!(!other.patch_action(PatchAction::Open).unwrap().playing);
         assert!(other
             .preview_editor(old_editor.clone(), 2, old_settings.clone(), true)
             .is_err());
@@ -1370,7 +1339,7 @@ mod tests {
     #[test]
     fn libraries_whose_migrated_patch_was_deleted_still_back_up_and_restore() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let migrated = state
             .patch_action(PatchAction::Open)
             .unwrap()
@@ -1397,7 +1366,7 @@ mod tests {
     #[test]
     fn restored_originals_remain_read_only_and_held_windows_files_need_no_rename() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let sample = state.list_samples().unwrap()[0].id.clone();
         let previous = state.prepare_library_sample(&sample, false).unwrap();
         let mut options = fs::OpenOptions::new();
@@ -1423,21 +1392,12 @@ mod tests {
             .unwrap()
             .starts_with(boundary));
         drop(held);
-        assert!(state
-            .act(Action::Root {
-                path: temp
-                    .path()
-                    .join("support/Library/Generations")
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .is_err());
     }
 
     #[test]
     fn restore_rejects_revision_identities_that_would_share_a_windows_cache_path() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let samples = state.list_samples().unwrap();
         let first = state.sample_revisions(samples[0].id.clone()).unwrap()[0]
             .id
@@ -1463,7 +1423,7 @@ mod tests {
     #[test]
     fn restore_accepts_recovery_snapshots_but_rejects_other_active_boundary_nesting() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("portable-source");
         state.backup_library(backup.clone()).unwrap();
         let generations = temp.path().join("support/Library/Generations");
@@ -1477,7 +1437,7 @@ mod tests {
     #[test]
     fn backup_and_pre_restore_recovery_refuse_unusable_current_history() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("good");
         state.backup_library(backup.clone()).unwrap();
         let sample = state.list_samples().unwrap()[0].id.clone();
@@ -1498,7 +1458,7 @@ mod tests {
     #[test]
     fn restore_returns_a_published_recovery_path_even_if_its_final_sync_fails() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("restore-source");
         state.backup_library(backup.clone()).unwrap();
         state
@@ -1532,7 +1492,7 @@ mod tests {
     #[test]
     fn restore_reports_recovery_before_and_after_the_durable_activation_commit() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         state
             .patch_action(PatchAction::RenamePatch {
                 name: "Incoming Library".into(),
@@ -1606,7 +1566,7 @@ mod tests {
     #[test]
     fn snapshot_rejects_windows_reserved_asset_names_even_on_macos() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("reserved-name");
         state.backup_library(backup.clone()).unwrap();
         let path = backup.join("manifest.json");
@@ -1641,7 +1601,7 @@ mod tests {
     #[test]
     fn restore_checks_unsafe_manifest_identities_and_database_asset_agreement() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("hostile-manifest");
         state.backup_library(backup.clone()).unwrap();
         let path = backup.join("manifest.json");
@@ -1675,7 +1635,7 @@ mod tests {
     #[test]
     fn restore_refuses_symlinked_snapshot_files_and_backup_refuses_linked_originals() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("linked-backup");
         state.backup_library(backup.clone()).unwrap();
         let manifest: Manifest =
@@ -1700,7 +1660,7 @@ mod tests {
     #[test]
     fn backup_rejects_nested_or_existing_destinations_without_clobbering() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let nested = temp.path().join("support/Library/nested-backup");
         assert!(state.backup_library(nested).is_err());
         let existing = temp.path().join("existing");
@@ -1713,7 +1673,7 @@ mod tests {
     #[test]
     fn restore_rejects_broken_revision_ownership_recipes_and_native_recognition_links() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         for sample in state.list_samples().unwrap() {
             state.sample_revisions(sample.id).unwrap();
         }
@@ -1737,7 +1697,7 @@ mod tests {
     #[test]
     fn restore_rejects_unknown_sql_schema_and_newer_database_versions() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         for (index, sql) in [
             "CREATE TABLE unexpected (value TEXT)",
             "CREATE TRIGGER surprise AFTER INSERT ON samples BEGIN DELETE FROM samples; END",
@@ -1757,7 +1717,7 @@ mod tests {
     #[test]
     fn restore_rejects_corrupt_graph_but_preserves_legal_incomplete_patch_drafts() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         state
             .patch_action(PatchAction::CreatePatch {
                 name: "Empty draft".into(),
@@ -1791,7 +1751,7 @@ mod tests {
     #[test]
     fn snapshot_rejects_self_consistent_but_truncated_audio_before_replacement() {
         let (temp, state, _) = fixture();
-        state.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&state);
         let backup = temp.path().join("damaged");
         state.backup_library(backup.clone()).unwrap();
         let manifest_path = backup.join("manifest.json");
@@ -1864,7 +1824,7 @@ mod tests {
     #[test]
     fn portable_snapshot_replaces_a_library_and_its_recovery_snapshot_is_usable() {
         let (temp, state, _) = fixture();
-        assert_eq!(state.migrate_legacy().unwrap().status, "complete");
+        crate::tests::seed_demo(&state);
         state
             .patch_action(PatchAction::RenamePatch {
                 name: "Portable music".into(),
@@ -1885,7 +1845,7 @@ mod tests {
         assert!(saved.complete);
         let other_support = temp.path().join("other-machine");
         let (other, _) = fixture_state(other_support.clone());
-        other.migrate_legacy().unwrap();
+        crate::tests::seed_demo(&other);
         other
             .patch_action(PatchAction::RenamePatch {
                 name: "Replaced music".into(),
@@ -1900,7 +1860,6 @@ mod tests {
         assert_eq!(patch.session.unwrap().bpm, 173.);
         drop(other);
         let (restarted, _) = fixture_state(other_support);
-        assert!(restarted.snapshot().managed);
         assert_eq!(
             restarted
                 .patch_action(PatchAction::Open)

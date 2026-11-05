@@ -4,6 +4,9 @@ status: accepted
 
 # Make the open Patch the main screen
 
+The folder-session migration offer and its backup limitation below were removed
+by [ADR 0009](0009-remove-the-folder-library.md).
+
 ADR 0001 made the Library and its Patches the application's model, but the
 main window kept showing the older folder session: it read WAVs from a chosen
 folder and offered **Open folder…**, **Check formats** and **Export kit**. Patches

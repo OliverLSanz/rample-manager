@@ -11,10 +11,8 @@ import {
 import { Modal } from "./Modal";
 import * as native from "./native";
 import {
-  basename,
   type EditorInfo,
   type EditSettings,
-  type Snapshot,
   type PatchSnapshot,
   type Transport,
 } from "./types";
@@ -22,25 +20,21 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function SampleEditor({
   initial,
   transport,
-  invalidated,
   onClose,
-  onSaved,
   onToggle,
   onPatchSaved,
 }: {
   initial: EditorInfo;
   transport: Transport;
-  invalidated: boolean;
   onClose: () => void;
-  onSaved: (s: Snapshot) => void;
   onToggle: () => Promise<void>;
   onPatchSaved?: (patch: PatchSnapshot) => void;
 }) {
   const [info, setInfo] = useState(initial);
-  const [sourceInvalidated, setSourceInvalidated] = useState(false);
-  invalidated = invalidated || sourceInvalidated;
+  // Set when the Sample or its Layer changed under the editor: reopen to edit.
+  const [invalidated, setInvalidated] = useState(false);
   const [variantName, setVariantName] = useState(
-    `${initial.managed?.name ?? "Sample"} variant`,
+    `${initial.managed.name} variant`,
   );
   const [managedSaved, setManagedSaved] = useState(false);
   const [settings, setSettings] = useState(initial.settings);
@@ -48,10 +42,6 @@ export function SampleEditor({
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{
-    backup: string;
-    clipped: number;
-  } | null>(null);
   const [duration, setDuration] = useState(
     initial.outputDuration ?? initial.duration,
   );
@@ -88,12 +78,11 @@ export function SampleEditor({
             if (mounted.current && version === sequence.current) {
               setError(message(e));
               if (
-                current.current.info.managed &&
                 /changed|closed|no longer|unavailable|restore the library|reopen/i.test(
                   message(e),
                 )
               )
-                setSourceInvalidated(true);
+                setInvalidated(true);
               setPending(false);
             }
           }
@@ -143,7 +132,6 @@ export function SampleEditor({
       next.end = Math.min(info.duration, Math.max(value, next.start + minimum));
     current.current.settings = next;
     setSettings(next);
-    setSaved(null);
     setManagedSaved(false);
     queuePreview(next, enabled);
   }
@@ -173,31 +161,11 @@ export function SampleEditor({
     setError(null);
     try {
       await chain.current;
-      if (info.managed) {
-        const result = await native.saveManagedEditor(
-          info.id,
-          settings,
-          asNew ? variantName : null,
-        );
-        current.current = {
-          info: result.editor,
-          settings: result.editor.settings,
-          enabled: true,
-        };
-        sequence.current = 0;
-        setInfo(result.editor);
-        setSettings(result.editor.settings);
-        setEnabled(true);
-        setDuration(
-          result.editor.outputDuration ??
-            result.editor.settings.end - result.editor.settings.start,
-        );
-        setPending(false);
-        setManagedSaved(true);
-        onPatchSaved?.(result.patch);
-        return;
-      }
-      const result = await native.saveEditor(info.id, settings);
+      const result = await native.saveManagedEditor(
+        info.id,
+        settings,
+        asNew ? variantName : null,
+      );
       current.current = {
         info: result.editor,
         settings: result.editor.settings,
@@ -207,23 +175,21 @@ export function SampleEditor({
       setInfo(result.editor);
       setSettings(result.editor.settings);
       setEnabled(true);
-      setDuration(result.rendered.duration);
+      setDuration(
+        result.editor.outputDuration ??
+          result.editor.settings.end - result.editor.settings.start,
+      );
       setPending(false);
-      setSaved({
-        backup: result.backup,
-        clipped: result.rendered.clippedFrames,
-      });
-      onSaved(result.snapshot);
-      if (result.snapshot.message) setError(result.snapshot.message);
+      setManagedSaved(true);
+      onPatchSaved?.(result.patch);
     } catch (e) {
       setError(message(e));
       if (
-        info.managed &&
         /changed|closed|no longer|unavailable|restore the library|reopen/i.test(
           message(e),
         )
       )
-        setSourceInvalidated(true);
+        setInvalidated(true);
     } finally {
       setBusy(false);
     }
@@ -231,7 +197,6 @@ export function SampleEditor({
   function reset() {
     setSettings(info.settings);
     current.current.settings = info.settings;
-    setSaved(null);
     setManagedSaved(false);
     queuePreview(info.settings, enabled);
   }
@@ -252,7 +217,7 @@ export function SampleEditor({
           </button>
         </div>
         <p className="editor-filename" title={info.path}>
-          {info.managed?.name ?? basename(info.path)}
+          {info.managed.name}
         </p>
         <div className="editor-transport">
           <button
@@ -294,16 +259,12 @@ export function SampleEditor({
                 ? "Updating…"
                 : enabled
                   ? "Live preview"
-                  : info.managed
-                    ? "Saved sound"
-                    : "Original audio"}
+                  : "Saved sound"}
           </span>
         </div>
         <p className="small">
-          {info.managed
-            ? "Draft preview applies only to this Layer occurrence. Closing restores its saved sound."
-            : "Only this sample is edited. Other layers and voices keep their sound."}{" "}
-          Drag the trim handles or enter times below.
+          Draft preview applies only to this Layer occurrence. Closing restores
+          its saved sound. Drag the trim handles or enter times below.
         </p>
         <TrimWaveform
           peaks={info.waveform}
@@ -450,36 +411,34 @@ export function SampleEditor({
           </section>
         </fieldset>
         <p className="small editor-save-note">
-          {info.managed
-            ? "Sample Edits remain reversible over the complete Original. Rample preview uses mono PCM16 at 44.1 kHz, including effect tails. Original bytes and stereo information are preserved."
-            : "MONO · PCM16 WAV · 44.1 kHz. Save to sample bakes these edits into the original WAV. A recoverable backup is made first. Closing discards unsaved edits."}
+          Sample Edits remain reversible over the complete Original. Rample
+          preview uses mono PCM16 at 44.1 kHz, including effect tails. Original
+          bytes and stereo information are preserved.
         </p>
-        {info.managed && (
-          <section aria-label="Shared Sample references">
-            <p>
-              Overwrite updates all {info.managed.references.length} referring
-              Layers:
-            </p>
-            <ul>
-              {info.managed.references.map((reference, i) => (
-                <li key={i}>{reference}</li>
-              ))}
-            </ul>
-            <label>
-              Variant name
-              <input
-                aria-label="Variant name"
-                value={variantName}
-                disabled={busy}
-                onChange={(e) => setVariantName(e.target.value)}
-              />
-            </label>
-            <p>
-              Save as new creates an independent Sample and changes only this
-              Layer.
-            </p>
-          </section>
-        )}
+        <section aria-label="Shared Sample references">
+          <p>
+            Overwrite updates all {info.managed.references.length} referring
+            Layers:
+          </p>
+          <ul>
+            {info.managed.references.map((reference, i) => (
+              <li key={i}>{reference}</li>
+            ))}
+          </ul>
+          <label>
+            Variant name
+            <input
+              aria-label="Variant name"
+              value={variantName}
+              disabled={busy}
+              onChange={(e) => setVariantName(e.target.value)}
+            />
+          </label>
+          <p>
+            Save as new creates an independent Sample and changes only this
+            Layer.
+          </p>
+        </section>
         {managedSaved && (
           <p role="status">Sample Edits saved. Original preserved.</p>
         )}
@@ -487,25 +446,6 @@ export function SampleEditor({
           <p className="import-error" role="alert">
             The source changed on disk. Close the editor and reopen the sample
             before saving.
-          </p>
-        )}
-        {saved && (
-          <p className="editor-saved" role="status">
-            Sample saved. Original backed up.
-            <br />
-            <small title={saved.backup}>
-              {saved.clipped
-                ? `${saved.clipped} output frames clipped. Restore the backup and lower Gain if needed.`
-                : "Your edits are now part of the WAV, including effect tails."}
-            </small>
-            <button
-              className="text-button"
-              onClick={() =>
-                void native.showEditBackups().catch((e) => setError(message(e)))
-              }
-            >
-              Show edit backups
-            </button>
           </p>
         )}
         {error && (
@@ -529,16 +469,14 @@ export function SampleEditor({
           >
             {dirty ? "Discard edits" : "Close"}
           </button>
-          {info.managed && (
-            <button
-              disabled={
-                busy || invalidated || !dirty || !enabled || !variantName.trim()
-              }
-              onClick={() => void save(true)}
-            >
-              Save as new
-            </button>
-          )}
+          <button
+            disabled={
+              busy || invalidated || !dirty || !enabled || !variantName.trim()
+            }
+            onClick={() => void save(true)}
+          >
+            Save as new
+          </button>
           <button
             className="primary"
             disabled={busy || invalidated || !dirty || !enabled}
@@ -549,11 +487,7 @@ export function SampleEditor({
             ) : (
               <Save size={14} />
             )}
-            {busy
-              ? "Saving…"
-              : info.managed
-                ? "Overwrite shared Sample"
-                : "Save to sample"}
+            {busy ? "Saving…" : "Overwrite shared Sample"}
           </button>
         </div>
       </div>

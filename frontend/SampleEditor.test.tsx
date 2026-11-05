@@ -9,14 +9,12 @@ import {
 import userEvent from "@testing-library/user-event";
 import { SampleEditor } from "./SampleEditor";
 import * as native from "./native";
-import { idleTransport, type EditorInfo, type Snapshot } from "./types";
+import { idleTransport, type EditorInfo } from "./types";
 vi.mock("./native", () => ({
   previewEditor: vi.fn(),
-  saveEditor: vi.fn(),
   saveManagedEditor: vi.fn(),
   closeEditor: vi.fn(),
   auditionEditor: vi.fn(),
-  showEditBackups: vi.fn(),
 }));
 const original: EditorInfo = {
   id: "edit-1",
@@ -39,19 +37,34 @@ const original: EditorInfo = {
     reverbMix: 0,
     reverbSeconds: 1.5,
   },
+  managed: {
+    sample: "sample",
+    revision: "revision",
+    layer: "layer",
+    patch: "patch",
+    kit: "kit",
+    name: "Warm kick",
+    references: ["Set one · A0 · Voice 1 · Layer 1"],
+  },
+};
+const patch = {
+  graph: { selectedPatch: "", patches: [] },
+  session: null,
+  samples: [],
+  validation: [],
+  playing: false,
 };
 const onClose = vi.fn(),
-  onSaved = vi.fn(),
-  onToggle = vi.fn();
-function boot(invalidated = false) {
+  onToggle = vi.fn(),
+  onPatchSaved = vi.fn();
+function boot(initial: EditorInfo = original) {
   return render(
     <SampleEditor
-      initial={structuredClone(original)}
+      initial={structuredClone(initial)}
       transport={idleTransport}
-      invalidated={invalidated}
       onClose={onClose}
-      onSaved={onSaved}
       onToggle={onToggle}
+      onPatchSaved={onPatchSaved}
     />,
   );
 }
@@ -69,33 +82,12 @@ beforeEach(() => {
 afterEach(cleanup);
 describe("sample editor", () => {
   it("disables a managed draft after its source changes until reopened", async () => {
-    const initial = {
-      ...original,
-      managed: {
-        sample: "sample",
-        revision: "revision",
-        layer: "layer",
-        patch: "patch",
-        kit: "kit",
-        name: "Warm kick",
-        references: [],
-      },
-    };
     vi.mocked(native.previewEditor).mockRejectedValue(
       new Error(
         "Original changed in managed storage. Restore the Library from a backup.",
       ),
     );
-    render(
-      <SampleEditor
-        initial={initial}
-        transport={idleTransport}
-        invalidated={false}
-        onClose={onClose}
-        onSaved={onSaved}
-        onToggle={onToggle}
-      />,
-    );
+    boot();
     fireEvent.change(screen.getByRole("slider", { name: "Gain" }), {
       target: { value: "-6" },
     });
@@ -112,32 +104,10 @@ describe("sample editor", () => {
     ).toHaveProperty("disabled", true);
   });
   it("shows shared Overwrite scope and saves an independent Variant for this occurrence", async () => {
-    const initial = {
-      ...structuredClone(original),
-      managed: {
-        sample: "sample",
-        revision: "revision",
-        layer: "second",
-        patch: "patch",
-        kit: "kit",
-        name: "Warm kick",
-        references: [
-          "Set one · A0 · Voice 1 · Layer 1",
-          "Set two · B2 · Voice 4 · Layer 2",
-        ],
-      },
-    };
-    render(
-      <SampleEditor
-        initial={initial}
-        transport={idleTransport}
-        invalidated={false}
-        onClose={onClose}
-        onSaved={onSaved}
-        onToggle={onToggle}
-        onPatchSaved={vi.fn()}
-      />,
-    );
+    const initial = structuredClone(original);
+    initial.managed.layer = "second";
+    initial.managed.references.push("Set two · B2 · Voice 4 · Layer 2");
+    boot(initial);
     fireEvent.change(screen.getByRole("slider", { name: "Gain" }), {
       target: { value: "-6" },
     });
@@ -155,13 +125,7 @@ describe("sample editor", () => {
         settings: { ...initial.settings, gainDb: -6, pitch: 12 },
         outputDuration: 0.5,
       },
-      patch: {
-        graph: { selectedPatch: "", patches: [] },
-        session: null,
-        samples: [],
-        validation: [],
-        playing: false,
-      },
+      patch,
     });
     fireEvent.change(screen.getByRole("slider", { name: "Pitch" }), {
       target: { value: "12" },
@@ -192,43 +156,43 @@ describe("sample editor", () => {
         true,
       ),
     );
-    expect(native.saveEditor).not.toHaveBeenCalled();
+    expect(native.saveManagedEditor).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Discard edits" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(native.closeEditor).toHaveBeenCalledWith("edit-1");
-    expect(native.saveEditor).not.toHaveBeenCalled();
+    expect(native.saveManagedEditor).not.toHaveBeenCalled();
   });
-  it("bakes the latest settings only after Save, then resets controls for the baked WAV", async () => {
+  it("overwrites the shared Sample with the latest settings only after Save", async () => {
     const next = {
       ...structuredClone(original),
       id: "edit-2",
-      duration: 0.5,
-      settings: { ...original.settings, end: 0.5 },
+      settings: { ...original.settings, pitch: 12 },
+      outputDuration: 0.5,
     };
-    vi.mocked(native.saveEditor).mockResolvedValue({
-      snapshot: { message: null } as Snapshot,
+    vi.mocked(native.saveManagedEditor).mockResolvedValue({
       editor: next,
-      backup: "/support/Sample edit backups/original.wav",
-      rendered: { duration: 0.5, frames: 22050, peak: 0.5, clippedFrames: 0 },
+      patch,
     });
     boot();
     fireEvent.change(screen.getByRole("slider", { name: "Pitch" }), {
       target: { value: "12" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save to sample" }));
-    await screen.findByText("Sample saved. Original backed up.");
-    expect(native.saveEditor).toHaveBeenCalledWith(
+    expect(native.saveManagedEditor).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Overwrite shared Sample" }),
+    );
+    await screen.findByText("Sample Edits saved. Original preserved.");
+    expect(native.saveManagedEditor).toHaveBeenCalledWith(
       "edit-1",
       expect.objectContaining({ pitch: 12 }),
+      null,
     );
-    expect(onSaved).toHaveBeenCalled();
-    expect(
-      (screen.getByRole("slider", { name: "Pitch" }) as HTMLInputElement).value,
-    ).toBe("0");
+    expect(onPatchSaved).toHaveBeenCalledWith(patch);
+    // The saved settings are now the editor's baseline: nothing left to save.
     expect(
       (
         screen.getByRole("button", {
-          name: "Save to sample",
+          name: "Overwrite shared Sample",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
@@ -250,7 +214,7 @@ describe("sample editor", () => {
     expect(
       (
         screen.getByRole("button", {
-          name: "Save to sample",
+          name: "Overwrite shared Sample",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
@@ -259,28 +223,27 @@ describe("sample editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Play sequence" }));
     expect(onToggle).toHaveBeenCalled();
   });
-  it("blocks saving when the source changes externally", () => {
-    boot(true);
-    expect(screen.getByRole("alert").textContent).toContain("source changed");
-    expect(
-      (
-        screen.getByRole("slider", { name: "Gain" }) as HTMLInputElement
-      ).matches(":disabled"),
-    ).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Save to sample" }));
-    expect(native.saveEditor).not.toHaveBeenCalled();
-  });
   it("preserves edits and shows a save failure for retry", async () => {
-    vi.mocked(native.saveEditor).mockRejectedValue(
-      "The source changed before replacement.",
+    vi.mocked(native.saveManagedEditor).mockRejectedValue(
+      "The Library disk is full.",
     );
     boot();
     fireEvent.change(screen.getByRole("slider", { name: "Gain" }), {
       target: { value: "-3" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save to sample" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Overwrite shared Sample" }),
+    );
     await screen.findByRole("alert");
-    expect(screen.getByRole("alert").textContent).toContain("source changed");
+    expect(screen.getByRole("alert").textContent).toContain("disk is full");
+    // A failure that is not a source change keeps the draft editable.
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Overwrite shared Sample",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
     expect(
       (screen.getByRole("slider", { name: "Gain" }) as HTMLInputElement).value,
     ).toBe("-3");

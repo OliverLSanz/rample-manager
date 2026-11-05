@@ -1597,23 +1597,6 @@ footer > span {
 }
 
 /* Workspace states */
-.migration {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-}
-.migration > .notice {
-  flex: 1;
-}
-.migration .notice button {
-  margin-top: 10px;
-  background: var(--raised);
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #eeeff1;
-}
 .kit-heading > .primary {
   margin-left: auto;
 }

@@ -1131,12 +1131,6 @@ mod tests {
         std::fs::create_dir_all(source.join("_save")).unwrap();
         wav::write_pcm16(&source.join("A0/1_Kick.wav"), &[8192; 4410], 44100).unwrap();
         std::fs::write(source.join("_save/A0.rpl"), [0, 255, 6, 9]).unwrap();
-        state
-            .act(Action::Root {
-                path: source.to_string_lossy().into_owned(),
-            })
-            .unwrap();
-        assert!(state.snapshot().watching);
         let review = state.prepare_sd_import(source.clone()).unwrap();
         assert_eq!(review.status, "new");
         assert_eq!(review.audio.imported, 1);
@@ -1153,7 +1147,6 @@ mod tests {
                 .len(),
             1
         );
-        assert!(!state.snapshot().watching);
         assert!(patch
             .validation
             .iter()

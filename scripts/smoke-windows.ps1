@@ -11,7 +11,6 @@ if (-not $InstallerPath) { throw 'No Windows installer was built.' }
 $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('rample-smoke-' + [guid]::NewGuid().ToString('N'))
 $installRoot = Join-Path $smokeRoot 'app'
 $env:RAMPLE_DATA_DIR = Join-Path $smokeRoot 'data'
-$sessionPath = Join-Path $env:RAMPLE_DATA_DIR 'session.json'
 $storePath = Join-Path $env:RAMPLE_DATA_DIR 'Library/library.sqlite3'
 $stdoutPath = Join-Path $smokeRoot 'startup.stdout.log'
 $stderrPath = Join-Path $smokeRoot 'startup.stderr.log'
@@ -31,8 +30,7 @@ function Start-App {
         $script:appProcess.Refresh()
         if ($script:appProcess.HasExited) { throw "Installed app exited during startup: $($script:appProcess.ExitCode)." }
         # First-run WebView2 initialization can exceed five seconds on hosted runners.
-        # Startup deliberately leaves existing session bytes untouched. A fresh session
-        # is persisted on graceful close, so readiness uses native storage and the window.
+        # Readiness uses the native Library store and the window.
         if ($startup.Elapsed.TotalSeconds -ge 5 -and (Test-Path $storePath -PathType Leaf) -and $script:appProcess.MainWindowHandle -ne 0) {
             $ready = $true
             break
@@ -56,25 +54,22 @@ function Stop-App {
     }
     $script:appProcess = $null
 }
-function Assert-Session {
-    if (-not (Test-Path $sessionPath -PathType Leaf)) { throw 'Graceful close did not save a session.' }
-    $session = Get-Content -Raw $sessionPath | ConvertFrom-Json
-    if ($session.schemaVersion -ne 2 -or $session.voices.Count -ne 4) { throw 'Invalid saved session.' }
+function Assert-Library {
+    if (-not (Test-Path $storePath -PathType Leaf)) { throw 'The Library store is missing after a graceful close.' }
 }
 try {
     New-Item -ItemType Directory -Path $smokeRoot | Out-Null
     Install-App
     Start-App
     Stop-App
-    Assert-Session
-    $sessionHash = (Get-FileHash $sessionPath).Hash
+    Assert-Library
+    $storeHash = (Get-FileHash $storePath).Hash
     Install-App
-    if ((Get-FileHash $sessionPath).Hash -ne $sessionHash) { throw 'Reinstall changed user preferences.' }
+    if ((Get-FileHash $storePath).Hash -ne $storeHash) { throw 'Reinstall changed the Library.' }
     Start-App
-    if ((Get-FileHash $sessionPath).Hash -ne $sessionHash) { throw 'Startup changed existing session bytes before graceful close.' }
     Stop-App
-    Assert-Session
-    Write-Output 'Windows installer, native startup, graceful session save and preference-preserving reinstall passed.'
+    Assert-Library
+    Write-Output 'Windows installer, native startup, graceful close and Library-preserving reinstall passed.'
     $passed = $true
 } finally {
     Stop-App -Force

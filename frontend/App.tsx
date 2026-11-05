@@ -22,7 +22,6 @@ import { SampleEditor } from "./SampleEditor";
 import { SdImport } from "./SdImport";
 import { SamplesScreen } from "./SamplesScreen";
 import { LibrarySnapshots } from "./LibrarySnapshots";
-import { LibraryMigration } from "./LibraryMigration";
 import {
   BuildResult,
   BuildReviewPanel,
@@ -234,9 +233,6 @@ function FirstPatch({
 
 export default function App() {
   const [view, setView] = useState<PatchSnapshot | null>(null);
-  // The folder session from before the managed Library: whether it has been
-  // moved into the Library, and whether it is only the bundled demo.
-  const [legacy, setLegacy] = useState({ managed: true, isDemo: false });
   const [transport, setTransport] = useState<Transport>(idleTransport);
   const [error, setError] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -256,7 +252,6 @@ export default function App() {
   const [review, setReview] = useState<BuildReview | null>(null);
   const [built, setBuilt] = useState<BuildReply | null>(null);
   const [backups, setBackups] = useState<{ focus: string | null } | null>(null);
-  const [migrationHidden, setMigrationHidden] = useState(false);
   // Counts deletions so each one restarts the Undo offer; 0 hides it.
   const [undoOffer, setUndoOffer] = useState(0);
   const alive = useRef(true);
@@ -351,12 +346,6 @@ export default function App() {
   useEffect(() => {
     alive.current = true;
     let cancelled = false;
-    native
-      .getSnapshot()
-      .then((s) => {
-        if (!cancelled) setLegacy({ managed: !!s.managed, isDemo: s.isDemo });
-      })
-      .catch(() => {});
     native
       .patchAction({ type: "open" })
       .then((result) => {
@@ -666,24 +655,6 @@ export default function App() {
         <div
           className={`workspace ${screen === "samples" ? "samples-mode" : ""}`}
         >
-          {!legacy.managed && !legacy.isDemo && !migrationHidden && (
-            <div className="migration">
-              <LibraryMigration
-                onComplete={() => {
-                  setLegacy((l) => ({ ...l, managed: true }));
-                  void act({ type: "open" });
-                }}
-              />
-              <button
-                className="icon-button"
-                aria-label="Hide folder migration"
-                title="Not now"
-                onClick={() => setMigrationHidden(true)}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
           {building && (
             <div className="notice" role="status">
               <LoaderCircle size={17} className="spin" />
@@ -1028,9 +999,8 @@ export default function App() {
       )}
       {snapshots && (
         <LibrarySnapshots
-          managed={legacy.managed}
           onClose={() => setSnapshots(false)}
-          onRestored={(result) => {
+          onRestored={() => {
             requestVersion.current++;
             setEditor(null);
             setAdding(null);
@@ -1038,8 +1008,6 @@ export default function App() {
             setVelocity(null);
             setReview(null);
             setBuilt(null);
-            if (result.snapshot?.managed)
-              setLegacy((l) => ({ ...l, managed: true }));
             void act({ type: "open" });
           }}
         />
@@ -1048,12 +1016,10 @@ export default function App() {
         <SampleEditor
           initial={editor}
           transport={transport}
-          invalidated={false}
           onClose={() => {
             setEditor(null);
             void act({ type: "open" });
           }}
-          onSaved={() => {}}
           onPatchSaved={setView}
           onToggle={() => musical({ type: "togglePlayback" })}
         />

@@ -4,11 +4,9 @@ import * as native from "./native";
 import type { LibrarySnapshotReply } from "./types";
 
 export function LibrarySnapshots({
-  managed,
   onClose,
   onRestored,
 }: {
-  managed: boolean;
   onClose: () => void;
   onRestored: (result: LibrarySnapshotReply) => void;
 }) {
@@ -23,22 +21,21 @@ export function LibrarySnapshots({
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
-    if (managed)
-      void native
-        .libraryRecoverySnapshots()
-        .then((paths) => {
-          if (alive.current) setSavedRecoveries(paths);
-        })
-        .catch((e) => {
-          if (alive.current)
-            setRecoveryError(
-              `Recovery snapshots could not be listed: ${String(e)}`,
-            );
-        });
+    void native
+      .libraryRecoverySnapshots()
+      .then((paths) => {
+        if (alive.current) setSavedRecoveries(paths);
+      })
+      .catch((e) => {
+        if (alive.current)
+          setRecoveryError(
+            `Recovery snapshots could not be listed: ${String(e)}`,
+          );
+      });
     return () => {
       alive.current = false;
     };
-  }, [managed]);
+  }, []);
   async function backup() {
     setBusy(true);
     setError(null);
@@ -104,20 +101,11 @@ export function LibrarySnapshots({
         history, Variants, Patches and musical state, native source data, Trash
         and recognition records.
       </p>
-      {!managed && (
-        <p role="alert">
-          Move the folder session into the managed Library before backing up or
-          restoring. Return to folders to complete migration first.
-        </p>
-      )}
-      <button
-        disabled={busy || !managed || pending !== null}
-        onClick={() => void backup()}
-      >
+      <button disabled={busy || pending !== null} onClick={() => void backup()}>
         Back up Library…
       </button>
       <button
-        disabled={busy || !managed || pending !== null}
+        disabled={busy || pending !== null}
         onClick={() => void chooseRestore()}
       >
         Restore Library…

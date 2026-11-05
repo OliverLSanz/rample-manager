@@ -14,7 +14,6 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rample-core = { path = "../crates/rample-core", features = ["native-audio"] }
-notify = "8"
 dirs = "6"
 dunce = "1"
 rusqlite = { version = "0.41.1", features = ["bundled"] }

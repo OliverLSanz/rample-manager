@@ -4,6 +4,9 @@ status: accepted
 
 # Own the Library and model SD layouts as Patches
 
+The folder migration described in the last paragraph was removed by
+[ADR 0009](0009-remove-the-folder-library.md); sounds are imported instead.
+
 The accepted target architecture copies imported audio into an application-managed
 Library and stores Patch arrangements and metadata independently of the source
 filesystem. A completed Import leaves the source untouched and no longer reads,

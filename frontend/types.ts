@@ -38,78 +38,11 @@ export interface Voice {
   layerMode: LayerMode;
   velocities: number[];
 }
+/** The open Patch as the sequencer plays it: the selected Kit, tempo and Voices. */
 export interface Session {
-  schemaVersion: number;
-  rootPath: string;
   selectedKit: string;
   bpm: number;
   voices: Voice[];
-  kitConfigurations: {
-    libraries: Record<
-      string,
-      Record<
-        string,
-        Record<string, { sampleName: string; layerMode: LayerMode }>
-      >
-    >;
-  };
-}
-export interface Sample {
-  id: string;
-  name: string;
-  voice: number;
-  revision: string;
-  duration: number;
-  rate: number;
-  channels: number;
-  bits: number;
-  warnings: string[];
-  readable: boolean;
-  needsConversion: boolean;
-}
-export interface Kit {
-  id: string;
-  bank: string;
-  path: string;
-  samples: Sample[];
-  warnings: string[];
-}
-export interface ReviewedFile {
-  id: string;
-  fingerprint: string;
-}
-export interface ImportCandidate extends ReviewedFile {
-  name: string;
-  kit: string;
-  issues: string[];
-  convertible: boolean;
-  target: string;
-}
-export interface ConversionResult {
-  name: string;
-  target: string | null;
-  backup: string | null;
-  error: string | null;
-}
-export interface ConversionReply {
-  snapshot: Snapshot;
-  results: ConversionResult[];
-  backupPath: string;
-}
-export interface Snapshot {
-  managed?: boolean;
-  revision: number;
-  session: Session;
-  catalog: { kits: Kit[]; error: string | null; unassigned: Sample[] };
-  waveforms: Record<string, number[]>;
-  banks: string[][];
-  isDemo: boolean;
-  watching: boolean;
-  supportPath: string;
-  message: string | null;
-  playing: boolean;
-  imports: ImportCandidate[];
-  editorInvalidated?: boolean;
 }
 export interface Transport {
   running: boolean;
@@ -122,29 +55,18 @@ export interface Transport {
   sampleRate: number;
   error: string | null;
 }
+/** Sequencer, mixer and audition controls of the open Patch. */
 export type Action =
-  | { type: "root"; path: string }
   | {
-      type:
-        | "demo"
-        | "basicPattern"
-        | "clearPattern"
-        | "refresh"
-        | "reviewFormats"
-        | "togglePlayback"
-        | "stop";
+      type: "basicPattern" | "clearPattern" | "togglePlayback" | "stop";
     }
-  | { type: "selectKit"; kit: string }
-  | { type: "selectSource"; channel: number; kit: string }
-  | { type: "selectSample"; channel: number; path: string }
   | { type: "setMode"; channel: number; mode: LayerMode }
   | { type: "toggleStep"; channel: number; step: number }
   | { type: "setVolume"; channel: number; value: number }
   | { type: "toggleMute" | "toggleSolo" | "audition"; channel: number }
   | { type: "setVelocity"; channel: number; step: number; value: number }
   | { type: "setBpm"; value: number }
-  | { type: "adjustBpm"; delta: number }
-  | { type: "dismissImports"; files: ReviewedFile[] };
+  | { type: "adjustBpm"; delta: number };
 export const modes: { id: LayerMode; title: string; description: string }[] = [
   {
     id: "manual",
@@ -210,7 +132,7 @@ export interface EditorInfo {
   waveform: number[];
   settings: EditSettings;
   outputDuration?: number;
-  managed?: {
+  managed: {
     sample: string;
     revision: string;
     layer: string;
@@ -218,20 +140,8 @@ export interface EditorInfo {
     kit: string;
     name: string;
     references: string[];
-  } | null;
-}
-export interface EditorSaveReply {
-  snapshot: Snapshot;
-  editor: EditorInfo;
-  backup: string;
-  rendered: {
-    frames: number;
-    duration: number;
-    peak: number;
-    clippedFrames: number;
   };
 }
-
 export interface PatchLayer {
   id: string;
   sampleId: string;
@@ -420,20 +330,10 @@ export type SdImportChoice =
   | { type: "update"; patch: string }
   | { type: "reuse" };
 
-export interface MigrationStatus {
-  status: string;
-  processed: number;
-  total: number;
-  current: string | null;
-  errors: string[];
-  backup: string | null;
-}
-
 export interface LibrarySnapshotReply {
   complete: boolean;
   activated: boolean;
   location: string | null;
   recovery: string | null;
   error: string | null;
-  snapshot: Snapshot | null;
 }

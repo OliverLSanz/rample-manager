@@ -16,15 +16,11 @@ import {
   type Patch,
   type PatchKit,
   type PatchSnapshot,
-  type Snapshot,
 } from "./types";
 
 vi.mock("./native", () => ({
-  getSnapshot: vi.fn(),
   getTransport: vi.fn(),
   patchAction: vi.fn(),
-  migrationStatus: vi.fn(),
-  migrateLegacy: vi.fn(),
   chooseFolder: vi.fn(),
   reviewPatchBuild: vi.fn(),
   applyPatchBuild: vi.fn(),
@@ -120,12 +116,9 @@ function view(): PatchSnapshot {
   return {
     graph: { selectedPatch: "patch", patches: [live, studio] },
     session: {
-      schemaVersion: 2,
-      rootPath: "",
       selectedKit: "kit",
       bpm: 120,
       voices,
-      kitConfigurations: { libraries: {} },
     },
     samples: [sample, snare],
     waveforms: { "occ-second": Array(100).fill(0.5) },
@@ -136,21 +129,9 @@ function view(): PatchSnapshot {
     playing: false,
   };
 }
-function legacy(managed: boolean, isDemo = false) {
-  return { managed, isDemo } as unknown as Snapshot;
-}
 
 beforeEach(() => {
-  vi.mocked(native.getSnapshot).mockResolvedValue(legacy(true));
   vi.mocked(native.getTransport).mockResolvedValue(idleTransport);
-  vi.mocked(native.migrationStatus).mockResolvedValue({
-    status: "idle",
-    processed: 0,
-    total: 0,
-    current: null,
-    errors: [],
-    backup: null,
-  });
   vi.mocked(native.openSampleAudition).mockResolvedValue("picker");
   vi.mocked(native.listSamples).mockResolvedValue([sample, snare]);
   vi.mocked(native.querySamples).mockResolvedValue([sample]);
@@ -517,7 +498,7 @@ describe("Patch-first main screen", () => {
     ).toBeTruthy();
   });
 
-  it("shows when a Voice plays from another Kit after a folder migration", async () => {
+  it("shows when a Voice plays from another Kit", async () => {
     const initial = view();
     initial.graph.patches[0].voiceKits = ["other-kit", "kit", "kit", "kit"];
     const voice = await openApp(initial);
@@ -906,7 +887,6 @@ describe("Library", () => {
       location: "/backup/Library",
       recovery: "/recovery/previous",
       error: null,
-      snapshot: null,
     });
     fireEvent.click(screen.getByRole("button", { name: /Library backup/ }));
     fireEvent.click(screen.getByRole("button", { name: "Restore Library…" }));
@@ -920,32 +900,18 @@ describe("Library", () => {
     ).toBeTruthy();
   });
 
-  it("offers moving an old folder session into the Library until hidden", async () => {
-    vi.mocked(native.getSnapshot).mockResolvedValue(legacy(false));
+  it("never offers the old folder session and keeps backups available", async () => {
+    vi.mocked(native.libraryRecoverySnapshots).mockResolvedValue([]);
     await openApp();
-    const migration = await screen.findByRole("region", {
-      name: "Managed Library migration",
-    });
+    expect(screen.queryByText(/Move current folder/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Library backup/ }));
     expect(
-      within(migration).getByRole("button", {
-        name: "Move current folder into Library",
-      }),
-    ).toBeTruthy();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Hide folder migration" }),
-    );
-    expect(
-      screen.queryByRole("region", { name: "Managed Library migration" }),
-    ).toBeNull();
-  });
-
-  it("does not offer migration once migrated or for the bundled demo", async () => {
-    vi.mocked(native.getSnapshot).mockResolvedValue(legacy(false, true));
-    await openApp();
-    await vi.waitFor(() => expect(native.getSnapshot).toHaveBeenCalled());
-    expect(
-      screen.queryByRole("region", { name: "Managed Library migration" }),
-    ).toBeNull();
+      (
+        (await screen.findByRole("button", {
+          name: "Back up Library…",
+        })) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
   });
 });
 

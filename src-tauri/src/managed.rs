@@ -113,6 +113,10 @@ impl ManagedLibrary {
         if version < 8 {
             db.execute_batch("BEGIN IMMEDIATE; CREATE TABLE exported_audio (sha256 TEXT NOT NULL, sample_id TEXT NOT NULL REFERENCES samples(id), revision_id TEXT NOT NULL REFERENCES sample_revisions(id), render TEXT NOT NULL DEFAULT 'rample-v1', recovered_id TEXT REFERENCES samples(id), PRIMARY KEY (sha256, sample_id, revision_id)); PRAGMA user_version=8; COMMIT;").map_err(|e| e.to_string())?;
         }
+        // Retired: it recorded the old folder-session migration. Every Library
+        // keeps the empty table so snapshots from any version share one schema.
+        db.execute_batch("CREATE TABLE IF NOT EXISTS legacy_migration (id INTEGER PRIMARY KEY CHECK(id=1), patch_id TEXT NOT NULL);")
+            .map_err(|e| e.to_string())?;
         fs::create_dir_all(root.join("Derived")).map_err(|e| e.to_string())?;
         // A single desktop instance owns this store. Staged copies never have published
         // references, so abandoned tempfile artifacts can be discarded on restart.
@@ -743,18 +747,6 @@ pub(super) fn fingerprint(path: &Path) -> Result<String, String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
-// Resolve symlinks before allowing either legacy destructive entry point.
-pub(super) fn guard_legacy_path(support: &Path, path: &Path, folder: bool) -> Result<(), String> {
-    let managed = dunce::canonicalize(support.join("Library")).map_err(|e| e.to_string())?;
-    let source = dunce::canonicalize(path).map_err(|e| e.to_string())?;
-    if source.starts_with(&managed) || (folder && managed.starts_with(&source)) {
-        return Err(
-            "This folder workflow cannot modify managed Originals. Use Library samples instead."
-                .into(),
-        );
-    }
-    Ok(())
-}
 impl AppState {
     pub fn prepare_library_sample(
         &self,
@@ -1011,7 +1003,7 @@ pub(super) fn open_sample_audition(
 
 #[cfg(test)]
 mod tests {
-    use crate::{tests::fixture, Action, Library};
+    use crate::tests::fixture;
     use rample_core::wav;
     use std::path::Path;
 
@@ -1512,54 +1504,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_folder_commands_cannot_open_managed_storage_for_destructive_workflows() {
-        let (temp, state, _) = fixture();
-        let source = temp.path().join("Short.wav");
-        wav::write_pcm16(&source, &[8192; 100], 48000).unwrap();
-        let original_bytes = std::fs::read(&source).unwrap();
-        let sample = state
-            .import_samples(vec![source])
-            .unwrap()
-            .samples
-            .remove(0);
-        let prepared = state.managed.lock().unwrap().prepare(&sample.id).unwrap();
-        let old_session = state.snapshot().session;
-        let error = state
-            .act(crate::Action::Root {
-                path: temp.path().join("support").to_string_lossy().into_owned(),
-            })
-            .err()
-            .expect("managed Library must never be a legacy source");
-        assert!(error.contains("managed Originals"));
-        assert_eq!(state.snapshot().session.root_path, old_session.root_path);
-        #[cfg(unix)]
-        {
-            let root = temp.path().join("external");
-            std::fs::create_dir_all(root.join("A0")).unwrap();
-            let alias = root.join("A0/1_Alias.wav");
-            std::os::unix::fs::symlink(&prepared.path, &alias).unwrap();
-            state
-                .act(crate::Action::Root {
-                    path: root.to_string_lossy().into_owned(),
-                })
-                .unwrap();
-            assert!(state.open_editor(0).is_err());
-            let result = state
-                .convert_imports(vec![crate::ReviewedFile {
-                    id: alias.to_string_lossy().into_owned(),
-                    fingerprint: rample_core::catalog::fingerprint(&alias),
-                }])
-                .unwrap();
-            assert!(result.results[0]
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("managed Originals"));
-        }
-        assert_eq!(std::fs::read(&prepared.path).unwrap(), original_bytes);
-    }
-
-    #[test]
     fn import_reports_partial_failures_and_never_publishes_incomplete_audio() {
         let (temp, state, _) = fixture();
         let valid = temp.path().join("Valid.wav");
@@ -1649,7 +1593,6 @@ mod tests {
     #[test]
     fn imported_original_survives_source_removal_and_application_restart() {
         let (temp, state, _) = fixture();
-        let legacy = state.act(Action::SetBpm { value: 137. }).unwrap().session;
         let source = temp.path().join("My kick.wav");
         wav::write_pcm16(&source, &vec![8192; 4410], 44100).unwrap();
         let bytes = std::fs::read(&source).unwrap();
@@ -1670,6 +1613,5 @@ mod tests {
         assert_eq!(prepared.head[0], [0.25, 0.25]);
         let owner = state.open_sample_audition().unwrap();
         state.audition_sample(owner, samples[0].id.clone()).unwrap();
-        assert_eq!(Library::new(support, false).unwrap().session, legacy);
     }
 }

@@ -18,7 +18,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 
 Use `./scripts/install.sh` to build, sign locally, replace and reopen the Mac app.
 Installation is part of the authorized workflow; do not ask for another approval
-or leave the user to copy bundles. Preserve the session and source libraries.
+or leave the user to copy bundles. Preserve the support folder and its Library.
 The installer keeps a local backup of an installed Swift 1.x app in `.build/legacy`.
 `legacy/swift` contains the archived implementation for reference/rollback only.
 Do not add features there or use its installer for normal updates.
@@ -47,18 +47,18 @@ file drops. Keep one Kit workspace: Patch,
 Kit and Layer management belong on this screen, never in a second dialog that
 repeats it. The switcher only chooses, creates, renames or imports Patches and
 returns to the main window. Pure view logic lives in `frontend/patchView.ts`.
-The folder session is not shown; it is only offered as **Move current folder
-into Library**. Kits, Patches and Layers delete at once with an in-memory Undo
+Kits, Patches and Layers delete at once with an in-memory Undo
 (`patches::Deleted`), not a confirmation; Undo must restore the same IDs.
 Deleting a Patch unlinks its `sd_intakes` rows in the same transaction.
 
 ## Architecture and audio
 
 - `frontend/`: UI, native IPC adapter and UI tests. It never schedules audio.
-- `crates/rample-core/`: WAV decoding, SD catalog, layer selection, session
-  migration/export and sample-clock renderer. `native-audio` enables CPAL.
-- `src-tauri/`: serialized app state, native dialogs/commands, file watching and
-  audio device management. Native settings live separately from app preferences.
+- `crates/rample-core/`: WAV and compressed-audio decoding, Rample preparation,
+  Sample Edit DSP, native `_save` reading, layer selection and the sample-clock
+  renderer. `native-audio` enables CPAL.
+- `src-tauri/`: the managed Library (`managed.rs`), Patches, SD Import, Build
+  Patch, Library snapshots, native dialogs/commands and audio devices.
 
 Sequence hits against the output sample clock. Keep filesystem reads, decoding,
 resampler preparation and device reconnection off the audio callback. Long WAVs
@@ -66,69 +66,45 @@ have bounded preloaded heads and background disk readers, not whole-file decodin
 Keep headless PCM/timing tests separate from hardware-dependent smoke tests:
 `cargo run -p rample-core --example audio_smoke --features native-audio`.
 
-Changes to selected or automatic layers must reload in real time. In the legacy
-folder backend kept for migration, preserve the selected filename when a file
-is removed, so restoring it restores playback.
-Source audio is read-only during browsing/playback. The explicit exception is
-conversion approved in the sample-review modal or explicit **Save to sample** in
-the editor: validate the reviewed fingerprint,
-back up the original under the app support folder, validate the complete output,
-recheck the source bytes and only then replace it. Never overwrite a different
-existing destination WAV. Export copies to a new kit and never overwrites one.
-The explicit exception is **Build Patch** (ADR 0005, below): after the user
-applies its reviewed difference, it may replace, remove and rename owned WAVs
-in canonical Kit folders of the destination, only once every affected file is
-backed up and verified as a Destination backup.
+Changes to selected or automatic layers must reload in real time.
+The app has no folder library (ADR 0009): every sound is a Sample imported into
+the Library, whose Originals are never modified. Imports, SD Import and Build
+Patch only read their sources. The one exception is **Build Patch** (ADR 0005,
+below): after the user applies its reviewed difference, it may replace, remove
+and rename owned WAVs in canonical Kit folders of the destination, only once
+every affected file is backed up and verified as a Destination backup.
 
-## Sample validation and conversion
-
-The folder review and conversion below belong to the legacy folder backend,
-which the interface no longer opens (ADR 0008); keep its behavior intact until
-it is removed. New or revised audio is reviewed against the official manual, including initial
-folder loading. `sample-reviews.json` remembers per-library reviews; declining
-must survive force refreshes/restarts and pending reviews must survive restart.
-`Check formats` explicitly reopens all current issues. Keep review state separate
-from the musical session. Files outside an A0–Z99 kit, bad voice prefixes, missing
-voice 1 and excess layers require manual fixes. Mixed mono/stereo layers are
-resolved by converting stereo layers to mono; leave compatible mono layers alone.
+## Rample preparation
 
 Use the bundled Rust decoder/converter; no FFmpeg installation is required.
-Target standard mono PCM16 WAV at 44.1 kHz. Average all input channels (stereo:
-(L + R) / 2) with disclosed consent, and pad short files with silence to 50 ms.
-Mono is the user-requested preparation policy, even for otherwise valid stereo
-WAVs. Reopen old stereo reviews once when introducing this policy; subsequent
-declines must persist. Do not report already compatible mono layers as needing
-manual fixes solely because another layer is stereo.
-Preserve duration and use band-limited resampling and dither where needed.
-Decode/convert in bounded chunks off the audio thread. Corrupt/truncated files,
-read-only files, stale reviews and conflicting .wav names must preserve originals.
-Backups contain the original bytes and a restore.json manifest with paths/SHA-256.
-Never guess a voice/kit, silently rename collisions or write native .rpl settings.
+Kit preview, Rample audition and Build Patch use the same preparation: standard
+mono PCM16 WAV at 44.1 kHz, averaging all input channels (stereo: (L + R) / 2),
+padding audio shorter than 50 ms with silence. Preserve duration and use
+band-limited resampling and dither where needed. Decode in bounded chunks off
+the audio thread. Originals keep their channels, rate and bytes.
 
 ## Sample editor
 
 `editing.rs` owns the shared pitch/trim interpolation and gain/EQ/echo/reverb DSP.
-Live preview uses this same engine inside each playback; baking streams through
-it at 44.1 kHz into mono PCM16. FX tails are part of the sample and reset on each
-trigger, matching Rample retrigger behavior. Pitch is varispeed, not time stretch.
-Prepare sinc tables, coefficients, delay buffers and trim-start preloads on the
-control thread. Preserve bounded streaming and never read files in the callback.
-The editor is transient and applies only to its source path, not all voice layers.
-Bypass/close restore original playback. Save backs up original bytes under
-`Sample edit backups`, validates the full WAV, rechecks the source before atomic
-publication, clears preview to prevent double effects, and reloads the voice.
+Live preview uses this same engine inside each playback; rendering streams
+through it at 44.1 kHz into mono PCM16. FX tails are part of the sound and reset
+on each trigger, matching Rample retrigger behavior. Pitch is varispeed, not time
+stretch. Prepare sinc tables, coefficients, delay buffers and trim-start preloads
+on the control thread. Preserve bounded streaming and never read files in the
+callback. Sample Edits are reversible settings over the complete Original
+(ADR 0004): a draft affects only its Layer occurrence until **Overwrite shared
+Sample** or **Save as new** (a Variant). Bypass/close restore the saved sound.
 Keep musical session/modes unchanged. Stale IDs and older preview requests must
-not affect a newer editor. External file changes disable preview/save until the
-sample is reopened. Failed post-save preference writes must still report a saved
-sample and backup accurately. Use owned fixtures for destructive editor QA.
+not affect a newer editor. Changed Originals disable preview/save until the
+Sample is reopened.
 
-## Session migration
+## Support folder
 
-macOS preferences stay at `~/Library/Application Support/Rample Preview/session.json`.
-Windows uses `%APPDATA%/Rample Preview/session.json`. The same folder contains
-`Demo SD`. Swift sessions migrate automatically and receive a byte-for-byte
-`session-swift-1.1.0.backup.json` backup before the first migrated save. Keep modes,
-selected layers, patterns, velocity, BPM, mixer and per-kit memory compatible.
+macOS uses `~/Library/Application Support/Rample Preview/`, Windows
+`%APPDATA%/Rample Preview/`. The app reads only its `Library/` (plus
+`Patch build backups/`). Files from the retired folder workflow (`session.json`,
+Swift session backups, `Demo SD`, `sample-reviews.json`, `Conversion backups`,
+`Sample edit backups`) are no longer read; never delete or rewrite them.
 `RAMPLE_DATA_DIR` overrides the support folder for isolated testing only.
 
 ## Native SD configuration

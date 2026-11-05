@@ -30,9 +30,8 @@ it("backs up to a new folder and shows its concrete location", async () => {
     location: "/backup/My Library",
     recovery: null,
     error: null,
-    snapshot: null,
   });
-  render(<LibrarySnapshots managed onClose={() => {}} onRestored={() => {}} />);
+  render(<LibrarySnapshots onClose={() => {}} onRestored={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Back up Library…" }));
   expect(await screen.findByText("Library backup complete.")).toBeTruthy();
   expect(screen.getByText("/backup/My Library")).toBeTruthy();
@@ -48,12 +47,9 @@ it("confirms replacement, returns the recovery location and offers the same rest
     location: "/incoming/Portable Library",
     recovery: "/support/Library/Recovery/previous",
     error: null,
-    snapshot: null,
   });
   const onRestored = vi.fn();
-  render(
-    <LibrarySnapshots managed onClose={() => {}} onRestored={onRestored} />,
-  );
+  render(<LibrarySnapshots onClose={() => {}} onRestored={onRestored} />);
   fireEvent.click(screen.getByRole("button", { name: "Restore Library…" }));
   expect(
     await screen.findByText(/replaces the entire active Library/),
@@ -90,7 +86,7 @@ it("keeps cancellation local and gates all controls while a restore is running",
         finish = resolve;
       }),
   );
-  render(<LibrarySnapshots managed onClose={onClose} onRestored={() => {}} />);
+  render(<LibrarySnapshots onClose={onClose} onRestored={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Back up Library…" }));
   await waitFor(() =>
     expect(
@@ -133,7 +129,6 @@ it("keeps cancellation local and gates all controls while a restore is running",
     location: null,
     recovery: "/recovery/current",
     error: "Could not publish activation",
-    snapshot: null,
   });
   expect(await screen.findByText("Library was not replaced.")).toBeTruthy();
   expect(screen.getByText("/recovery/current")).toBeTruthy();
@@ -148,12 +143,9 @@ it("distinguishes validation failure from an activated Library needing playback 
       location: "/backup/Library",
       recovery: "/recovery/old",
       error: "Playback refresh failed; reopen the application",
-      snapshot: null,
     });
   const refreshed = vi.fn();
-  render(
-    <LibrarySnapshots managed onClose={() => {}} onRestored={refreshed} />,
-  );
+  render(<LibrarySnapshots onClose={() => {}} onRestored={refreshed} />);
   for (const index of [0, 1]) {
     fireEvent.click(screen.getByRole("button", { name: "Restore Library…" }));
     await screen.findByRole("button", { name: "Replace Library" });
@@ -172,32 +164,11 @@ it("distinguishes validation failure from an activated Library needing playback 
     }
   }
 });
-it("explains migration before allowing a portable folder-session backup", () => {
-  render(
-    <LibrarySnapshots
-      managed={false}
-      onClose={() => {}}
-      onRestored={() => {}}
-    />,
-  );
-  expect(screen.getByText(/Move the folder session/)).toBeTruthy();
-  expect(
-    screen
-      .getByRole("button", { name: "Back up Library…" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
-  expect(
-    screen
-      .getByRole("button", { name: "Restore Library…" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
-});
-
 it("offers saved recovery snapshots again after reopening the app", async () => {
   vi.mocked(native.libraryRecoverySnapshots).mockResolvedValue([
     "/support/Library/Recovery/older",
   ]);
-  render(<LibrarySnapshots managed onClose={() => {}} onRestored={() => {}} />);
+  render(<LibrarySnapshots onClose={() => {}} onRestored={() => {}} />);
   expect(
     await screen.findByText("/support/Library/Recovery/older"),
   ).toBeTruthy();
