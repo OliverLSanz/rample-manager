@@ -375,7 +375,7 @@ function buildReview(
   overrides: Partial<import("./types").BuildReview> = {},
 ): import("./types").BuildReview {
   return {
-    patch: "patch",
+    patchId: "patch",
     patchName: "Live set",
     destination: "/Volumes/RAMPLE",
     kits: ["A0"],
@@ -387,8 +387,8 @@ function buildReview(
     removedKits: ["C3"],
     conflicts: [],
     notices: ["1 unassigned SD Import occurrence(s) are not part of any Kit."],
-    state: [],
-    folders: ["A0", "C3"],
+    reviewedAudio: [],
+    reviewedKitFolders: ["A0", "C3"],
     ...overrides,
   };
 }

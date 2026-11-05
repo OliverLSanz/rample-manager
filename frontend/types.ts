@@ -327,7 +327,7 @@ export interface DestinationFile {
 }
 /** Reviewed difference between a Patch's output and a destination. */
 export interface BuildReview {
-  patch: string;
+  patchId: string;
   patchName: string;
   destination: string;
   kits: string[];
@@ -340,8 +340,10 @@ export interface BuildReview {
   /** Problems that block applying the review. */
   conflicts: string[];
   notices: string[];
-  state: DestinationFile[];
-  folders: string[];
+  /** Owned destination audio when reviewed. */
+  reviewedAudio: DestinationFile[];
+  /** Canonical Kit folders on the destination when reviewed. */
+  reviewedKitFolders: string[];
 }
 /** `applying` until publication ends; it stays so when a Build is interrupted. */
 export type BuildStatus = "applying" | "complete" | "incomplete";

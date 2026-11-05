@@ -129,12 +129,13 @@ pub struct DestinationFile {
 #[derive(Default)]
 struct Scan {
     /// Canonical Kit folders at the destination root.
-    folders: Vec<String>,
-    files: Vec<DestinationFile>,
-    /// Other non-metadata entries inside each Kit folder.
-    others: HashMap<String, Vec<String>>,
+    kit_folders: Vec<String>,
+    /// Owned audio inside those folders.
+    audio: Vec<DestinationFile>,
+    /// Non-metadata entries inside each Kit folder that are not owned audio.
+    unowned_in_kit: HashMap<String, Vec<String>>,
     /// Every non-metadata name at the destination root.
-    entries: Vec<String>,
+    root_names: Vec<String>,
     /// Non-canonical folders that SD Import reads as a Kit, such as `A05`,
     /// with the canonical Kit folder name it reads them as.
     aliases: Vec<(String, String)>,
@@ -149,7 +150,7 @@ fn scan(destination: &Path) -> Result<Scan, String> {
         if sd_import::is_system_entry(&name) {
             continue;
         }
-        scan.entries.push(name.clone());
+        scan.root_names.push(name.clone());
         if !canonical_kit(&name) {
             let folder = entry.file_type().map_err(read_error)?.is_dir();
             if let Some((bank, number)) = sd_import::address(&name).filter(|_| folder) {
@@ -167,7 +168,7 @@ fn scan(destination: &Path) -> Result<Scan, String> {
             ));
             continue;
         }
-        scan.folders.push(name.clone());
+        scan.kit_folders.push(name.clone());
         let mut others = vec![];
         for item in fs::read_dir(entry.path()).map_err(read_error)? {
             let item = item.map_err(read_error)?;
@@ -176,7 +177,7 @@ fn scan(destination: &Path) -> Result<Scan, String> {
                 continue;
             }
             if sd_import::is_wav(&file) && item.file_type().map_err(read_error)?.is_file() {
-                scan.files.push(DestinationFile {
+                scan.audio.push(DestinationFile {
                     path: format!("{name}/{file}"),
                     sha256: managed::fingerprint(&item.path())
                         .map_err(|e| format!("Could not read {name}/{file}: {e}"))?,
@@ -186,11 +187,11 @@ fn scan(destination: &Path) -> Result<Scan, String> {
             }
         }
         others.sort_by(|a, b| natord::compare(a, b));
-        scan.others.insert(name, others);
+        scan.unowned_in_kit.insert(name, others);
     }
-    scan.folders.sort_by(|a, b| natord::compare(a, b));
-    scan.files.sort_by(|a, b| natord::compare(&a.path, &b.path));
-    scan.entries.sort();
+    scan.kit_folders.sort_by(|a, b| natord::compare(a, b));
+    scan.audio.sort_by(|a, b| natord::compare(&a.path, &b.path));
+    scan.root_names.sort();
     scan.aliases.sort();
     scan.notices.sort();
     Ok(scan)
@@ -201,7 +202,7 @@ fn scan(destination: &Path) -> Result<Scan, String> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildReview {
-    pub patch: String,
+    pub patch_id: String,
     pub patch_name: String,
     pub destination: String,
     pub kits: Vec<String>,
@@ -217,9 +218,10 @@ pub struct BuildReview {
     /// Problems that block applying this review.
     pub conflicts: Vec<String>,
     pub notices: Vec<String>,
-    /// Owned destination audio and Kit folders when reviewed.
-    pub state: Vec<DestinationFile>,
-    pub folders: Vec<String>,
+    /// Owned destination audio when reviewed.
+    pub reviewed_audio: Vec<DestinationFile>,
+    /// Canonical Kit folders on the destination when reviewed.
+    pub reviewed_kit_folders: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -248,7 +250,9 @@ struct Manifest {
     version: u32,
     id: String,
     created: u64,
-    patch: String,
+    /// The Patch built; `patch` in manifests written before it was renamed.
+    #[serde(alias = "patch")]
+    patch_id: String,
     patch_name: String,
     destination: String,
     status: BuildStatus,
@@ -343,12 +347,12 @@ pub struct BuildBackup {
 }
 
 impl ManagedLibrary {
-    fn review_build(&self, patch: &str, destination: &Path) -> Result<BuildReview, String> {
+    fn review_build(&self, patch_id: &str, destination: &Path) -> Result<BuildReview, String> {
         let graph = self.load_patches()?;
         let patch = graph
             .patches
             .iter()
-            .find(|p| p.id == patch)
+            .find(|p| p.id == patch_id)
             .ok_or("Patch no longer exists.")?;
         let mut issues = patches::kit_issues(patch);
         if patch.kits.is_empty() {
@@ -396,7 +400,7 @@ impl ManagedLibrary {
         let found = scan(destination)?;
         let mut conflicts = found.conflicts.clone();
         for kit in &kits {
-            for entry in &found.entries {
+            for entry in &found.root_names {
                 if entry != kit && entry.eq_ignore_ascii_case(kit) {
                     conflicts.push(format!("{entry} has the same name as Kit folder {kit} on cards that ignore letter case. Move or rename it before building onto this destination."));
                 }
@@ -404,14 +408,14 @@ impl ManagedLibrary {
         }
         for file in &files {
             let name = &file.path[file.kit.len() + 1..];
-            for other in found.others.get(&file.kit).into_iter().flatten() {
+            for other in found.unowned_in_kit.get(&file.kit).into_iter().flatten() {
                 if other.eq_ignore_ascii_case(name) {
                     conflicts.push(format!("{}/{other} is not an audio file Build Patch can replace. Move or rename it before building onto this destination.", file.kit));
                 }
             }
         }
         let existing: HashMap<&str, &str> = found
-            .files
+            .audio
             .iter()
             .map(|f| (f.path.as_str(), f.sha256.as_str()))
             .collect();
@@ -427,13 +431,13 @@ impl ManagedLibrary {
             }
         }
         let removals: Vec<String> = found
-            .files
+            .audio
             .iter()
             .filter(|f| !planned.contains(f.path.as_str()))
             .map(|f| f.path.clone())
             .collect();
         let removed_kits: Vec<String> = found
-            .folders
+            .kit_folders
             .iter()
             .filter(|f| !kits.contains(f))
             .cloned()
@@ -441,7 +445,7 @@ impl ManagedLibrary {
         let mut notices = found.notices.clone();
         let mut kept = vec![];
         for kit in &removed_kits {
-            let others = &found.others[kit];
+            let others = &found.unowned_in_kit[kit];
             if !others.is_empty() {
                 kept.push(kit);
                 notices.push(format!(
@@ -468,7 +472,7 @@ impl ManagedLibrary {
             }
         }
         Ok(BuildReview {
-            patch: patch.id.clone(),
+            patch_id: patch.id.clone(),
             patch_name: patch.name.clone(),
             destination: destination.to_string_lossy().into_owned(),
             kits,
@@ -480,8 +484,8 @@ impl ManagedLibrary {
             removed_kits,
             conflicts,
             notices,
-            state: found.files,
-            folders: found.folders,
+            reviewed_audio: found.audio,
+            reviewed_kit_folders: found.kit_folders,
         })
     }
     /// Whether `sha256` is a recognized export of this Layer's current Revision.
@@ -499,7 +503,7 @@ impl ManagedLibrary {
     /// with `error` means publication started and the destination is incomplete.
     fn apply_build(&self, reviewed: &BuildReview, backups: &Path) -> Result<BuildReply, String> {
         let destination = PathBuf::from(&reviewed.destination);
-        let current = self.review_build(&reviewed.patch, &destination)?;
+        let current = self.review_build(&reviewed.patch_id, &destination)?;
         if current.files != reviewed.files || current.kits != reviewed.kits {
             return Err(
                 "The Patch changed after this review. Review Build Patch again. Nothing was written."
@@ -600,7 +604,7 @@ impl ManagedLibrary {
             version: 1,
             id,
             created: now(),
-            patch: review.patch.clone(),
+            patch_id: review.patch_id.clone(),
             patch_name: review.patch_name.clone(),
             destination: review.destination.clone(),
             status: BuildStatus::Applying,
@@ -619,7 +623,7 @@ impl ManagedLibrary {
             new_folders: review
                 .kits
                 .iter()
-                .filter(|kit| !review.folders.contains(kit))
+                .filter(|kit| !review.reviewed_kit_folders.contains(kit))
                 .cloned()
                 .collect(),
             obsolete_folders: review.removed_kits.clone(),
@@ -674,7 +678,7 @@ fn back_up(
     manifest: &mut Manifest,
 ) -> Result<(), String> {
     let reviewed: HashMap<&str, &str> = review
-        .state
+        .reviewed_audio
         .iter()
         .map(|f| (f.path.as_str(), f.sha256.as_str()))
         .collect();
@@ -771,7 +775,7 @@ fn unchanged_since_review(
     change: &str,
 ) -> Result<(), String> {
     let reviewed = review
-        .state
+        .reviewed_audio
         .iter()
         .find(|f| f.path == path)
         .map(|f| f.sha256.as_str());
@@ -1082,13 +1086,13 @@ impl AppState {
     }
     pub fn review_patch_build(
         &self,
-        patch: String,
+        patch_id: String,
         destination: PathBuf,
     ) -> Result<BuildReview, String> {
         self.managed
             .lock()
             .map_err(|_| "Library is unavailable")?
-            .review_build(&patch, &destination)
+            .review_build(&patch_id, &destination)
     }
     pub fn apply_patch_build(&self, review: BuildReview) -> Result<BuildReply, String> {
         let backups = self.support()?.join(BACKUPS);
@@ -1112,8 +1116,12 @@ impl AppState {
     }
     /// Reviews and applies in one step, failing on an incomplete Build.
     #[cfg(test)]
-    pub fn build_patch(&self, patch: String, destination: PathBuf) -> Result<BuildReply, String> {
-        let review = self.review_patch_build(patch, destination)?;
+    pub fn build_patch(
+        &self,
+        patch_id: String,
+        destination: PathBuf,
+    ) -> Result<BuildReply, String> {
+        let review = self.review_patch_build(patch_id, destination)?;
         let reply = self.apply_patch_build(review)?;
         match &reply.error {
             Some(error) => Err(error.clone()),
@@ -1123,12 +1131,12 @@ impl AppState {
 }
 #[tauri::command]
 pub async fn review_patch_build(
-    patch: String,
+    patch_id: String,
     destination: PathBuf,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<BuildReview, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.review_patch_build(patch, destination))
+    tauri::async_runtime::spawn_blocking(move || state.review_patch_build(patch_id, destination))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1856,6 +1864,33 @@ mod tests {
             .restore_patch_build(first.backup.unwrap().id, card.clone())
             .unwrap();
         assert_eq!(contents(&card), original);
+    }
+
+    #[test]
+    fn destination_backups_recorded_with_the_older_patch_field_still_restore() {
+        let (temp, state, _) = fixture();
+        let (patch, _, _) = live_patch(&state, temp.path());
+        let destination = temp.path().join("Card");
+        populated_card(&destination);
+        let before = contents(&destination);
+        let backup = state
+            .build_patch(patch.clone(), destination.clone())
+            .unwrap()
+            .backup
+            .unwrap();
+        let manifest = Path::new(&backup.folder).join("restore.json");
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        let fields = record.as_object_mut().unwrap();
+        let id = fields.remove("patchId").unwrap();
+        fields.insert("patch".into(), id);
+        fs::write(&manifest, serde_json::to_vec(&record).unwrap()).unwrap();
+
+        assert_eq!(state.patch_build_backups().unwrap()[0].id, backup.id);
+        state
+            .restore_patch_build(backup.id, destination.clone())
+            .unwrap();
+        assert_eq!(contents(&destination), before);
     }
 
     #[test]

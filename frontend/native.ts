@@ -116,9 +116,9 @@ export const showEditBackups = () => invoke<void>("show_edit_backups");
 export const patchAction = (action: import("./types").PatchAction) =>
   invoke<import("./types").PatchSnapshot>("patch_action", { action });
 export const closePatch = () => invoke<void>("close_patch");
-export const reviewPatchBuild = (patch: string, destination: string) =>
+export const reviewPatchBuild = (patchId: string, destination: string) =>
   invoke<import("./types").BuildReview>("review_patch_build", {
-    patch,
+    patchId,
     destination,
   });
 export const applyPatchBuild = (review: import("./types").BuildReview) =>
