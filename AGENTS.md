@@ -135,6 +135,9 @@ tests use generated fixtures. BPM and sequencer steps remain app-only.
 
 `src-tauri/src/build_patch.rs` reconciles a folder or SD root with a Patch
 (ADR 0005) in two commands: `review_patch_build` and `apply_patch_build(review)`.
+`src-tauri/src/destination_backups.rs` owns Destination backups: the
+`restore.json` `Manifest` (backup, verification, restore planning), listing and
+`restore_patch_build`.
 Build owns only WAV files directly inside canonical Kit folders (`A0`–`Z99`, no
 leading zeros). Everything else, including `_save`, firmware, other files in Kit
 folders and names such as `A05`, is never written, removed or backed up; OS

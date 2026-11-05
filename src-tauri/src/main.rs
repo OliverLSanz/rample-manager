@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod build_patch;
+mod destination_backups;
 mod editor;
 mod legacy_migration;
 mod library_snapshots;
@@ -948,9 +949,9 @@ fn main() {
             patches::patch_action,
             build_patch::review_patch_build,
             build_patch::apply_patch_build,
-            build_patch::patch_build_backups,
-            build_patch::restore_patch_build,
-            build_patch::show_patch_build_backups,
+            destination_backups::patch_build_backups,
+            destination_backups::restore_patch_build,
+            destination_backups::show_patch_build_backups,
             patches::close_patch,
             managed::list_samples,
             managed::query_samples,
