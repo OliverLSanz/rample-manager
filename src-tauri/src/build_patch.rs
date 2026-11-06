@@ -78,7 +78,13 @@ pub struct BuildProgress {
 }
 /// Receives each [`BuildProgress`] step.
 pub type Progress<'a> = &'a mut dyn FnMut(BuildProgress);
-pub(crate) fn report(progress: Progress, stage: &'static str, file: &str, done: usize, total: usize) {
+pub(crate) fn report(
+    progress: Progress,
+    stage: &'static str,
+    file: &str,
+    done: usize,
+    total: usize,
+) {
     progress(BuildProgress {
         stage,
         file: file.to_owned(),
@@ -166,7 +172,8 @@ fn scan(destination: &Path, progress: Progress) -> Result<Scan, String> {
     for (done, (path, file)) in wavs.into_iter().enumerate() {
         report(progress, READING, &path, done, total);
         scan.audio.push(DestinationFile {
-            sha256: managed::fingerprint(&file).map_err(|e| format!("Could not read {path}: {e}"))?,
+            sha256: managed::fingerprint(&file)
+                .map_err(|e| format!("Could not read {path}: {e}"))?,
             path,
         });
     }
