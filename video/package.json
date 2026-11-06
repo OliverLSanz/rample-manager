@@ -1,0 +1,25 @@
+{
+  "name": "rample-manager-video",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "audio": "node scripts/render-audio.ts",
+    "studio": "npm run audio && remotion studio",
+    "render": "npm run audio && remotion render Prototype out/prototype.mp4",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.541",
+    "@remotion/google-fonts": "4.0.541",
+    "lucide-react": "0.468.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "remotion": "4.0.541"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/react": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}
