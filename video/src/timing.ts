@@ -26,3 +26,6 @@ export function ramp(step: number, from: number, to: number, easing = Easing.out
     easing,
   });
 }
+
+/** The snare's waveform after 0…5 sample-editor edits, on one scale. */
+export const editorWaveforms = analysis.editor as number[][];

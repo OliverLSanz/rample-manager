@@ -8,16 +8,20 @@ import { fileURLToPath } from "node:url";
 import {
   DURATION_IN_FRAMES,
   FPS,
-  KIT_FOLDER,
+  SAMPLES_FOLDER,
   SAMPLE_RATE,
+  auditions,
+  edits,
+  files,
   hits,
   stepToSeconds,
   voices,
 } from "../src/score.ts";
+import { applyEdits } from "./edits.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const video = resolve(here, "..");
-const kit = resolve(video, "..", KIT_FOLDER);
+const samples = resolve(video, "..", SAMPLES_FOLDER);
 
 /** Reads a mono or stereo PCM16 WAV as mono floats. */
 function readWav(path: string): Float32Array {
@@ -54,19 +58,23 @@ function readWav(path: string): Float32Array {
 }
 
 const cache = new Map<string, Float32Array>();
-const sample = (file: string) => {
-  if (!cache.has(file)) cache.set(file, readWav(join(kit, file)));
-  return cache.get(file)!;
+const sample = (file: string, edit = 0) => {
+  const key = `${file}#${edit}`;
+  if (!cache.has(key)) {
+    const original = readWav(join(samples, file));
+    cache.set(key, edit ? applyEdits(original, edit) : original);
+  }
+  return cache.get(key)!;
 };
 
 const length = Math.ceil((DURATION_IN_FRAMES / FPS) * SAMPLE_RATE);
 const mix = new Float32Array(length);
-const perVoice = Array.from({ length: 4 }, () => new Float32Array(length));
+const perVoice = Array.from({ length: 5 }, () => new Float32Array(length));
 const all = hits();
 const CHOKE = Math.round(0.004 * SAMPLE_RATE);
 
 for (const [index, hit] of all.entries()) {
-  const data = sample(hit.file);
+  const data = sample(hit.file, hit.edit ?? 0);
   const start = Math.round(stepToSeconds(hit.at) * SAMPLE_RATE);
   // A voice is monophonic: the next hit on it cuts this one with a short fade.
   let end = start + data.length;
@@ -125,23 +133,33 @@ function levels(signal: Float32Array, gain: number) {
   return out;
 }
 
-function waveform(data: Float32Array, bins = 96) {
+/** Peak per bin over `seconds` (default: the whole sound), divided by `scale` (default: its own peak). */
+function waveform(data: Float32Array, bins = 96, seconds?: number, scale?: number) {
   const out: number[] = [];
-  const per = data.length / bins;
+  const total = seconds ? seconds * SAMPLE_RATE : data.length;
+  const per = total / bins;
   let max = 0;
   for (let b = 0; b < bins; b++) {
     let p = 0;
-    for (let t = Math.floor(b * per); t < Math.floor((b + 1) * per); t++) p = Math.max(p, Math.abs(data[t]));
+    for (let t = Math.floor(b * per); t < Math.min(data.length, Math.floor((b + 1) * per)); t++)
+      p = Math.max(p, Math.abs(data[t]));
     out.push(p);
     max = Math.max(max, p);
   }
-  return out.map((p) => Number((p / (max || 1)).toFixed(3)));
+  return out.map((p) => Number(Math.min(1, p / (scale ?? (max || 1))).toFixed(3)));
 }
+
+const EDITOR_SECONDS = 1.6;
+const editorScale = Math.max(...Array.from({ length: edits.length + 1 }, (_, i) => sample(files.snare, i).reduce((m, v) => Math.max(m, Math.abs(v)), 0)));
 
 const analysis = {
   master: levels(shaped, 1),
   voices: perVoice.map((v) => levels(v, drive)),
-  waveforms: Object.fromEntries(voices.map((v) => [v.file, waveform(sample(v.file))])),
+  waveforms: Object.fromEntries(
+    [...voices.map((v) => v.file), files.kickPunch, ...auditions.map((a) => a.file!)].map((f) => [f, waveform(sample(f))]),
+  ),
+  /** The snare after 0…5 edits, on one time and level scale. */
+  editor: Array.from({ length: edits.length + 1 }, (_, i) => waveform(sample(files.snare, i), 160, EDITOR_SECONDS, editorScale)),
 };
 mkdirSync(join(video, "src", "generated"), { recursive: true });
 writeFileSync(join(video, "src", "generated", "analysis.json"), JSON.stringify(analysis));

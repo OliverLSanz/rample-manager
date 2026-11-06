@@ -1,13 +1,13 @@
 # Promo video
 
-A short demo of Rample Manager made in code with [Remotion](https://www.remotion.dev),
+A 50-second demo of Rample Manager made in code with [Remotion](https://www.remotion.dev),
 in the style of the website. Its scenes reuse the app's own components from
 `../frontend` (the sequencer) with demo data.
 
 ```sh
 npm ci
 npm run studio   # edit with a live preview and timeline
-npm run render   # out/prototype.mp4, 1920×1080 at 60 fps
+npm run render   # out/rample-manager-demo.mp4, 1920×1080 at 60 fps
 ```
 
 - `src/score.ts` is the single score: tempo, scene boundaries, the beat and when each

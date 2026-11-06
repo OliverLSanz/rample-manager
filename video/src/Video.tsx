@@ -1,6 +1,9 @@
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame } from "remotion";
 import { SCENES, frameToStep } from "./score";
+import { Build } from "./scenes/Build";
 import { Chaos } from "./scenes/Chaos";
+import { Editor } from "./scenes/Editor";
+import { Library } from "./scenes/Library";
 import { Outro } from "./scenes/Outro";
 import { SequencerScene } from "./scenes/SequencerScene";
 import { Title } from "./scenes/Title";
@@ -24,8 +27,17 @@ export function Video() {
       <Scene {...SCENES.title}>
         <Title />
       </Scene>
-      <Scene {...SCENES.sequencer} lead={4}>
+      <Scene {...SCENES.library} lead={2}>
+        <Library />
+      </Scene>
+      <Scene {...SCENES.sequencer} lead={2}>
         <SequencerScene />
+      </Scene>
+      <Scene {...SCENES.editor} lead={2}>
+        <Editor />
+      </Scene>
+      <Scene {...SCENES.build} lead={2}>
+        <Build />
       </Scene>
       <Scene {...SCENES.outro}>
         <Outro />

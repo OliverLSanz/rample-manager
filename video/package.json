@@ -6,7 +6,7 @@
   "scripts": {
     "audio": "node scripts/render-audio.ts",
     "studio": "npm run audio && remotion studio",
-    "render": "npm run audio && remotion render Prototype out/prototype.mp4",
+    "render": "npm run audio && remotion render Demo out/rample-manager-demo.mp4",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

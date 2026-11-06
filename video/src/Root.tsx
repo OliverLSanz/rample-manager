@@ -5,7 +5,7 @@ import { Video } from "./Video";
 export function Root() {
   return (
     <Composition
-      id="Prototype"
+      id="Demo"
       component={Video}
       durationInFrames={DURATION_IN_FRAMES}
       fps={FPS}
