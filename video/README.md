@@ -9,6 +9,7 @@ npm ci
 npm run studio   # edit with a live preview and timeline
 npm run render            # out/rample-manager-demo.mp4, 16:9 1920×1080 at 60 fps
 npm run render:vertical   # out/rample-manager-demo-vertical.mp4, 9:16 1080×1920 for Shorts/Reels/TikTok
+npm run thumbnail         # out/youtube-thumbnail.png, 1280×720
 ```
 
 - `src/score.ts` is the single score: tempo, scene boundaries, the beat and when each

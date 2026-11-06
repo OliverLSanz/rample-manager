@@ -8,6 +8,7 @@
     "studio": "npm run audio && remotion studio",
     "render": "npm run audio && remotion render Demo out/rample-manager-demo.mp4",
     "render:vertical": "npm run audio && remotion render DemoVertical out/rample-manager-demo-vertical.mp4",
+    "thumbnail": "remotion still Thumbnail out/youtube-thumbnail.png",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
