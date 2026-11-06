@@ -9,8 +9,14 @@ The website and visual manual live in `site/` and deploy with
 `./scripts/deploy-site.sh` to https://oliverlsanz.com/RampleManager/. Keep the
 manual in step with user-facing changes. Release builds show one dismissible
 startup notice (`frontend/notices.ts`): a newer GitHub Release with the first
-bullets of its notes, or a message from `site/messages.json` (README, Startup
-notices). Every failure must stay silent; never add tracking.
+bullets of its notes, or a message from `site/messages.json`
+(`docs/development.md`, Startup notices). Every failure must stay silent; never
+add tracking.
+
+The repository is public: `README.md` is its front page for users (website link,
+features, install). Detailed app behavior lives in `docs/how-it-works.md` and
+building, architecture and releases in `docs/development.md`; update those, not
+the README, with behavior or developer changes.
 
 ## Change, validate and install
 

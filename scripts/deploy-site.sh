@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Publishes site/ (landing page and manual) to https://oliverlsanz.com/RampleManager/.
-# The VPS's Nginx serves ~/vps/html/RampleManager; see "Website" in README.md.
+# The VPS's Nginx serves ~/vps/html/RampleManager; see "Website" in docs/development.md.
 set -euo pipefail
 PROJECT_DIR="${0:A:h:h}"
 HOST="${RAMPLE_SITE_HOST:-oliverlsanz.com}"

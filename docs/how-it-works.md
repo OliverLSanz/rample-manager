@@ -1,0 +1,322 @@
+# How Rample Manager works
+
+A detailed reference of the app's behavior, screen by screen. For a visual
+walkthrough, see the [manual](https://oliverlsanz.com/RampleManager/manual/);
+for building and contributing, see [development.md](development.md).
+
+## The Library (Samples view)
+
+The **Samples** view (next to **Kit** at the top) is the Library. **Import audio
+files…** and **Import folder…** bring mono or stereo WAV, AIFF, FLAC and MP3 files
+into the app's private Library. Folder import includes nested folders and does
+not require Rample kit names or voice prefixes. Each Sample gets a stable identity
+and an initial name from its source filename. Identical file bytes are recognized
+across filenames, locations and restarts, retaining the existing Sample name.
+The results show each imported, recognized or failed file; an incomplete import
+is reported explicitly. **Original** auditions the unchanged source channels
+independently of the kit mixer and sample editor. **Rample mono** auditions a
+separate target preparation: channel-average mono PCM16 WAV at 44.1 kHz, with
+band-limited resampling and dither where needed. Only audio shorter than 50 ms
+is padded. The square button stops either audition. Clicking a row, or browsing
+with ↑/↓ while **Hear while browsing** is on, plays its Rample sound.
+
+The filters show all Samples, those in the open Patch, those not in any Kit,
+the Trash, or tags: picking several tags shows the Samples that have all of
+them (`#kick` and `#industrial` for industrial kicks), and **Clear** drops them;
+sort by import order, name, duration or use. Each row
+shows where the Sample plays in the open Patch (such as `A0·V2`) and in how many
+other Patches. The details beside the list show its waveform and **Used in**:
+every Layer that plays it, across Patches; click one to open that Kit. **Add as
+Layer** adds it to the open Patch's Kit by default, or to any Kit and Voice of any
+Patch, without leaving the open one (Enter does the same). ⌘/Ctrl-click and
+Shift-click (or Shift+↑/↓) select several Samples to add as consecutive Layers,
+tag or move to Trash together. The selection lists the tags its Samples carry;
+× removes one from all of them.
+
+Tags ignore case: `kick` and `Kick` are the same tag, and the Library keeps a
+single spelling of each. Typing a tag that already exists in another case uses
+the existing spelling. Opening the Library merges tags left in several cases
+into the spelling most Samples use.
+
+Hovering a tag filter shows **Rename** and **Delete**. Both apply to every
+Sample, including those in Trash. Renaming onto another existing tag, in any
+case, merges the two (each Sample keeps one copy); renaming to another case of
+the same tag respells it. Removing, renaming and deleting tags happen at once
+and offer **Undo** until the next change.
+
+Select a Sample to edit its descriptive name and tags (one tag per
+line; a tag another Sample has keeps that Sample's spelling). Tags can contain spaces, punctuation and Unicode text. Search matches
+literal, case-insensitive words: every word must be part of the name or a tag,
+so `kick industrial` finds industrial kicks. Renaming and tagging do not rename
+Original files or change Sample identity. Reimporting known audio retains this
+metadata, including after restarting the app. Samples with the same name remain
+separate entries; selecting or auditioning a row always uses its Sample ID.
+
+**Move to Trash** retires a Sample from ordinary Library searches and the Add
+Samples panel. Open **Trash** to audition or **Restore** it. Existing Layers keep their
+Sample identity and saved sound, including after restarting. Restore makes the
+same Sample available again without copying audio or changing its Kit references.
+Importing an Original again from the Samples view while all its Samples are in
+Trash brings it back as a fresh import: the source filename as its name, no
+tags, no Sample Edits and no Layers. A trashed Sample that no Layer uses leaves
+Trash with its identity (its saved Revisions stay in its history); when Layers
+still play every one, they stay in Trash and a new Sample shares the Original.
+Reimporting an exported, edited sound of a retired Sample, and **Import Rample
+SD…**, report the existing Trash entry and offer **Restore Sample** instead.
+Retirement retains Originals and saved history; permanent purge is not available.
+
+Completed imports preserve all Original bytes privately and work after removing
+the source. WAV playback reads its Original directly. Other supported formats
+use a disposable source-rate, channel-preserving float64 WAV playback artifact,
+without making that artifact or the mono Rample preparation the Library master.
+Decode and preparation use the bundled Rust codecs, work in bounded chunks off
+the audio callback, and need no FFmpeg installation. Playback artifacts currently
+support mono/stereo audio up to 384 kHz and standard RIFF size limits; files that
+cannot be completely decoded are reported individually.
+
+## Patches and Kits
+
+The main window always shows the open Patch
+([ADR 0008](adr/0008-make-the-open-patch-the-main-screen.md)). Its name
+at the top opens the Patch switcher: choose another Patch, create, rename,
+duplicate or delete one, or **Import Rample SD…**. Each choice returns to the
+main window with that Patch loaded. All Patches share the Library's Samples.
+
+The sidebar lists the open Patch's Kits in Rample order (A0, A1 … Z99), grouped
+by Bank; click a Bank to fold it (the selected Kit's Bank stays open). Search
+matches a Kit address or the name of any Sample in it, and a warning marks a Kit
+that Build would refuse. **+** creates a Kit at the next free address; change the
+Bank letter or Kit number before confirming. A Kit's **⋯** menu changes its
+address without copying any audio, duplicates it to another address (new Layer
+occurrences of the same Samples, same modes and selections) or deletes it. Used
+addresses are refused as you type. With a Kit focused, ↑/↓ select the previous or
+next Kit and Delete removes it.
+
+Deleting a Kit or Patch, or removing a Layer, happens at once and shows **Undo**
+(also Cmd/Ctrl+Z) for ten seconds. Undoing a Layer puts it back at its position,
+with its selection, and shows its Kit. Undo restores it exactly, with the same identities, even after
+other edits, until the next deletion, a Library restore or quitting the app.
+A deleted imported Patch stops being recognized when its card is imported
+again; undo restores that recognition. A duplicated Patch starts without the
+original's SD Import report.
+
+## Voices and Layers
+
+Each voice card lists its Voice's ordered Layers. Click a Layer to select it;
+hover it to move it up or down, **repeat** it (intentionally adding another
+occurrence of the same Sample) or remove just that occurrence, or drag it to
+another position in its Voice. Selection follows the occurrence when its
+position changes, even for duplicates. All five Layer modes use this saved order;
+new Voices use the Library's Default Layer mode. The waveform shows the Layer you
+hear: the selected one in Single sample mode, otherwise the one last triggered.
+Kit preview uses the Library's mono Rample preparation.
+
+## Adding Samples to a Voice
+
+**Add Sample** on a voice card opens the **Add Samples** panel beside the Kit,
+targeting that Voice; the 1–4 buttons change the target. Search matches part of
+a name or tag for every word, and the tag buttons under it combine like the
+Library's tag filters. ↑/↓ browse and, with **Hear while browsing**, play each Sample as
+the Rample will (mono preparation, independently of the mixer); Enter,
+double-click or **+** adds it as the Voice's last Layer. The panel stays open,
+so you can keep auditioning and adding, also while switching Kits. Shift- and
+Cmd/Ctrl-click, Shift+↑/↓ or Cmd/Ctrl+A select several Samples: Enter or
+**Add N to Voice** adds them in list order. Drag any row onto a voice card to
+add it there; dragging a selected row carries the whole selection. Long Libraries show 150 matches at a time.
+
+## Sample editor
+
+Select a Layer and click the sliders button beside **Audition** to edit its complete Original. Trim,
+gain, varispeed pitch, EQ, echo and reverb are saved as reversible Sample Edits;
+reopening retains the controls and full waveform, so trims can expand and effects
+can be reduced. Drafts affect only that Layer occurrence, including repeated uses
+of the same Sample. Bypass compares against its saved sound; closing discards the
+draft. **Overwrite shared Sample** lists every affected Layer across Patches and
+updates their shared sound. **Save as new** names an independent Variant, retains
+tags and the shared Original, and retargets only the selected occurrence. Saved
+Revisions remain available for reproducible future exports. See
+[reversible Sample Edits](reversible-sample-edits.md) for the rendering contract.
+
+## Sequencer and mixer
+
+Below the voice cards are the four-channel, 16-step sequencer, tempo, velocities,
+volume, mute and solo controls. Modes and selected Layers are remembered per Kit;
+patterns, mixer and tempo persist within each Patch when changing Kits. Musical
+controls reuse prepared audio, so changing a step or stopping playback does not
+reread/decode long Originals; opening the app, the Library or the editor
+revalidates assets. Incomplete drafts remain editable: missing Voice 1 and more
+than 12 Layers, duplicate addresses and audio that cannot be prepared are listed
+under **issues to fix before Build**, retaining every Layer. While any remain,
+**Build to SD…** shows their number and opens that list instead of asking for a
+destination. Notes from SD Import about native settings are listed apart and do
+not block a Build. Patches save locally in the private Library database. These controls
+never write native Rample settings (`_save`). To use a mode on the device, set
+it on the Rample and STORE.
+
+| Shortcut                               | Action                            |
+| -------------------------------------- | --------------------------------- |
+| Space                                  | Play / stop                       |
+| 1–4                                    | Audition a voice                  |
+| Option/Alt-click or right-click a step | Edit its velocity                 |
+| [ and ]                                | Previous or next Kit              |
+| Cmd/Ctrl+1, Cmd/Ctrl+2                 | Kit or Samples view               |
+| Cmd/Ctrl+F                             | Search the current view           |
+| Cmd/Ctrl+Z                             | Undo a deletion while it is shown |
+| ?                                      | List all shortcuts                |
+
+Shortcuts leave text fields alone; Space and 1–4 also leave focused buttons
+alone. The **Pattern** menu loads
+an example beat or clears the sequence.
+
+## Import Rample SD
+
+**Import Rample SD…** copies an SD root or local copy into managed storage and
+reconstructs its Bank/Kit addresses, Voice ownership and numerical/alphabetical
+Layer order. Exact Originals reuse existing Samples, preserving their names,
+tags and Trash identity. An unchanged arrangement and native state opens its
+previous Patch, including when imported from a different mount location. A
+changed intake requires **Create new Patch** or **Update existing Patch**; update
+retains the Patch name, tempo, sequencer/mixer memory and matching Layer selection.
+
+Usable audio survives malformed layouts and individual failures. Invalid source
+assignments stay unassigned rather than being guessed; use **Add Sample** in
+the intended Voice to place them explicitly. Excess Layers are retained. The
+**SD Import report** keeps historical source issues separately from current
+draft validation. A partial copy reports the failures and asks you to retain the
+source for retry. Completed copies, pending reviews, and committed Patches survive
+removing the source and restarting.
+
+Native files in `_save` and other non-audio files are retained as exact bytes in
+the Library database. Known operating-system filesystem metadata is ignored.
+Import reads each Kit's STOREd Layer modes and selected Layers. Kits never saved
+with STORE use your **Default Layer mode**, which you set in the Patch switcher
+and which also applies to new Kits. The Rample's global LAYER setting
+is not read. Unverified or unreadable values use that default and are listed
+in the review. A source with Kits but no `_save` folder at all (for example a
+copy of only the Kit folders) is reported too: no native settings were found,
+so every Kit uses your Default Layer mode.
+
+## Build to SD
+
+**Build to SD…** (Build Patch) writes the open Patch to a folder or directly onto an SD
+card, empty or populated. Every Kit and every ordered Layer, including repeated
+occurrences, becomes a Bank/Kit folder and a mono PCM16 44.1 kHz WAV of at
+least 50 ms rendered from its Original and saved Sample Edits, exactly as Kit
+preview plays it. Files are named `<Voice>_<position>_<name>.wav`, for example
+`A0/1_01_Warm_kick.wav` and `A0/1_02_Snare.wav`, so the Rample's
+numerical/alphabetical sort keeps the intended Layer order; Library names are
+unchanged. Build first checks Voice 1, the 12-Layer limit and all audio,
+listing every problem. While it reviews and builds, a progress bar shows each
+stage (reading the destination, preparing audio, backing up, writing and
+verifying) and the file being handled, so a large card visibly advances.
+
+Before anything is written, Build shows a review of the destination: files to
+add, files to replace, files to remove and files already up to date. Build
+owns only WAV files directly inside `A0`–`Z99` Kit folders: the card's Kit
+audio is made to match the Patch, so Kits that are not in the Patch lose their
+audio and their folder is removed when nothing else is left in it. Native
+settings (`_save`), firmware, other files and folders, and non-canonical names
+such as `A05` are never changed or backed up. Names that would collide on a
+card that ignores letter case (for example an `a0` folder) block the build
+until you move them, and so does a non-canonical folder that **Import Rample
+SD…** would read as a built or kept Kit (for example `A05` when the Patch
+builds `A5`), because reimporting the card would keep only one of them. **Apply Build** first rechecks that the Patch and the
+reviewed Kit audio are unchanged; if anything changed, nothing is written and
+you review again. It then renders every Layer, copies every file it will
+replace or remove into `Patch build backups` in the application support
+folder (with a `restore.json` manifest listing paths and SHA-256), verifies
+those copies and only then updates the card, rechecking each file right before
+it is replaced or removed so audio saved in the meantime is never overwritten. Files that already hold the
+Patch's current audio are left alone, so rebuilding an unchanged Patch writes
+nothing. A failure after publication starts is reported as an incomplete
+Build with the number of changes applied, never as a complete one.
+Originals are never modified. Built files are recognized by **Import Rample
+SD…** and **Import samples**, so reimporting a build keeps Samples and their
+edits instead of adding new Originals. Build never writes `_save`, Layer modes,
+selected Layers, BPM or patterns: set modes on the Rample and STORE. Settings
+stored on the device that no longer match its files are yours to update there.
+
+## Destination backups
+
+The clock button beside **Build to SD…** opens **Destination backups**, which lists every Build that changed a folder or card, with
+its Patch, destination, time and status (complete, incomplete or interrupted);
+a Build's result links straight to its backup. **Restore…** asks for
+confirmation, then returns that destination to its state before the Build:
+files the Build added are removed, files it replaced or removed get their
+backed-up bytes back (verified by SHA-256), and Kit folders it created or
+removed are undone. Use **Restore another folder…** when the card mounts
+elsewhere. Restore only changes files that still hold that Build's output or
+are missing; if anything changed since, nothing is changed and the files are
+listed. To step back several Builds, restore the newest first. Restoring again
+is harmless. `_save` and all other content stay untouched.
+
+## Library backups
+
+Use **Library backup…** in the sidebar to create a complete
+portable snapshot, or replace the Library with a verified snapshot from another
+machine. Restore first creates a recoverable snapshot of the current Library and
+shows its location, including on later failures. **Restore recovery snapshot…**
+returns to that saved state. See [portable Library snapshots](library-snapshots.md) for the
+format, validation and interruption/recovery behavior.
+
+## Layer playback
+
+| App mode                | Rample mode    | Behavior                                     |
+| ----------------------- | -------------- | -------------------------------------------- |
+| Single sample (default) | MANUAL         | Trigger only the selected sample             |
+| Random                  | RANDOM         | Choose a layer per trigger, allowing repeats |
+| Sequential              | CYCLIC         | Advance in natural filename order, then wrap |
+| Reverse sequential      | REVERSE CYCLIC | Advance backwards, then wrap                 |
+| Velocity                | VELOCITY       | Select a layer using the step's velocity     |
+
+Automatic modes use up to 12 readable layers. Cyclic modes start at the selected
+layer when transport starts, advancing on triggers rather than empty steps.
+Audition uses the same cursor and mode, with step 1's velocity. The waveform and
+layer counter show the triggered layer. Velocity selects a layer in even zones
+without changing amplitude. Exact hardware velocity boundaries and cyclic
+initialization still require a device comparison.
+
+Modes and selected layers are remembered independently per voice and Kit.
+Patterns, velocities, BPM and mixer belong to the Patch; browsing Kits keeps the
+same beat. Mono and stereo audition work; stereo pairing on the module, its DAC
+and its effects are not emulated.
+
+### Native Rample SD settings are read-only
+
+The app manages audio files and never creates, modifies or deletes `_save/*.rpl`
+([ADR 0007](adr/0007-read-native-settings-and-never-write-save.md)).
+Import only reads verified fields to fill initial modes. Device settings that
+no longer match the files are adjusted on the Rample. The verified mappings and
+the current limits of reading are in
+[the mappings note](research/rample-native-settings-mappings.md).
+[The format study](research/rample-save-format-study.es.md) is historical
+reference only: no further device captures are planned.
+
+## Where your Library lives
+
+The private Library lives in `Library/` in the app support folder
+(`~/Library/Application Support/Rample Manager/` on macOS,
+`%APPDATA%/Rample Manager/` on Windows). A Library created by Rample Preview
+(`Rample Preview/Library`) keeps being used in place, without moving files,
+until a `Rample Manager` folder exists. After restore, its active store is selected from protected
+`Library/Generations/` by immutable activation records. `library.sqlite3` stores stable Sample/Original identities, names,
+audio metadata and SHA-256 recognition; Original locators are relative to this
+store, with no dependency on external source paths. SQLite is bundled on both
+platforms. Complete verified Originals are published before their database
+references are committed. Interrupted temporary copies are discarded on restart;
+a complete file interrupted before its database commit stays unreferenced and
+is never presented as a completed import. Missing/damaged assets are reported,
+and audition checks their fingerprint rather than substituting another file.
+`Derived/` holds regenerable Rample preparations and decoded Original playback
+files. Removing these cache files does not remove Samples or Originals; the next
+preparation rebuilds them from the managed Original. The cache version and target
+are part of its key; it is never used for Import identity.
+
+Earlier versions worked on a folder of WAVs and kept a folder session
+(`session.json`), a `Demo SD`, sample reviews and conversion and edit backups in
+the same support folder. That workflow and its migration were removed
+([ADR 0009](adr/0009-remove-the-folder-library.md)): the app no longer reads
+those files and never deletes them. Bring sounds in with **Import audio
+files…**, **Import folder…** or **Import Rample SD…**. Installing or updating the
+app never deletes the support folder. `RAMPLE_DATA_DIR` provides an isolated
+support directory for development and tests.

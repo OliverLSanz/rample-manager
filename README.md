@@ -1,431 +1,78 @@
-# Rample Manager
+<p align="center">
+  <a href="https://oliverlsanz.com/RampleManager/"><img src="site/assets/icon.png" width="128" alt="Rample Manager icon"></a>
+</p>
 
-A desktop sample library and kit-building app for Squarp Rample / Rample Turbo.
-Runs on **macOS and Windows** with a shared React interface and native Rust audio
-engine. Everything works locally and offline; no account or server is required.
-Rample Manager was called Rample Preview before version 3.0.
+<h1 align="center">Rample Manager</h1>
 
-Website and visual manual: <https://oliverlsanz.com/RampleManager/> (source in
-[`site/`](site/)).
+<p align="center">
+  <b>Your samples. Your kits. Ready for the Rample.</b><br>
+  A free desktop app for macOS and Windows to organise your samples, build Kits for the
+  Squarp Rample and Rample Turbo, hear them as the module will, and write the SD card safely.
+</p>
+
+<p align="center">
+  <a href="https://oliverlsanz.com/RampleManager/"><img src="https://img.shields.io/badge/Visit_the_website-oliverlsanz.com%2FRampleManager-f68061?style=for-the-badge&labelColor=111316" alt="Visit the website: oliverlsanz.com/RampleManager" height="44"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-macOS.dmg"><img src="https://img.shields.io/badge/Download-macOS-eeeff1?style=flat-square&logo=apple&logoColor=eeeff1&labelColor=252a31&color=252a31" alt="Download for macOS"></a>
+  <a href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-Windows-x64-setup.exe"><img src="https://img.shields.io/badge/Download-Windows-eeeff1?style=flat-square&logo=windows&logoColor=eeeff1&labelColor=252a31&color=252a31" alt="Download for Windows"></a>
+  <a href="https://oliverlsanz.com/RampleManager/manual/"><img src="https://img.shields.io/badge/Read-the_manual-eeeff1?style=flat-square&labelColor=252a31&color=252a31" alt="Read the manual"></a>
+</p>
+
+<p align="center">
+  <a href="https://oliverlsanz.com/RampleManager/#tour"><img src="docs/media/tour-preview.gif" width="800" alt="A clip of the video tour: the sequencer programming a beat across four voices"></a><br>
+  <a href="https://oliverlsanz.com/RampleManager/#tour"><b>▶ Watch the 50-second tour, with sound</b></a>
+</p>
+
+## Features
+
+- **One sample Library.** Import WAV, AIFF, FLAC and MP3 files or whole folders; name, tag, search and
+  audition every sound. Your originals are never modified.
+- **Kits A0 to Z99.** Four Voices of up to 12 Layers per Kit. Drag samples onto voices, reorder Layers,
+  duplicate and move Kits, with Undo for every deletion.
+- **Hear your kit in context.** A sample-accurate 16-step sequencer plays the four voices together, so
+  you hear how the sounds fit before anything goes to the SD card.
+- **Sounds like the Rample.** Audition the exact mono 44.1 kHz preparation and all five Layer modes.
+- **Non-destructive sample editor.** Trim, gain, varispeed pitch, EQ, echo and reverb over the complete
+  original. Save for every use of a sound or as a new Variant, and change it later.
+- **Import your card.** Bring an existing SD card into a Patch with its Kits, Layer order and the Layer
+  modes you STOREd on the module.
+- **Safe Build to SD.** Review every file before it is written. Replaced files are backed up and
+  verified first, any Build can be restored, and `_save` is never touched.
+
+Free, works offline, no account.
+
+<p align="center">
+  <a href="https://oliverlsanz.com/RampleManager/"><img src="site/assets/screens/main.png" width="900" alt="Rample Manager main window: Kits in the sidebar, four voice cards with their Layers and the step sequencer"></a>
+</p>
 
 ## Install
 
 Download the newest installer from the
-[latest GitHub Release](https://github.com/OliverLSanz/rample-manager/releases/latest).
+[latest release](https://github.com/OliverLSanz/rample-manager/releases/latest).
 
-- **macOS:** open `Rample-Manager-macOS.dmg` and drag **Rample Manager** to
-  Applications. The app is universal (Apple Silicon and Intel) and needs
-  macOS 14+. It is signed ad hoc, not notarized, so the first launch is blocked:
-  open **System Settings → Privacy & Security** and choose **Open Anyway**, or run
+- **macOS 14+** (Apple Silicon and Intel): open `Rample-Manager-macOS.dmg` and drag **Rample Manager**
+  to Applications. The app is not notarized, so the first launch is blocked: open **System Settings →
+  Privacy & Security** and choose **Open Anyway**, or run
   `xattr -dr com.apple.quarantine "/Applications/Rample Manager.app"`.
-- **Windows:** run `Rample-Manager-Windows-x64-setup.exe`. It installs for the
-  current user. Windows 10/11 x64 and the WebView2 runtime are required; the
-  installer can install WebView2 if needed. The installer is unsigned, so
-  SmartScreen may show **More info → Run anyway**.
+- **Windows 10/11** (x64): run `Rample-Manager-Windows-x64-setup.exe`. It installs for the current user
+  and adds the WebView2 runtime if it is missing. It is unsigned, so SmartScreen may ask: choose **More
+  info → Run anyway**.
 
-Pushing a version tag (`v3.0.0`, matching `VERSION`) makes the **Desktop builds**
-workflow test, build and publish both installers as a GitHub Release, with the
-notes in `docs/releases/<tag>.md`. Release files keep the same names across
-versions, so `releases/latest/download/<file>` always serves the newest one.
-Every build of `main` also keeps both installers as workflow artifacts.
-Updates on Oliver's Mac remain fully automated through the local install script.
-Hosted automatic updates are not enabled; the installers can upgrade an existing
-installation while keeping preferences and sample libraries.
+Installing a new version over the old one keeps your Library, Patches and settings. Step-by-step help
+is in the [manual](https://oliverlsanz.com/RampleManager/manual/#install).
 
-### Startup notices
+## Documentation
 
-A few seconds after startup, release builds ask two public sources whether
-there is something to tell the user, and show at most one small card in the
-corner, which never takes focus:
+- [Manual](https://oliverlsanz.com/RampleManager/manual/): a visual guide to every screen.
+- [How it works](docs/how-it-works.md): the detailed behavior of each feature.
+- [Development](docs/development.md): build from source, architecture, tests and releases.
+- [Release notes](docs/releases/) and [design decisions](docs/adr/).
 
-- **A new version.** The latest GitHub Release (`api.github.com`), when it is
-  newer than the running app. The card lists the first five bullet points of
-  `docs/releases/<tag>.md`, so put short user-facing bullets first. It appears
-  only once a Release is published, never for work on `main`.
-- **News.** `site/messages.json`, published with the website. Each message
-  needs an `id` and a `title`; `body`, an https `url` with `linkLabel`,
-  `minVersion`, `maxVersion` and `until` (`YYYY-MM-DD`) are optional. Edit the
-  file and run `./scripts/deploy-site.sh` to send one.
+Found a bug or have an idea? [Open an issue](https://github.com/OliverLSanz/rample-manager/issues).
 
-The version notice comes first, then the messages in file order. Closing a
-card, **Skip this version** or following its link dismisses it for good on that
-computer. Any failure (offline, a timeout of five seconds, an error response
-or invalid data) shows nothing. Development builds never ask. The requests
-carry no identifier; the servers only see the computer's IP address.
+---
 
-## Website
-
-`site/` holds the landing page and the visual manual: static HTML, CSS and a
-small script, with no build step. Screenshots in `site/assets/screens/` are
-WebP captures of the real app on a demo Library; retake them when the screens
-they show change. Preview locally with
-`python3 -m http.server 8765 --directory site` and publish with
-`./scripts/deploy-site.sh`, which copies `site/` to `~/vps/html/RampleManager`
-on the VPS, where its Nginx serves `/RampleManager/`. Download buttons link
-`releases/latest/download/<file>` and the page reads the version from the
-GitHub API, so a new release needs no site change.
-
-
-The **Samples** view (next to **Kit** at the top) is the Library. **Import audio
-files…** and **Import folder…** bring mono or stereo WAV, AIFF, FLAC and MP3 files
-into the app's private Library. Folder import includes nested folders and does
-not require Rample kit names or voice prefixes. Each Sample gets a stable identity
-and an initial name from its source filename. Identical file bytes are recognized
-across filenames, locations and restarts, retaining the existing Sample name.
-The results show each imported, recognized or failed file; an incomplete import
-is reported explicitly. **Original** auditions the unchanged source channels
-independently of the kit mixer and sample editor. **Rample mono** auditions a
-separate target preparation: channel-average mono PCM16 WAV at 44.1 kHz, with
-band-limited resampling and dither where needed. Only audio shorter than 50 ms
-is padded. The square button stops either audition. Clicking a row, or browsing
-with ↑/↓ while **Hear while browsing** is on, plays its Rample sound.
-
-The filters show all Samples, those in the open Patch, those not in any Kit,
-the Trash, or tags: picking several tags shows the Samples that have all of
-them (`#kick` and `#industrial` for industrial kicks), and **Clear** drops them;
-sort by import order, name, duration or use. Each row
-shows where the Sample plays in the open Patch (such as `A0·V2`) and in how many
-other Patches. The details beside the list show its waveform and **Used in**:
-every Layer that plays it, across Patches; click one to open that Kit. **Add as
-Layer** adds it to the open Patch's Kit by default, or to any Kit and Voice of any
-Patch, without leaving the open one (Enter does the same). ⌘/Ctrl-click and
-Shift-click (or Shift+↑/↓) select several Samples to add as consecutive Layers,
-tag or move to Trash together. The selection lists the tags its Samples carry;
-× removes one from all of them.
-
-Tags ignore case: `kick` and `Kick` are the same tag, and the Library keeps a
-single spelling of each. Typing a tag that already exists in another case uses
-the existing spelling. Opening the Library merges tags left in several cases
-into the spelling most Samples use.
-
-Hovering a tag filter shows **Rename** and **Delete**. Both apply to every
-Sample, including those in Trash. Renaming onto another existing tag, in any
-case, merges the two (each Sample keeps one copy); renaming to another case of
-the same tag respells it. Removing, renaming and deleting tags happen at once
-and offer **Undo** until the next change.
-
-Select a Sample to edit its descriptive name and tags (one tag per
-line; a tag another Sample has keeps that Sample's spelling). Tags can contain spaces, punctuation and Unicode text. Search matches
-literal, case-insensitive words: every word must be part of the name or a tag,
-so `kick industrial` finds industrial kicks. Renaming and tagging do not rename
-Original files or change Sample identity. Reimporting known audio retains this
-metadata, including after restarting the app. Samples with the same name remain
-separate entries; selecting or auditioning a row always uses its Sample ID.
-
-**Move to Trash** retires a Sample from ordinary Library searches and the Add
-Samples panel. Open **Trash** to audition or **Restore** it. Existing Layers keep their
-Sample identity and saved sound, including after restarting. Restore makes the
-same Sample available again without copying audio or changing its Kit references.
-Importing an Original again from the Samples view while all its Samples are in
-Trash brings it back as a fresh import: the source filename as its name, no
-tags, no Sample Edits and no Layers. A trashed Sample that no Layer uses leaves
-Trash with its identity (its saved Revisions stay in its history); when Layers
-still play every one, they stay in Trash and a new Sample shares the Original.
-Reimporting an exported, edited sound of a retired Sample, and **Import Rample
-SD…**, report the existing Trash entry and offer **Restore Sample** instead.
-Retirement retains Originals and saved history; permanent purge is not available.
-
-Completed imports preserve all Original bytes privately and work after removing
-the source. WAV playback reads its Original directly. Other supported formats
-use a disposable source-rate, channel-preserving float64 WAV playback artifact,
-without making that artifact or the mono Rample preparation the Library master.
-Decode and preparation use the bundled Rust codecs, work in bounded chunks off
-the audio callback, and need no FFmpeg installation. Playback artifacts currently
-support mono/stereo audio up to 384 kHz and standard RIFF size limits; files that
-cannot be completely decoded are reported individually.
-
-The main window always shows the open Patch
-([ADR 0008](docs/adr/0008-make-the-open-patch-the-main-screen.md)). Its name
-at the top opens the Patch switcher: choose another Patch, create, rename,
-duplicate or delete one, or **Import Rample SD…**. Each choice returns to the
-main window with that Patch loaded. All Patches share the Library's Samples.
-
-The sidebar lists the open Patch's Kits in Rample order (A0, A1 … Z99), grouped
-by Bank; click a Bank to fold it (the selected Kit's Bank stays open). Search
-matches a Kit address or the name of any Sample in it, and a warning marks a Kit
-that Build would refuse. **+** creates a Kit at the next free address; change the
-Bank letter or Kit number before confirming. A Kit's **⋯** menu changes its
-address without copying any audio, duplicates it to another address (new Layer
-occurrences of the same Samples, same modes and selections) or deletes it. Used
-addresses are refused as you type. With a Kit focused, ↑/↓ select the previous or
-next Kit and Delete removes it.
-
-Deleting a Kit or Patch, or removing a Layer, happens at once and shows **Undo**
-(also Cmd/Ctrl+Z) for ten seconds. Undoing a Layer puts it back at its position,
-with its selection, and shows its Kit. Undo restores it exactly, with the same identities, even after
-other edits, until the next deletion, a Library restore or quitting the app.
-A deleted imported Patch stops being recognized when its card is imported
-again; undo restores that recognition. A duplicated Patch starts without the
-original's SD Import report.
-
-Each voice card lists its Voice's ordered Layers. Click a Layer to select it;
-hover it to move it up or down, **repeat** it (intentionally adding another
-occurrence of the same Sample) or remove just that occurrence, or drag it to
-another position in its Voice. Selection follows the occurrence when its
-position changes, even for duplicates. All five Layer modes use this saved order;
-new Voices use the Library's Default Layer mode. The waveform shows the Layer you
-hear: the selected one in Single sample mode, otherwise the one last triggered.
-Kit preview uses the Library's mono Rample preparation.
-
-**Add Sample** on a voice card opens the **Add Samples** panel beside the Kit,
-targeting that Voice; the 1–4 buttons change the target. Search matches part of
-a name or tag for every word, and the tag buttons under it combine like the
-Library's tag filters. ↑/↓ browse and, with **Hear while browsing**, play each Sample as
-the Rample will (mono preparation, independently of the mixer); Enter,
-double-click or **+** adds it as the Voice's last Layer. The panel stays open,
-so you can keep auditioning and adding, also while switching Kits. Shift- and
-Cmd/Ctrl-click, Shift+↑/↓ or Cmd/Ctrl+A select several Samples: Enter or
-**Add N to Voice** adds them in list order. Drag any row onto a voice card to
-add it there; dragging a selected row carries the whole selection. Long Libraries show 150 matches at a time.
-
-Select a Layer and click the sliders button beside **Audition** to edit its complete Original. Trim,
-gain, varispeed pitch, EQ, echo and reverb are saved as reversible Sample Edits;
-reopening retains the controls and full waveform, so trims can expand and effects
-can be reduced. Drafts affect only that Layer occurrence, including repeated uses
-of the same Sample. Bypass compares against its saved sound; closing discards the
-draft. **Overwrite shared Sample** lists every affected Layer across Patches and
-updates their shared sound. **Save as new** names an independent Variant, retains
-tags and the shared Original, and retargets only the selected occurrence. Saved
-Revisions remain available for reproducible future exports. See
-[reversible Sample Edits](docs/reversible-sample-edits.md) for the rendering contract.
-
-Below the voice cards are the four-channel, 16-step sequencer, tempo, velocities,
-volume, mute and solo controls. Modes and selected Layers are remembered per Kit;
-patterns, mixer and tempo persist within each Patch when changing Kits. Musical
-controls reuse prepared audio, so changing a step or stopping playback does not
-reread/decode long Originals; opening the app, the Library or the editor
-revalidates assets. Incomplete drafts remain editable: missing Voice 1 and more
-than 12 Layers, duplicate addresses and audio that cannot be prepared are listed
-under **issues to fix before Build**, retaining every Layer. While any remain,
-**Build to SD…** shows their number and opens that list instead of asking for a
-destination. Notes from SD Import about native settings are listed apart and do
-not block a Build. Patches save locally in the private Library database. These controls
-never write native Rample settings (`_save`). To use a mode on the device, set
-it on the Rample and STORE.
-
-| Shortcut                               | Action                            |
-| -------------------------------------- | --------------------------------- |
-| Space                                  | Play / stop                       |
-| 1–4                                    | Audition a voice                  |
-| Option/Alt-click or right-click a step | Edit its velocity                 |
-| [ and ]                                | Previous or next Kit              |
-| Cmd/Ctrl+1, Cmd/Ctrl+2                 | Kit or Samples view               |
-| Cmd/Ctrl+F                             | Search the current view           |
-| Cmd/Ctrl+Z                             | Undo a deletion while it is shown |
-| ?                                      | List all shortcuts                |
-
-Shortcuts leave text fields alone; Space and 1–4 also leave focused buttons
-alone. The **Pattern** menu loads
-an example beat or clears the sequence.
-
-**Import Rample SD…** copies an SD root or local copy into managed storage and
-reconstructs its Bank/Kit addresses, Voice ownership and numerical/alphabetical
-Layer order. Exact Originals reuse existing Samples, preserving their names,
-tags and Trash identity. An unchanged arrangement and native state opens its
-previous Patch, including when imported from a different mount location. A
-changed intake requires **Create new Patch** or **Update existing Patch**; update
-retains the Patch name, tempo, sequencer/mixer memory and matching Layer selection.
-
-Usable audio survives malformed layouts and individual failures. Invalid source
-assignments stay unassigned rather than being guessed; use **Add Sample** in
-the intended Voice to place them explicitly. Excess Layers are retained. The
-**SD Import report** keeps historical source issues separately from current
-draft validation. A partial copy reports the failures and asks you to retain the
-source for retry. Completed copies, pending reviews, and committed Patches survive
-removing the source and restarting.
-
-Native files in `_save` and other non-audio files are retained as exact bytes in
-the Library database. Known operating-system filesystem metadata is ignored.
-Import reads each Kit's STOREd Layer modes and selected Layers. Kits never saved
-with STORE use your **Default Layer mode**, which you set in the Patch switcher
-and which also applies to new Kits. The Rample's global LAYER setting
-is not read. Unverified or unreadable values use that default and are listed
-in the review. A source with Kits but no `_save` folder at all (for example a
-copy of only the Kit folders) is reported too: no native settings were found,
-so every Kit uses your Default Layer mode.
-
-**Build to SD…** (Build Patch) writes the open Patch to a folder or directly onto an SD
-card, empty or populated. Every Kit and every ordered Layer, including repeated
-occurrences, becomes a Bank/Kit folder and a mono PCM16 44.1 kHz WAV of at
-least 50 ms rendered from its Original and saved Sample Edits, exactly as Kit
-preview plays it. Files are named `<Voice>_<position>_<name>.wav`, for example
-`A0/1_01_Warm_kick.wav` and `A0/1_02_Snare.wav`, so the Rample's
-numerical/alphabetical sort keeps the intended Layer order; Library names are
-unchanged. Build first checks Voice 1, the 12-Layer limit and all audio,
-listing every problem. While it reviews and builds, a progress bar shows each
-stage (reading the destination, preparing audio, backing up, writing and
-verifying) and the file being handled, so a large card visibly advances.
-
-Before anything is written, Build shows a review of the destination: files to
-add, files to replace, files to remove and files already up to date. Build
-owns only WAV files directly inside `A0`–`Z99` Kit folders: the card's Kit
-audio is made to match the Patch, so Kits that are not in the Patch lose their
-audio and their folder is removed when nothing else is left in it. Native
-settings (`_save`), firmware, other files and folders, and non-canonical names
-such as `A05` are never changed or backed up. Names that would collide on a
-card that ignores letter case (for example an `a0` folder) block the build
-until you move them, and so does a non-canonical folder that **Import Rample
-SD…** would read as a built or kept Kit (for example `A05` when the Patch
-builds `A5`), because reimporting the card would keep only one of them. **Apply Build** first rechecks that the Patch and the
-reviewed Kit audio are unchanged; if anything changed, nothing is written and
-you review again. It then renders every Layer, copies every file it will
-replace or remove into `Patch build backups` in the application support
-folder (with a `restore.json` manifest listing paths and SHA-256), verifies
-those copies and only then updates the card, rechecking each file right before
-it is replaced or removed so audio saved in the meantime is never overwritten. Files that already hold the
-Patch's current audio are left alone, so rebuilding an unchanged Patch writes
-nothing. A failure after publication starts is reported as an incomplete
-Build with the number of changes applied, never as a complete one.
-Originals are never modified. Built files are recognized by **Import Rample
-SD…** and **Import samples**, so reimporting a build keeps Samples and their
-edits instead of adding new Originals. Build never writes `_save`, Layer modes,
-selected Layers, BPM or patterns: set modes on the Rample and STORE. Settings
-stored on the device that no longer match its files are yours to update there.
-
-The clock button beside **Build to SD…** opens **Destination backups**, which lists every Build that changed a folder or card, with
-its Patch, destination, time and status (complete, incomplete or interrupted);
-a Build's result links straight to its backup. **Restore…** asks for
-confirmation, then returns that destination to its state before the Build:
-files the Build added are removed, files it replaced or removed get their
-backed-up bytes back (verified by SHA-256), and Kit folders it created or
-removed are undone. Use **Restore another folder…** when the card mounts
-elsewhere. Restore only changes files that still hold that Build's output or
-are missing; if anything changed since, nothing is changed and the files are
-listed. To step back several Builds, restore the newest first. Restoring again
-is harmless. `_save` and all other content stay untouched.
-
-Use **Library backup…** in the sidebar to create a complete
-portable snapshot, or replace the Library with a verified snapshot from another
-machine. Restore first creates a recoverable snapshot of the current Library and
-shows its location, including on later failures. **Restore recovery snapshot…**
-returns to that saved state. See [portable Library snapshots](docs/library-snapshots.md) for the
-format, validation and interruption/recovery behavior.
-
-## Layer playback
-
-| App mode                | Rample mode    | Behavior                                     |
-| ----------------------- | -------------- | -------------------------------------------- |
-| Single sample (default) | MANUAL         | Trigger only the selected sample             |
-| Random                  | RANDOM         | Choose a layer per trigger, allowing repeats |
-| Sequential              | CYCLIC         | Advance in natural filename order, then wrap |
-| Reverse sequential      | REVERSE CYCLIC | Advance backwards, then wrap                 |
-| Velocity                | VELOCITY       | Select a layer using the step's velocity     |
-
-Automatic modes use up to 12 readable layers. Cyclic modes start at the selected
-layer when transport starts, advancing on triggers rather than empty steps.
-Audition uses the same cursor and mode, with step 1's velocity. The waveform and
-layer counter show the triggered layer. Velocity selects a layer in even zones
-without changing amplitude. Exact hardware velocity boundaries and cyclic
-initialization still require a device comparison.
-
-Modes and selected layers are remembered independently per voice and Kit.
-Patterns, velocities, BPM and mixer belong to the Patch; browsing Kits keeps the
-same beat. Mono and stereo audition work; stereo pairing on the module, its DAC
-and its effects are not emulated.
-
-### Native Rample SD settings are read-only
-
-The app manages audio files and never creates, modifies or deletes `_save/*.rpl`
-([ADR 0007](docs/adr/0007-read-native-settings-and-never-write-save.md)).
-Import only reads verified fields to fill initial modes. Device settings that
-no longer match the files are adjusted on the Rample. The verified mappings and
-the current limits of reading are in
-[the mappings note](docs/research/rample-native-settings-mappings.md).
-[The format study](docs/research/rample-save-format-study.es.md) is historical
-reference only: no further device captures are planned.
-
-## Session preservation
-
-The private Library lives in `Library/` in the app support folder
-(`~/Library/Application Support/Rample Manager/` on macOS,
-`%APPDATA%/Rample Manager/` on Windows). A Library created by Rample Preview
-(`Rample Preview/Library`) keeps being used in place, without moving files,
-until a `Rample Manager` folder exists. After restore, its active store is selected from protected
-`Library/Generations/` by immutable activation records. `library.sqlite3` stores stable Sample/Original identities, names,
-audio metadata and SHA-256 recognition; Original locators are relative to this
-store, with no dependency on external source paths. SQLite is bundled on both
-platforms. Complete verified Originals are published before their database
-references are committed. Interrupted temporary copies are discarded on restart;
-a complete file interrupted before its database commit stays unreferenced and
-is never presented as a completed import. Missing/damaged assets are reported,
-and audition checks their fingerprint rather than substituting another file.
-`Derived/` holds regenerable Rample preparations and decoded Original playback
-files. Removing these cache files does not remove Samples or Originals; the next
-preparation rebuilds them from the managed Original. The cache version and target
-are part of its key; it is never used for Import identity.
-
-Earlier versions worked on a folder of WAVs and kept a folder session
-(`session.json`), a `Demo SD`, sample reviews and conversion and edit backups in
-the same support folder. That workflow and its migration were removed
-([ADR 0009](docs/adr/0009-remove-the-folder-library.md)): the app no longer reads
-those files and never deletes them. Bring sounds in with **Import audio
-files…**, **Import folder…** or **Import Rample SD…**. Installing or updating the
-app never deletes the support folder. `RAMPLE_DATA_DIR` provides an isolated
-support directory for development and tests.
-
-## Develop and build
-
-Requires Node 22+, stable Rust and platform build tools: Xcode command-line tools
-on Mac, Microsoft C++ Build Tools and WebView2 on Windows.
-
-```sh
-npm ci
-npm run tauri dev
-```
-
-Validation:
-
-```sh
-npm run build
-npm test
-cargo test --workspace --all-targets --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
-```
-
-Package on the target operating system:
-
-```sh
-# macOS
-npm run tauri -- build --bundles app,dmg
-./scripts/install.sh
-# Windows
-npm run tauri -- build --bundles nsis
-```
-
-The installer builds before closing the current app, signs locally, replaces the
-bundle and reopens it. `--no-launch` skips reopening; `RAMPLE_INSTALL_DIR` changes
-the installation directory. Mac builds are signed ad hoc, not notarized for other
-computers. Windows installers are currently unsigned.
-
-## Architecture and validation
-
-`frontend/` holds the React UI and IPC: `App.tsx` is the Patch main screen,
-with `KitList`, `PatchMenu` and `VoiceCard`, and `patchView.ts` its pure view
-model. `crates/rample-core/` holds audio decoding, Rample preparation, Sample
-Edit DSP, native `_save` reading, layer selection and the sample-clock
-renderer. `src-tauri/` integrates the Library, Patches, native dialogs and
-devices. CPAL outputs through CoreAudio on Mac and WASAPI on Windows.
-
-Triggers are rendered against the device sample clock, independently of browser
-or UI timers. Each track retriggers monophonically at the correct frame. WAVs
-stream with bounded heads and background readers; decoding and disk I/O stay off
-the callback. Matched sample rates preserve PCM exactly; other rates use a
-32-tap windowed-sinc resampler. Device reconnection is retried automatically.
-
-Headless tests check actual PCM, trigger boundaries, modes, mute/solo, resampling,
-long-file streaming, Library snapshots, SD Import, Build Patch and UI behavior on both
-operating systems. Actual-device smoke testing is separate:
-
-```sh
-cargo run -p rample-core --example audio_smoke --features native-audio
-```
-
-The Windows CI build verifies compilation, tests, packaging, native app startup,
-graceful close, and a reinstall that leaves the Library unchanged
-(`scripts/smoke-windows.ps1`). Startup readiness uses the native window and Library
-store. This
-cannot replace a listening test on physical Windows audio hardware. The original Swift sources
-are archived under `legacy/swift` for reference and rollback.
-
-Keep UI text in English and commit/push each atomic functional change with its
-relevant tests and docs; see [AGENTS.md](AGENTS.md).
+Made by [Óliver L. Sanz](https://oliverlsanz.com/). Not affiliated with Squarp. Rample Manager was
+called Rample Preview before version 3.0.
