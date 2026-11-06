@@ -1,4 +1,5 @@
-// The last hit: name, platforms and where to find the link.
+// The last hit: name, platforms and the website. No platform-specific call to action
+// ("link in the description"): the same video plays on YouTube, the website and socials.
 import { Easing, Img, staticFile } from "remotion";
 import { SCENES } from "../score";
 import { theme } from "../theme";
@@ -13,8 +14,10 @@ export function Outro() {
   const icon = ramp(step, from, from + 3, Easing.out(Easing.back(1.7)));
   const name = ramp(step, from + 1, from + 4);
   const platforms = ramp(step, from + 5, from + 8);
-  const link = ramp(step, from + 10, from + 13, Easing.out(Easing.back(1.4)));
-  const arrow = Math.sin(Math.max(0, local - 13) * 0.9) * 6;
+  const cta = ramp(step, from + 7, from + 9);
+  const url = ramp(step, from + 8, from + 11, Easing.out(Easing.back(1.4)));
+  // The button breathes with the beat once it has landed.
+  const glow = local > 11 ? 0.5 + 0.5 * Math.cos(((local - 11) / 4) * 2 * Math.PI) : 0;
 
   return (
     <div style={{ position: "absolute", inset: 0, background: theme.bg, overflow: "hidden" }}>
@@ -58,26 +61,36 @@ export function Outro() {
         </div>
         <div
           style={{
-            marginTop: 64,
+            marginTop: 72,
+            font: `600 20px ${theme.mono}`,
+            letterSpacing: "0.18em",
+            color: theme.accent,
+            opacity: cta,
+          }}
+        >
+          TRY IT NOW
+        </div>
+        <div
+          style={{
+            marginTop: 20,
             display: "flex",
             alignItems: "center",
-            gap: 18,
-            padding: "20px 34px",
+            gap: 20,
+            padding: "24px 40px",
             borderRadius: 999,
             background: theme.accent,
             color: "#121519",
-            font: `700 30px ${theme.display}`,
-            opacity: link,
-            transform: `scale(${0.8 + 0.2 * link})`,
-            boxShadow: `0 20px 60px -20px ${theme.accent}`,
+            // Mono so the "l" in oliverlsanz can't be read as a capital I.
+            font: `600 42px ${theme.mono}`,
+            letterSpacing: "-0.02em",
+            opacity: url,
+            transform: `scale(${0.85 + 0.15 * url})`,
+            boxShadow: `0 24px ${70 + 30 * glow}px -20px ${theme.accent}`,
           }}
         >
-          Link in the description
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ transform: `translateY(${arrow}px)` }}>
-            <path d="M12 4v15m0 0-6-6m6 6 6-6" />
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" />
           </svg>
-        </div>
-        <div style={{ marginTop: 26, font: `500 22px ${theme.mono}`, color: theme.muted, opacity: link }}>
           oliverlsanz.com/RampleManager
         </div>
       </div>
