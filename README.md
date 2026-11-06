@@ -32,7 +32,18 @@ Updates on Oliver's Mac remain fully automated through the local install script.
 Hosted automatic updates are not enabled; the installers can upgrade an existing
 installation while keeping preferences and sample libraries.
 
-## Use
+## Website
+
+`site/` holds the landing page and the visual manual: static HTML, CSS and a
+small script, with no build step. Screenshots in `site/assets/screens/` are
+WebP captures of the real app on a demo Library; retake them when the screens
+they show change. Preview locally with
+`python3 -m http.server 8765 --directory site` and publish with
+`./scripts/deploy-site.sh`, which copies `site/` to `~/vps/html/RampleManager`
+on the VPS, where its Nginx serves `/RampleManager/`. Download buttons link
+`releases/latest/download/<file>` and the page reads the version from the
+GitHub API, so a new release needs no site change.
+
 
 The **Samples** view (next to **Kit** at the top) is the Library. **Import audio
 files…** and **Import folder…** bring mono or stereo WAV, AIFF, FLAC and MP3 files

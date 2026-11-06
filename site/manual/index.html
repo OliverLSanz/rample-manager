@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Manual — Rample Manager</title>
+    <meta
+      name="description"
+      content="Visual guide to Rample Manager: install the app, import samples and SD cards, build Kits, edit sounds, play the sequencer and write Patches to the Rample's SD card."
+    />
+    <meta name="theme-color" content="#111316" />
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../assets/style.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap">
+        <a class="brand" href="../"><img src="../assets/icon.png" alt="" />Rample Manager</a>
+        <nav class="nav-links" aria-label="Main">
+          <a href="../#features">Features</a>
+          <a href="./" aria-current="page">Manual</a>
+          <a href="https://github.com/OliverLSanz/rample-manager">GitHub</a>
+          <a class="button small" href="../#download">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="manual-hero">
+      <div class="wrap">
+        <span class="eyebrow">Manual</span>
+        <h1>How to use Rample Manager</h1>
+        <p>
+          A visual tour, from installing the app to writing a complete Patch onto your Rample's SD
+          card. Numbered markers on each screenshot match the list below it.
+        </p>
+      </div>
+    </div>
+
+    <div class="wrap manual">
+      <aside class="toc" aria-label="Contents">
+        <p>Contents</p>
+        <ol>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#concepts">Key ideas</a></li>
+          <li><a href="#main-window">The main window</a></li>
+          <li><a href="#import">Bring in your sounds</a></li>
+          <li><a href="#library">Organise the Library</a></li>
+          <li><a href="#kits">Build a Kit</a></li>
+          <li><a href="#play">Play and audition</a></li>
+          <li><a href="#editor">Edit a sound</a></li>
+          <li><a href="#build">Build to SD</a></li>
+          <li><a href="#backups">Backups and restore</a></li>
+          <li><a href="#shortcuts">Shortcuts</a></li>
+          <li><a href="#faq">Questions</a></li>
+        </ol>
+      </aside>
+
+      <main>
+        <!-- 01 Install -->
+        <section class="chapter" id="install" style="--c: var(--v1)">
+          <header>
+            <span class="eyebrow">01 · Install</span>
+            <h2>Install the app</h2>
+          </header>
+          <p class="intro">
+            Download the installer for your computer from the
+            <a href="../#download">download page</a>. Rample Manager is free, works offline and
+            needs no account.
+          </p>
+          <div class="cols">
+            <div class="card">
+              <h4>macOS 14 or later</h4>
+              <ol>
+                <li>Open <code>Rample-Manager-macOS.dmg</code>.</li>
+                <li>Drag <strong>Rample Manager</strong> onto <strong>Applications</strong>.</li>
+                <li>Open it from Applications or Launchpad.</li>
+              </ol>
+            </div>
+            <div class="card">
+              <h4>Windows 10 or 11 (64-bit)</h4>
+              <ol>
+                <li>Run <code>Rample-Manager-Windows-x64-setup.exe</code>.</li>
+                <li>It installs for your user only; no administrator needed.</li>
+                <li>Open Rample Manager from the Start menu.</li>
+              </ol>
+            </div>
+          </div>
+          <div class="tip warn">
+            <p><strong>The first launch asks for permission.</strong> The app is not yet signed by Apple or Microsoft.</p>
+            <p>
+              <strong>macOS:</strong> if a message says Apple cannot verify the app, click
+              <em>Done</em>, open <strong>System Settings → Privacy &amp; Security</strong>, scroll
+              down and click <strong>Open Anyway</strong>. You only do this once. (Advanced: you can also run
+              <code>xattr -dr com.apple.quarantine "/Applications/Rample Manager.app"</code>.)
+            </p>
+            <p>
+              <strong>Windows:</strong> if SmartScreen shows “Windows protected your PC”, click
+              <strong>More info</strong> and then <strong>Run anyway</strong>.
+            </p>
+          </div>
+          <h3>Updating</h3>
+          <p>
+            Install a newer version over the old one. Your Library, Patches and settings are kept. If
+            you used <strong>Rample Preview</strong> (the app's earlier name), Rample Manager opens
+            the same Library automatically; you can then delete the old app.
+          </p>
+        </section>
+
+        <!-- 02 Concepts -->
+        <section class="chapter" id="concepts" style="--c: var(--v2)">
+          <header>
+            <span class="eyebrow">02 · Key ideas</span>
+            <h2>Five words to know</h2>
+          </header>
+          <p class="intro">Rample Manager uses the Rample's own vocabulary, plus a shared Library.</p>
+          <div class="table-wrap">
+            <table>
+              <tr><th>Word</th><th>What it means</th></tr>
+              <tr><td><strong>Library</strong></td><td>Every sound you imported, stored privately on this computer. Your original files are kept exactly as they were.</td></tr>
+              <tr><td><strong>Sample</strong></td><td>One sound in the Library, with a name, tags and optional edits.</td></tr>
+              <tr><td><strong>Patch</strong></td><td>A complete SD card layout: up to 2,600 Kits from A0 to Z99. You can keep several Patches (a live set, a studio set…). All share the Library.</td></tr>
+              <tr><td><strong>Kit</strong></td><td>Four <strong>Voices</strong> at a Bank letter and number, such as <code>A0</code> or <code>C12</code>.</td></tr>
+              <tr><td><strong>Layer</strong></td><td>One use of a Sample in a Voice, in order. A Voice holds up to 12 Layers; the same Sample can appear many times.</td></tr>
+            </table>
+          </div>
+        </section>
+
+        <!-- 03 Main window -->
+        <section class="chapter" id="main-window" style="--c: var(--v3)">
+          <header>
+            <span class="eyebrow">03 · The main window</span>
+            <h2>The open Patch is the main screen</h2>
+          </header>
+          <p class="intro">
+            Everything you build lives on one screen: the Kits of the open Patch, the four voices of
+            the selected Kit and a sequencer to hear them together.
+          </p>
+          <figure class="figure">
+            <div class="shot annotated">
+              <img src="../assets/screens/main.webp" width="2000" height="1364" alt="Main window of Rample Manager with numbered markers." />
+              <span class="marker" style="left: 32.5%; top: 6.6%">1</span>
+              <span class="marker" style="left: 47%; top: 6.5%">2</span>
+              <span class="marker" style="left: 85.7%; top: 2.8%">3</span>
+              <span class="marker" style="left: 95.5%; top: 2.8%">4</span>
+              <span class="marker" style="left: 13%; top: 35.4%">5</span>
+              <span class="marker" style="left: 29.5%; top: 29.3%">6</span>
+              <span class="marker" style="left: 33%; top: 52%">7</span>
+              <span class="marker" style="left: 18.3%; top: 59.6%">8</span>
+              <span class="marker" style="left: 35.6%; top: 64.2%">9</span>
+              <span class="marker" style="left: 40.5%; top: 73%">10</span>
+              <span class="marker" style="left: 17.6%; top: 92.5%">11</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><span>1</span><div><strong>Patch switcher.</strong> Choose, create, rename, duplicate or delete Patches, and import an SD card.</div></li>
+            <li><span>2</span><div><strong>Kit / Samples.</strong> Switch between building Kits and browsing the Library (<kbd>⌘1</kbd> / <kbd>⌘2</kbd>).</div></li>
+            <li><span>3</span><div><strong>Destination backups.</strong> Every Build that changed a card, with one-click restore.</div></li>
+            <li><span>4</span><div><strong>Build to SD.</strong> Review and write the whole Patch to a card or folder.</div></li>
+            <li><span>5</span><div><strong>Kits.</strong> The Patch's Kits in Rample order, grouped by Bank. <strong>+</strong> adds a Kit; <strong>⋯</strong> moves, duplicates or deletes one.</div></li>
+            <li><span>6</span><div><strong>Layer mode</strong> of each Voice: Single sample, Random, Sequential, Reverse sequential or Velocity.</div></li>
+            <li><span>7</span><div><strong>Layers</strong> in playing order. Click to select; hover to move, repeat or remove; drag to reorder.</div></li>
+            <li><span>8</span><div><strong>Add Sample</strong> opens the Add Samples panel for this Voice.</div></li>
+            <li><span>9</span><div><strong>Audition</strong> the Voice (keys <kbd>1</kbd>–<kbd>4</kbd>) and, next to it, the <strong>sample editor</strong>.</div></li>
+            <li><span>10</span><div><strong>Sequencer.</strong> 16 steps per Voice with velocity, level, mute and solo.</div></li>
+            <li><span>11</span><div><strong>Library backup.</strong> Save or restore a complete, portable copy of your Library.</div></li>
+          </ol>
+          <h3>Switch and create Patches</h3>
+          <p>
+            Click the Patch name to open the switcher. Pick a Patch, type a name and press
+            <strong>Create Patch</strong>, or use <strong>Import Rample SD…</strong>. The switcher also
+            sets your <strong>default Layer mode</strong> for new Kits.
+          </p>
+          <figure class="figure">
+            <div class="shot"><img src="../assets/screens/switcher.webp" loading="lazy" width="2000" height="1303" alt="The Patch switcher open over the main window, listing two Patches." /></div>
+            <figcaption>The Patch switcher. Each choice returns to the main window with that Patch open.</figcaption>
+          </figure>
+        </section>
+
+        <!-- 04 Import -->
+        <section class="chapter" id="import" style="--c: var(--v4)">
+          <header>
+            <span class="eyebrow">04 · Bring in your sounds</span>
+            <h2>Import samples or a whole card</h2>
+          </header>
+          <p class="intro">
+            Rample Manager copies each sound into its private Library, so it keeps working after you
+            move or delete the source. Importing the same audio again is recognised and keeps its
+            name, tags and edits.
+          </p>
+          <div class="cols">
+            <div class="card">
+              <h4>Sample files and folders</h4>
+              <ol>
+                <li>Open <strong>Samples</strong> (<kbd>⌘2</kbd>).</li>
+                <li>Click <strong>Import audio files…</strong> or <strong>Import folder…</strong>.</li>
+                <li>Read the result: what was imported, recognised or could not be read.</li>
+              </ol>
+              <p style="margin-top: 10px">WAV, AIFF, FLAC and MP3, mono or stereo, any sample rate. Folders include their subfolders.</p>
+            </div>
+            <div class="card">
+              <h4>An existing Rample SD card</h4>
+              <ol>
+                <li>Open the Patch switcher and choose <strong>Import Rample SD…</strong>.</li>
+                <li>Select the card (or a copy of it).</li>
+                <li>Choose <strong>Create new Patch</strong>, or <strong>Update existing Patch</strong> if you imported it before.</li>
+              </ol>
+              <p style="margin-top: 10px">Kits, Voice order and the Layer modes you STOREd on the Rample are restored.</p>
+            </div>
+          </div>
+          <div class="tip">
+            <p><strong>Your files are safe.</strong> Imports only read their sources. Originals in the Library are never modified; edits are stored separately.</p>
+          </div>
+        </section>
+
+        <!-- 05 Library -->
+        <section class="chapter" id="library" style="--c: var(--v1)">
+          <header>
+            <span class="eyebrow">05 · Organise the Library</span>
+            <h2>Find any sound quickly</h2>
+          </header>
+          <p class="intro">
+            The <strong>Samples</strong> view lists the whole Library. Combine filters, tags and
+            search words, listen while you browse and send a Sample to any Kit.
+          </p>
+          <figure class="figure">
+            <div class="shot annotated">
+              <img src="../assets/screens/samples.webp" loading="lazy" width="2000" height="1364" alt="The Samples view with numbered markers." />
+              <span class="marker" style="left: 79.2%; top: 15.1%">1</span>
+              <span class="marker" style="left: 40%; top: 15.1%">2</span>
+              <span class="marker" style="left: 28.5%; top: 26.5%">3</span>
+              <span class="marker" style="left: 28.5%; top: 45%">4</span>
+              <span class="marker" style="left: 61.1%; top: 22.6%">5</span>
+              <span class="marker" style="left: 81.5%; top: 31.5%">6</span>
+              <span class="marker" style="left: 93%; top: 51.3%">7</span>
+              <span class="marker" style="left: 93%; top: 57.5%">8</span>
+              <span class="marker" style="left: 93%; top: 70.4%">9</span>
+              <span class="marker" style="left: 95%; top: 84.3%">10</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><span>1</span><div><strong>Import</strong> files or folders into the Library.</div></li>
+            <li><span>2</span><div><strong>Search</strong> by name or tag. Every word must match: <code>kick industrial</code>.</div></li>
+            <li><span>3</span><div><strong>Filters:</strong> all Samples, those in the open Patch, those in no Kit, or the Trash.</div></li>
+            <li><span>4</span><div><strong>Tags.</strong> Pick several to narrow down; hover one to rename or delete it everywhere.</div></li>
+            <li><span>5</span><div><strong>Where it plays:</strong> <code>C0·V1</code> means Kit C0, Voice 1 of the open Patch.</div></li>
+            <li><span>6</span><div><strong>Rample mono</strong> plays the sound as the Rample will; <strong>Original</strong> plays the untouched file.</div></li>
+            <li><span>7</span><div><strong>Add as Layer</strong> to any Kit and Voice of any Patch (or press <kbd>Enter</kbd>).</div></li>
+            <li><span>8</span><div><strong>Used in</strong> lists every Layer that plays this Sample; click one to open its Kit.</div></li>
+            <li><span>9</span><div><strong>Name and tags</strong>, one tag per line. Tags ignore upper and lower case.</div></li>
+            <li><span>10</span><div><strong>Export</strong> the prepared WAV, or <strong>Move to Trash</strong> (recoverable).</div></li>
+          </ol>
+          <div class="tip">
+            <p><strong>Select several.</strong> <kbd>Shift</kbd>-click or <kbd>⌘</kbd>/<kbd>Ctrl</kbd>-click rows to tag, add or trash many Samples at once.</p>
+          </div>
+        </section>
+
+        <!-- 06 Kits -->
+        <section class="chapter" id="kits" style="--c: var(--v2)">
+          <header>
+            <span class="eyebrow">06 · Build a Kit</span>
+            <h2>Add Samples to voices</h2>
+          </header>
+          <p class="intro">
+            Click <strong>Add Sample</strong> on a voice card. The <strong>Add Samples</strong> panel
+            opens beside the Kit and stays open while you audition, add and even switch Kits.
+          </p>
+          <figure class="figure">
+            <div class="shot annotated">
+              <img src="../assets/screens/panel.webp" loading="lazy" width="2000" height="1364" alt="The Add Samples panel beside the Kit, with numbered markers." />
+              <span class="marker" style="left: 92%; top: 7%">1</span>
+              <span class="marker" style="left: 78%; top: 15.4%">2</span>
+              <span class="marker" style="left: 76%; top: 19.8%">3</span>
+              <span class="marker" style="left: 77%; top: 25.4%">4</span>
+              <span class="marker" style="left: 92%; top: 38.3%">5</span>
+              <span class="marker" style="left: 60%; top: 42.5%">6</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><span>1</span><div><strong>Target:</strong> the Kit and Voice that receive new Layers. Click 1–4 to change Voice.</div></li>
+            <li><span>2</span><div><strong>Search</strong> names and tags.</div></li>
+            <li><span>3</span><div><strong>Tag filters</strong> combine, like in the Library.</div></li>
+            <li><span>4</span><div><strong>Hear while browsing:</strong> <kbd>↑</kbd>/<kbd>↓</kbd> play each Sample as you move.</div></li>
+            <li><span>5</span><div><strong>+</strong> (or <kbd>Enter</kbd>, or a double-click) adds it as the Voice's last Layer.</div></li>
+            <li><span>6</span><div><strong>Drag</strong> any row onto a voice card to add it there. A selection drags together.</div></li>
+          </ol>
+          <h3>Arrange Layers</h3>
+          <ol class="steps-list">
+            <li>Hover a Layer to move it <strong>up</strong> or <strong>down</strong>, <strong>repeat</strong> it, or <strong>remove</strong> it. You can also drag it to a new position.</li>
+            <li>Choose the Voice's <strong>Layer mode</strong> in the menu above its waveform (see the table below).</li>
+            <li>Deleted something by mistake? Click <strong>Undo</strong> or press <kbd>⌘Z</kbd> while it is shown. Kits and Patches undo the same way.</li>
+          </ol>
+          <div class="table-wrap">
+            <table class="modes">
+              <tr><th>App mode</th><th>On the Rample</th><th>Each trigger plays…</th></tr>
+              <tr><td>Single sample</td><td>MANUAL</td><td>the selected Layer</td></tr>
+              <tr><td>Random</td><td>RANDOM</td><td>a random Layer (repeats allowed)</td></tr>
+              <tr><td>Sequential</td><td>CYCLIC</td><td>the next Layer, then wraps around</td></tr>
+              <tr><td>Reverse sequential</td><td>REVERSE CYCLIC</td><td>the previous Layer, then wraps around</td></tr>
+              <tr><td>Velocity</td><td>VELOCITY</td><td>a Layer chosen by the step's velocity</td></tr>
+            </table>
+          </div>
+          <div class="tip warn">
+            <p><strong>Modes are for listening here.</strong> Build to SD writes audio files only. To use a mode on the module, set it on the Rample and STORE.</p>
+          </div>
+        </section>
+
+        <!-- 07 Play -->
+        <section class="chapter" id="play" style="--c: var(--v3)">
+          <header>
+            <span class="eyebrow">07 · Play and audition</span>
+            <h2>Hear the Kit in context</h2>
+          </header>
+          <p class="intro">
+            The sequencer below the voice cards plays your Kit with sample-accurate timing, using the
+            same mono 44.1 kHz audio the Rample will get.
+          </p>
+          <ol class="steps-list">
+            <li>Open the <strong>Pattern</strong> menu and choose <strong>Load example beat</strong>, or click steps to switch them on.</li>
+            <li>Press <kbd>Space</kbd> to play or stop. Set the tempo and each Voice's level, <strong>M</strong>ute and <strong>S</strong>olo.</li>
+            <li><kbd>Alt</kbd>-click or right-click a step to change its velocity (used by Velocity mode).</li>
+            <li>Browse Kits with <kbd>[</kbd> and <kbd>]</kbd>: the beat keeps playing with the new sounds.</li>
+          </ol>
+          <div class="tip">
+            <p><strong>Patterns belong to the Patch.</strong> Tempo, steps and mixer are saved with each Patch on this computer; they are never written to the card.</p>
+          </div>
+        </section>
+
+        <!-- 08 Editor -->
+        <section class="chapter" id="editor" style="--c: var(--v4)">
+          <header>
+            <span class="eyebrow">08 · Edit a sound</span>
+            <h2>Trim, tune and add effects</h2>
+          </header>
+          <p class="intro">
+            Select a Layer and click the sliders button beside <strong>Audition</strong>. Edits are
+            settings over the complete original, so you can reopen a sound later and undo a trim or
+            an effect.
+          </p>
+          <figure class="figure">
+            <div class="shot annotated">
+              <img src="../assets/screens/editor.webp" loading="lazy" width="2000" height="1364" alt="The sample editor with numbered markers." />
+              <span class="marker" style="left: 22.8%; top: 16.1%">1</span>
+              <span class="marker" style="left: 64%; top: 16.1%">2</span>
+              <span class="marker" style="left: 61.5%; top: 28%">3</span>
+              <span class="marker" style="left: 30%; top: 43.8%">4</span>
+              <span class="marker" style="left: 61%; top: 43.8%">5</span>
+              <span class="marker" style="left: 28%; top: 68.3%">6</span>
+              <span class="marker" style="left: 55.5%; top: 88.5%">7</span>
+              <span class="marker" style="left: 66%; top: 88.5%">8</span>
+              <span class="marker" style="left: 82.6%; top: 93.7%">9</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><span>1</span><div><strong>Audition</strong> the sound alone, or <strong>Play sequence</strong> to hear it in the beat.</div></li>
+            <li><span>2</span><div><strong>Preview edits</strong> on or off to compare with the saved sound.</div></li>
+            <li><span>3</span><div><strong>Trim handles.</strong> Drag them, or type Start and End in seconds.</div></li>
+            <li><span>4</span><div><strong>Gain and pitch.</strong> Pitch is varispeed: it changes speed and length, like on tape.</div></li>
+            <li><span>5</span><div><strong>Equalizer:</strong> low, mid and high bands.</div></li>
+            <li><span>6</span><div><strong>Echo and reverb.</strong> Their tails become part of the sound.</div></li>
+            <li><span>7</span><div><strong>Discard edits</strong> drops the draft; closing does too.</div></li>
+            <li><span>8</span><div><strong>Save as new</strong> creates a Variant used only by this Layer.</div></li>
+            <li><span>9</span><div><strong>Overwrite shared Sample</strong> updates every Layer that uses this Sample, in every Patch.</div></li>
+          </ol>
+          <div class="tip">
+            <p><strong>Drafts are local.</strong> Until you save, changes affect only the Layer you opened, even if the same Sample is used elsewhere.</p>
+          </div>
+        </section>
+
+        <!-- 09 Build -->
+        <section class="chapter" id="build" style="--c: var(--v1)">
+          <header>
+            <span class="eyebrow">09 · Build to SD</span>
+            <h2>Write the Patch to your card</h2>
+          </header>
+          <p class="intro">
+            <strong>Build to SD…</strong> turns the open Patch into Rample folders and files. It works
+            on an empty card, a card you already use, or any folder.
+          </p>
+          <ol class="steps-list">
+            <li>Insert the SD card and click <strong>Build to SD…</strong> (top right).</li>
+            <li>Choose the card's top folder (the one that contains <code>A0</code>, <code>_save</code>…).</li>
+            <li>Read the review, then click <strong>Apply Build</strong>.</li>
+            <li>Wait for the progress bar to finish, eject the card and put it in the Rample.</li>
+          </ol>
+          <figure class="figure">
+            <div class="shot annotated">
+              <img src="../assets/screens/build.webp" loading="lazy" width="2000" height="1364" alt="The Build review for an SD card, with numbered markers." />
+              <span class="marker" style="left: 45%; top: 15%">1</span>
+              <span class="marker" style="left: 45%; top: 20.1%">2</span>
+              <span class="marker" style="left: 45%; top: 25.2%">3</span>
+              <span class="marker" style="left: 45%; top: 30.2%">4</span>
+              <span class="marker" style="left: 29.5%; top: 38.1%">5</span>
+            </div>
+            <figcaption>One Layer was added and one sound was edited since the last Build: only two files change.</figcaption>
+          </figure>
+          <ol class="legend">
+            <li><span>1</span><div><strong>Destination and summary</strong> of every change.</div></li>
+            <li><span>2</span><div><strong>Files to add:</strong> new Layers and Kits.</div></li>
+            <li><span>3</span><div><strong>Files to replace:</strong> Layers whose sound or position changed.</div></li>
+            <li><span>4</span><div><strong>Up to date:</strong> files already matching your Patch, left untouched.</div></li>
+            <li><span>5</span><div><strong>Apply Build</strong> rechecks the card, backs up and only then writes.</div></li>
+          </ol>
+          <figure class="figure">
+            <div class="shot"><img src="../assets/screens/build-progress.webp" loading="lazy" width="2000" height="1364" alt="Build progress bar showing the file being prepared." /></div>
+            <figcaption>Progress shows each stage and the file being handled.</figcaption>
+          </figure>
+          <h3>What gets written</h3>
+          <p>
+            Every Layer becomes a mono 16-bit 44.1 kHz WAV named so the Rample plays it in your order:
+            <code>A0/1_01_Warm_kick.wav</code>, <code>A0/1_02_Snare.wav</code>… Your Sample names in
+            the app don't change.
+          </p>
+          <div class="tip warn">
+            <p><strong>The card's Kit audio is made to match the Patch.</strong> Kits that are not in the Patch lose their audio files. Everything is backed up first (next chapter).</p>
+            <p>Build never touches <code>_save</code> (your STOREd settings), firmware, or any other file or folder.</p>
+          </div>
+        </section>
+
+        <!-- 10 Backups -->
+        <section class="chapter" id="backups" style="--c: var(--v2)">
+          <header>
+            <span class="eyebrow">10 · Backups and restore</span>
+            <h2>Undo a Build, keep your Library safe</h2>
+          </header>
+          <p class="intro">
+            Before a Build changes a file, it copies the file to this computer and verifies the copy.
+            The clock button next to <strong>Build to SD…</strong> lists every Build.
+          </p>
+          <figure class="figure">
+            <div class="shot"><img src="../assets/screens/restore.webp" loading="lazy" width="2000" height="1364" alt="Destination backups listing two Builds, with the restore confirmation open." /></div>
+            <figcaption><strong>Restore…</strong> asks for confirmation, then puts the card back as it was before that Build.</figcaption>
+          </figure>
+          <ol class="steps-list">
+            <li>Click the <strong>clock</strong> button and find the Build to undo. Restore the newest first to step back several Builds.</li>
+            <li>Click <strong>Restore…</strong> and confirm. Use <strong>Restore another folder…</strong> if the card now mounts under another name.</li>
+            <li>If a file changed since that Build, nothing is changed and the files are listed for you to check.</li>
+          </ol>
+          <h3>Library backups</h3>
+          <p>
+            <strong>Library backup…</strong> (bottom of the sidebar) saves a complete, verified copy of
+            your Library: Samples, edits, tags and Patches. Restore it on another computer, or return
+            to a recovery snapshot that is created automatically before every restore.
+          </p>
+        </section>
+
+        <!-- 11 Shortcuts -->
+        <section class="chapter" id="shortcuts" style="--c: var(--v3)">
+          <header>
+            <span class="eyebrow">11 · Shortcuts</span>
+            <h2>Work from the keyboard</h2>
+          </header>
+          <p class="intro">Press <kbd>?</kbd> in the app to see this list. On Windows, use <kbd>Ctrl</kbd> instead of <kbd>⌘</kbd>.</p>
+          <div class="table-wrap">
+            <table>
+              <tr><th>Keys</th><th>Action</th></tr>
+              <tr><td><kbd>Space</kbd></td><td>Play or stop the sequencer</td></tr>
+              <tr><td><kbd>1</kbd>–<kbd>4</kbd></td><td>Audition a voice</td></tr>
+              <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Previous or next Kit</td></tr>
+              <tr><td><kbd>⌘1</kbd> / <kbd>⌘2</kbd></td><td>Kit or Samples view</td></tr>
+              <tr><td><kbd>⌘F</kbd></td><td>Search the current view</td></tr>
+              <tr><td><kbd>⌘Z</kbd></td><td>Undo a deletion while it is shown</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Browse Samples, hearing each one</td></tr>
+              <tr><td><kbd>Enter</kbd></td><td>Add the selected Sample as a Layer</td></tr>
+              <tr><td><kbd>Shift</kbd> or <kbd>⌘</kbd>-click</td><td>Select several Samples</td></tr>
+              <tr><td><kbd>Alt</kbd>-click a step</td><td>Edit its velocity</td></tr>
+              <tr><td><kbd>Delete</kbd> in the Kit list</td><td>Delete the focused Kit</td></tr>
+            </table>
+          </div>
+        </section>
+
+        <!-- 12 FAQ -->
+        <section class="chapter" id="faq" style="--c: var(--v4)">
+          <header>
+            <span class="eyebrow">12 · Questions</span>
+            <h2>Frequently asked</h2>
+          </header>
+          <h3>Will it overwrite my Rample settings?</h3>
+          <p>No. Rample Manager never creates, changes or deletes anything in <code>_save</code>. Set Layer modes on the module and STORE as usual.</p>
+          <h3>Where is my Library stored?</h3>
+          <p>
+            On this computer only: <code>~/Library/Application Support/Rample Manager/</code> on macOS
+            and <code>%APPDATA%\Rample Manager\</code> on Windows. Use <strong>Library backup…</strong>
+            to move it to another computer.
+          </p>
+          <h3>Do I need to convert my samples first?</h3>
+          <p>No. Import them as they are; Build prepares mono 16-bit 44.1 kHz WAVs (stereo is mixed to mono, very short sounds are padded to 50 ms). Your originals keep their quality.</p>
+          <h3>Does it work with Rample Turbo?</h3>
+          <p>Yes. Both use the same SD card layout.</p>
+          <h3>I found a bug or have an idea.</h3>
+          <p>Please open an issue on <a href="https://github.com/OliverLSanz/rample-manager/issues">GitHub</a>.</p>
+        </section>
+      </main>
+    </div>
+
+    <footer>
+      <div class="wrap">
+        <span>Rample Manager by <a href="https://oliverlsanz.com/">Óliver L. Sanz</a>. Not affiliated with Squarp.</span>
+        <nav aria-label="Footer">
+          <a href="../">Home</a>
+          <a href="https://github.com/OliverLSanz/rample-manager/releases">Releases</a>
+          <a href="https://github.com/OliverLSanz/rample-manager/issues">Report an issue</a>
+        </nav>
+      </div>
+    </footer>
+    <script src="../assets/site.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rample Manager — sample library and kit builder for the Rample</title>
+    <meta
+      name="description"
+      content="Rample Manager is a free desktop app for macOS and Windows to organise your samples, build and audition Squarp Rample kits, and write them to the SD card safely."
+    />
+    <meta name="theme-color" content="#111316" />
+    <meta property="og:title" content="Rample Manager" />
+    <meta
+      property="og:description"
+      content="Organise samples, build Rample kits with a live sequencer and write them to the SD card safely. macOS and Windows."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://oliverlsanz.com/RampleManager/" />
+    <meta property="og:image" content="https://oliverlsanz.com/RampleManager/assets/screens/main.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="apple-touch-icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap">
+        <a class="brand" href="./"><img src="assets/icon.png" alt="" />Rample Manager</a>
+        <nav class="nav-links" aria-label="Main">
+          <a href="#features">Features</a>
+          <a href="#workflow">How it works</a>
+          <a href="manual/">Manual</a>
+          <a href="https://github.com/OliverLSanz/rample-manager">GitHub</a>
+          <a class="button small" href="#download">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div>
+            <span class="eyebrow">For Squarp Rample &amp; Rample Turbo</span>
+            <h1>Your samples.<br /><em>Your kits.</em><br />Ready for the card.</h1>
+            <p class="lede">
+              Rample Manager is a free desktop app to keep every sound in one Library, build
+              Kits with a live four-voice sequencer, hear them exactly as the Rample will, and
+              write the whole SD card safely.
+            </p>
+            <div class="cta">
+              <a class="button" href="#download" data-primary-download>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" /></svg>
+                <span data-primary-label>Download free</span>
+              </a>
+              <a class="button ghost" href="manual/">Read the manual</a>
+            </div>
+            <p class="meta">
+              macOS 14+ (Apple Silicon &amp; Intel) · Windows 10/11 ·
+              <span data-version>Latest release</span> · Works offline, no account
+            </p>
+          </div>
+          <div class="pads" aria-hidden="true" data-pads></div>
+        </div>
+      </section>
+
+      <div class="wrap showcase glow reveal">
+        <div class="shot">
+          <img
+            src="assets/screens/main.webp"
+            width="2000"
+            height="1364"
+            alt="Rample Manager main window: Kits in the sidebar, four voice cards with their Layers and the step sequencer."
+          />
+        </div>
+      </div>
+
+      <section id="features">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="eyebrow">Features</span>
+            <h2>Everything between your sample folder and the Rample.</h2>
+            <p>
+              Stop renaming WAVs by hand. Rample Manager keeps your sounds organised, shows every
+              Kit as it will play, and takes care of filenames, formats and backups when you
+              write the card.
+            </p>
+          </div>
+          <div class="features">
+            <article class="feature v1 reveal">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /><circle cx="19" cy="17" r="2" /></svg></div>
+              <h3>One sample Library</h3>
+              <p>Import WAV, AIFF, FLAC and MP3 files or whole folders. Name, tag, search and audition every sound; your originals are never modified.</p>
+            </article>
+            <article class="feature v2 reveal">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></svg></div>
+              <h3>Kits A0 to Z99</h3>
+              <p>Arrange four Voices of up to 12 Layers per Kit. Drag samples onto voices, reorder Layers, duplicate and move Kits, with Undo for every deletion.</p>
+            </article>
+            <article class="feature v3 reveal">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4" /></svg></div>
+              <h3>Hear it like the Rample</h3>
+              <p>A sample-accurate 16-step sequencer with velocity, mute and solo. Audition the exact mono 44.1 kHz preparation and all five Layer modes.</p>
+            </article>
+            <article class="feature v4 reveal">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg></div>
+              <h3>Non-destructive edits</h3>
+              <p>Trim, gain, varispeed pitch, EQ, echo and reverb over the complete original. Save for every use of a sound or as a new Variant, and change it later.</p>
+            </article>
+            <article class="feature v1 reveal">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H7z" /><path d="M10 8v3M13 8v3M16 8v3" /></svg></div>
+              <h3>Import your card</h3>
+              <p>Bring an existing SD card into a Patch with its Kits, Layer order and the Layer modes you STOREd on the module.</p>
+            </article>
+            <article class="feature v2 reveal">
+              <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z" /><path d="m9 12 2 2 4-4" /></svg></div>
+              <h3>Safe Build to SD</h3>
+              <p>Review every file before it is written. Replaced files are backed up and verified first, and any Build can be restored with one click.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" style="background: linear-gradient(180deg, transparent, #15181c 30%, #15181c 70%, transparent)">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="eyebrow">How it works</span>
+            <h2>Import. Arrange. Build.</h2>
+            <p>Three steps from a messy folder of sounds to a card that plays exactly what you heard.</p>
+          </div>
+          <ol class="flow">
+            <li class="v1 reveal">
+              <h3>Import</h3>
+              <p>Drop in sample packs, your own recordings or a whole Rample card. Everything is copied into your private Library and recognised if you import it again.</p>
+            </li>
+            <li class="v2 reveal">
+              <h3>Arrange</h3>
+              <p>Search by name or tag, audition while browsing and add sounds to any Voice. Play the Kit with the sequencer and fine-tune each sound.</p>
+            </li>
+            <li class="v3 reveal">
+              <h3>Build</h3>
+              <p>Choose the SD card. Rample Manager renders every Layer as a Rample-ready WAV with the right name and order, and leaves <code>_save</code> alone.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section>
+        <div class="wrap">
+          <div class="split reveal">
+            <div>
+              <span class="eyebrow">Library</span>
+              <h3>Find the right kick in seconds.</h3>
+              <p>Tags and search words combine, so <code>kick industrial</code> finds exactly that. Every row shows where it plays in your Patch.</p>
+              <ul class="checks">
+                <li style="--c: var(--v1)">Hear while browsing with the arrow keys</li>
+                <li style="--c: var(--v2)">Compare the original with the Rample mono version</li>
+                <li style="--c: var(--v3)">Recoverable Trash and portable Library backups</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="assets/screens/samples.webp" loading="lazy" width="2000" height="1364" alt="The Samples view with tag filters, a sample list and the waveform of the selected sample." /></div>
+          </div>
+          <div class="split flip reveal">
+            <div>
+              <span class="eyebrow">Sample editor</span>
+              <h3>Shape the sound, keep the original.</h3>
+              <p>Edits are settings over the complete source, not destructive renders. Reopen any sound and expand a trim or remove an effect.</p>
+              <ul class="checks">
+                <li style="--c: var(--v4)">Trim, gain and varispeed pitch</li>
+                <li style="--c: var(--v2)">Three-band EQ, echo and reverb with tails</li>
+                <li style="--c: var(--v3)">Bypass to compare before you save</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="assets/screens/editor.webp" loading="lazy" width="2000" height="1364" alt="The sample editor with trim handles over a waveform and effect controls." /></div>
+          </div>
+          <div class="split reveal">
+            <div>
+              <span class="eyebrow">Build to SD</span>
+              <h3>See every change before it happens.</h3>
+              <p>Build compares your Patch with the card and lists the files to add, replace and remove. Files that already match are left alone.</p>
+              <ul class="checks">
+                <li style="--c: var(--v1)">Verified backup of every replaced file</li>
+                <li style="--c: var(--v2)">One-click restore of any Build</li>
+                <li style="--c: var(--v4)">Never touches <code>_save</code>, firmware or other files</li>
+              </ul>
+            </div>
+            <div class="shot"><img src="assets/screens/build.webp" loading="lazy" width="2000" height="1364" alt="The Build to SD review listing files to add and replace." /></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="download" class="download">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="eyebrow">Download</span>
+            <h2>Free for macOS and Windows.</h2>
+            <p>Installers are hosted on GitHub Releases. Your Library stays on your computer.</p>
+          </div>
+          <div class="platforms">
+            <div class="platform reveal" data-os="mac">
+              <svg class="os" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.15-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.59-.75 2.99-.75 1.4 0 1.79.75 3.01.72 1.24-.02 2.03-1.13 2.79-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.45-3.69zM14.07 5.85c.64-.78 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.11 1.77-.97 2.82 1.03.08 2.07-.52 2.71-1.28z" /></svg>
+              <h3>macOS</h3>
+              <p>Universal · Apple Silicon &amp; Intel · macOS 14+</p>
+              <a class="button" href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-macOS.dmg">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" /></svg>
+                Download .dmg <small data-size="Rample-Manager-macOS.dmg"></small>
+              </a>
+            </div>
+            <div class="platform reveal" data-os="windows">
+              <svg class="os" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.1 10.4 4v7.2H3zm8.3-1.2L21 2.5v8.7h-9.7zM3 12.2h7.4v7.2L3 18.3zm8.3 0H21v8.7l-9.7-1.4z" /></svg>
+              <h3>Windows</h3>
+              <p>64-bit · Windows 10 &amp; 11</p>
+              <a class="button" href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-Windows-x64-setup.exe">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" /></svg>
+                Download .exe <small data-size="Rample-Manager-Windows-x64-setup.exe"></small>
+              </a>
+            </div>
+          </div>
+          <p class="version">
+            <span data-version>Latest release</span> ·
+            <a href="https://github.com/OliverLSanz/rample-manager/releases">All releases and notes</a>
+          </p>
+          <div class="note reveal">
+            <p><strong>First launch.</strong> The app is free and not yet signed by Apple or Microsoft, so your system asks before opening it the first time.</p>
+            <p><strong>macOS:</strong> drag Rample Manager to Applications and open it. If macOS blocks it, go to System Settings → Privacy &amp; Security and click <em>Open Anyway</em>.</p>
+            <p><strong>Windows:</strong> if SmartScreen appears, click <em>More info</em> → <em>Run anyway</em>.</p>
+            <p>Step-by-step instructions are in the <a href="manual/#install">manual</a>.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>Rample Manager by <a href="https://oliverlsanz.com/">Óliver L. Sanz</a>. Not affiliated with Squarp.</span>
+        <nav aria-label="Footer">
+          <a href="manual/">Manual</a>
+          <a href="https://github.com/OliverLSanz/rample-manager/releases">Releases</a>
+          <a href="https://github.com/OliverLSanz/rample-manager/issues">Report an issue</a>
+        </nav>
+      </div>
+    </footer>
+    <script src="assets/site.js" defer></script>
+  </body>
+</html>
