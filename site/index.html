@@ -33,6 +33,7 @@
       <div class="wrap">
         <a class="brand" href="./"><img src="assets/icon.png" alt="" />Rample Manager</a>
         <nav class="nav-links" aria-label="Main">
+          <a href="#tour">Tour</a>
           <a href="#features">Features</a>
           <a href="#workflow">How it works</a>
           <a href="manual/">Manual</a>
@@ -79,6 +80,25 @@
           />
         </div>
       </div>
+
+      <section id="tour" class="tour">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <span class="eyebrow">50-second tour</span>
+            <h2>See it in action.</h2>
+            <p>From a folder of samples to a Kit on the card. Turn the sound on: the beat is built from the Kit on screen.</p>
+          </div>
+          <div class="tour-player glow reveal" data-tour>
+            <video controls preload="none" playsinline width="1920" height="1080" poster="assets/video/tour-poster.webp">
+              <source src="assets/video/tour.mp4" type="video/mp4" />
+            </video>
+            <button class="tour-play" type="button" hidden>
+              <span class="tour-play-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.6-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg></span>
+              <span class="tour-play-label">Play the tour<small>0:50 · sound on</small></span>
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section id="features">
         <div class="wrap">

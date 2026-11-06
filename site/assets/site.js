@@ -76,6 +76,30 @@
       .catch(() => {});
   }
 
+  // Video tour: the 9:16 cut on phones held upright, a play button over the poster.
+  const tour = document.querySelector("[data-tour]");
+  if (tour) {
+    const video = tour.querySelector("video");
+    const play = tour.querySelector(".tour-play");
+    if (matchMedia("(max-width: 640px) and (orientation: portrait)").matches) {
+      tour.classList.add("vertical");
+      video.width = 1080;
+      video.height = 1920;
+      video.poster = "assets/video/tour-poster-vertical.webp";
+      video.querySelector("source").src = "assets/video/tour-vertical.mp4";
+      video.load();
+    }
+    video.controls = false;
+    play.hidden = false;
+    play.addEventListener("click", () => {
+      play.hidden = true;
+      video.controls = true;
+      video.play().catch(() => {
+        play.hidden = false;
+      });
+    });
+  }
+
   // Reveal sections as they scroll into view.
   const reveals = document.querySelectorAll(".reveal");
   if ("IntersectionObserver" in window && !reduced) {
