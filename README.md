@@ -1,20 +1,33 @@
-# Rample Preview
+# Rample Manager
 
-A desktop sample auditioning and kit-building app for Squarp Rample / Rample Turbo.
+A desktop sample library and kit-building app for Squarp Rample / Rample Turbo.
 Runs on **macOS and Windows** with a shared React interface and native Rust audio
 engine. Everything works locally and offline; no account or server is required.
+Rample Manager was called Rample Preview before version 3.0.
+
+Website and visual manual: <https://oliverlsanz.com/RampleManager/> (source in
+[`site/`](site/)).
 
 ## Install
 
-- **macOS:** open the DMG and copy **Rample Preview** to Applications. The build
-  currently targets Apple Silicon and macOS 14+. Codex installs local changes with
-  `./scripts/install.sh`; the previous Swift app is kept as a local backup.
-- **Windows:** run the x64 `.exe` installer. It installs for the current user. Windows 10/11 x64 and the WebView2 runtime are required;
-  the installer can install WebView2 if needed. A publisher signing certificate
-  is not configured, so Windows may display an unknown-publisher warning.
+Download the newest installer from the
+[latest GitHub Release](https://github.com/OliverLSanz/rample-manager/releases/latest).
 
-Installers are attached to [private GitHub releases](https://github.com/OliverLSanz/rample-preview/releases). The **Desktop builds** workflow
-also keeps macOS DMG and Windows EXE artifacts for each successful code build.
+- **macOS:** open `Rample-Manager-macOS.dmg` and drag **Rample Manager** to
+  Applications. The app is universal (Apple Silicon and Intel) and needs
+  macOS 14+. It is signed ad hoc, not notarized, so the first launch is blocked:
+  open **System Settings → Privacy & Security** and choose **Open Anyway**, or run
+  `xattr -dr com.apple.quarantine "/Applications/Rample Manager.app"`.
+- **Windows:** run `Rample-Manager-Windows-x64-setup.exe`. It installs for the
+  current user. Windows 10/11 x64 and the WebView2 runtime are required; the
+  installer can install WebView2 if needed. The installer is unsigned, so
+  SmartScreen may show **More info → Run anyway**.
+
+Pushing a version tag (`v3.0.0`, matching `VERSION`) makes the **Desktop builds**
+workflow test, build and publish both installers as a GitHub Release, with the
+notes in `docs/releases/<tag>.md`. Release files keep the same names across
+versions, so `releases/latest/download/<file>` always serves the newest one.
+Every build of `main` also keeps both installers as workflow artifacts.
 Updates on Oliver's Mac remain fully automated through the local install script.
 Hosted automatic updates are not enabled; the installers can upgrade an existing
 installation while keeping preferences and sample libraries.
@@ -292,8 +305,10 @@ reference only: no further device captures are planned.
 ## Session preservation
 
 The private Library lives in `Library/` in the app support folder
-(`~/Library/Application Support/Rample Preview/` on macOS,
-`%APPDATA%/Rample Preview/` on Windows). After restore, its active store is selected from protected
+(`~/Library/Application Support/Rample Manager/` on macOS,
+`%APPDATA%/Rample Manager/` on Windows). A Library created by Rample Preview
+(`Rample Preview/Library`) keeps being used in place, without moving files,
+until a `Rample Manager` folder exists. After restore, its active store is selected from protected
 `Library/Generations/` by immutable activation records. `library.sqlite3` stores stable Sample/Original identities, names,
 audio metadata and SHA-256 recognition; Original locators are relative to this
 store, with no dependency on external source paths. SQLite is bundled on both

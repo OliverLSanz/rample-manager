@@ -2,6 +2,8 @@ name: Desktop builds
 on:
   push:
     branches: [main]
+    # A version tag (v3.0.0) also publishes a public GitHub Release.
+    tags: ["v*"]
     paths:
       [
         "crates/**",
@@ -27,15 +29,21 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            platform: macOS-arm64
+            platform: macOS-universal
             bundles: app,dmg
-            artifact: target/release/bundle/dmg/*.dmg
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            installer: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            release-name: Rample-Manager-macOS.dmg
           - os: windows-latest
             platform: Windows-x64
             bundles: nsis
-            artifact: target/release/bundle/nsis/*.exe
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            installer: target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            release-name: Rample-Manager-Windows-x64-setup.exe
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +53,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
+          targets: ${{ matrix.rust-targets }}
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -55,14 +64,43 @@ jobs:
       - run: cargo test --workspace --all-targets --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Package desktop app
-        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+        run: npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Check Windows install, launch and upgrade
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/smoke-windows.ps1
+      # Release files keep one name across versions, so
+      # releases/latest/download/<name> always links the newest installer.
+      - name: Name the installer
+        shell: bash
+        run: |
+          mkdir -p installer
+          cp ${{ matrix.installer }} "installer/${{ matrix.release-name }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: Rample-Preview-${{ matrix.platform }}
-          path: ${{ matrix.artifact }}
+          name: Rample-Manager-${{ matrix.platform }}
+          path: installer/${{ matrix.release-name }}
           if-no-files-found: error
           retention-days: 30
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test "$version" = "$(cat VERSION)"
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          test -f "$notes"
+          gh release create "$GITHUB_REF_NAME" installers/* \
+            --title "Rample Manager $version" --notes-file "$notes" --verify-tag

@@ -83,7 +83,7 @@ impl ManagedLibrary {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(|e| e.to_string())?;
         if version > 8 {
-            return Err("This Library was created by a newer application. Update Rample Preview before opening it.".into());
+            return Err("This Library was created by a newer application. Update Rample Manager before opening it.".into());
         }
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
             .map_err(|e| e.to_string())?;

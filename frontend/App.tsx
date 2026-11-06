@@ -548,7 +548,7 @@ export default function App() {
     return (
       <div className="boot">
         <AudioLines size={48} />
-        <h1>Rample Preview</h1>
+        <h1>Rample Manager</h1>
         {bootError ? (
           <>
             <p role="alert">{bootError}</p>

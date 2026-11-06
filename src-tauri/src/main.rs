@@ -131,6 +131,18 @@ fn open_backup_folder(state: &AppState, folder: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// The support folder inside the platform data folder. The app was called
+/// Rample Preview before 3.0: a Library created under that name keeps being
+/// used, in place, until a `Rample Manager` folder exists.
+fn support_folder(data: &Path) -> PathBuf {
+    let current = data.join("Rample Manager");
+    let previous = data.join("Rample Preview");
+    if !current.exists() && previous.join("Library").is_dir() {
+        previous
+    } else {
+        current
+    }
+}
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -144,9 +156,7 @@ fn main() {
             let support = if let Some(override_path) = std::env::var_os("RAMPLE_DATA_DIR") {
                 PathBuf::from(override_path)
             } else {
-                dirs::data_dir()
-                    .ok_or("Could not locate the app data folder")?
-                    .join("Rample Preview")
+                support_folder(&dirs::data_dir().ok_or("Could not locate the app data folder")?)
             };
             app.manage(AppState::open(support, AudioHost::new())?);
             Ok(())
@@ -193,7 +203,7 @@ fn main() {
             editor::audition_editor,
         ])
         .run(tauri::generate_context!())
-        .expect("run Rample Preview");
+        .expect("run Rample Manager");
 }
 
 #[cfg(test)]
@@ -222,6 +232,20 @@ mod tests {
                 },
             )
             .unwrap()
+    }
+    #[test]
+    fn a_library_from_rample_preview_stays_in_place_until_a_rample_manager_folder_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        assert_eq!(support_folder(data), data.join("Rample Manager"));
+        // Retired folder-workflow files alone are not a Library.
+        std::fs::create_dir_all(data.join("Rample Preview")).unwrap();
+        std::fs::write(data.join("Rample Preview/session.json"), b"{}").unwrap();
+        assert_eq!(support_folder(data), data.join("Rample Manager"));
+        std::fs::create_dir_all(data.join("Rample Preview/Library")).unwrap();
+        assert_eq!(support_folder(data), data.join("Rample Preview"));
+        std::fs::create_dir_all(data.join("Rample Manager")).unwrap();
+        assert_eq!(support_folder(data), data.join("Rample Manager"));
     }
     #[test]
     fn a_new_library_opens_empty_and_the_demo_card_imports_as_a_patch() {

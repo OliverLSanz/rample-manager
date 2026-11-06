@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Rample Preview",
-  "version": "2.3.0",
-  "identifier": "net.oliver.rample-preview",
-  "mainBinaryName": "RamplePreview",
+  "productName": "Rample Manager",
+  "version": "3.0.0",
+  "identifier": "net.oliver.rample-manager",
+  "mainBinaryName": "RampleManager",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Rample Preview",
+        "title": "Rample Manager",
         "width": 1320,
         "height": 900,
         "minWidth": 1100,

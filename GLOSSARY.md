@@ -1,4 +1,4 @@
-# Rample Preview
+# Rample Manager
 
 Domain vocabulary for the shared sample Library and Rample Patch preparation.
 

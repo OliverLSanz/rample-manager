@@ -5,7 +5,7 @@ if ($env:GITHUB_ACTIONS -ne 'true') {
     throw 'Run this installer check only on a disposable GitHub Actions Windows runner.'
 }
 if (-not $InstallerPath) {
-    $InstallerPath = (Get-ChildItem 'target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1).FullName
+    $InstallerPath = (Get-ChildItem 'target/*/release/bundle/nsis/*-setup.exe', 'target/release/bundle/nsis/*-setup.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
 }
 if (-not $InstallerPath) { throw 'No Windows installer was built.' }
 $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('rample-smoke-' + [guid]::NewGuid().ToString('N'))
@@ -19,10 +19,10 @@ $passed = $false
 function Install-App {
     $installer = Start-Process -FilePath $InstallerPath -ArgumentList @('/S', "/D=$installRoot") -PassThru -Wait
     if ($installer.ExitCode -ne 0) { throw "Installer failed with code $($installer.ExitCode)." }
-    if (-not (Test-Path (Join-Path $installRoot 'RamplePreview.exe'))) { throw 'Installed app is missing.' }
+    if (-not (Test-Path (Join-Path $installRoot 'RampleManager.exe'))) { throw 'Installed app is missing.' }
 }
 function Start-App {
-    $script:appProcess = Start-Process -FilePath (Join-Path $installRoot 'RamplePreview.exe') -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $script:appProcess = Start-Process -FilePath (Join-Path $installRoot 'RampleManager.exe') -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     $startup = [Diagnostics.Stopwatch]::StartNew()
     $ready = $false
     while ($startup.Elapsed.TotalSeconds -lt 60) {

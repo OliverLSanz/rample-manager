@@ -470,7 +470,7 @@ fn validate_schema(path: &Path) -> Result<(), String> {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(io)?;
     if version != 8 {
-        return Err("Unsupported Library snapshot database version. Update Rample Preview or choose a supported backup.".into());
+        return Err("Unsupported Library snapshot database version. Update Rample Manager or choose a supported backup.".into());
     }
     let reference = tempfile::tempdir().map_err(io)?;
     let known = ManagedLibrary::open(reference.path())?;

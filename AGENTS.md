@@ -1,8 +1,13 @@
-# Rample Preview
+# Rample Manager
 
 Cross-platform desktop app: Tauri 2 shell, React/TypeScript UI and Rust audio/file
-core. The macOS installation is `/Applications/Rample Preview.app`. Windows NSIS
-installers are built by `.github/workflows/desktop.yml` and published privately.
+core. The macOS installation is `/Applications/Rample Manager.app` (called Rample
+Preview before 3.0). Windows NSIS and universal macOS installers are built by
+`.github/workflows/desktop.yml`; a `v*` tag publishes them as a public GitHub
+Release of `OliverLSanz/rample-manager` with `docs/releases/<tag>.md` as notes.
+The website and visual manual live in `site/` and deploy with
+`./scripts/deploy-site.sh` to https://oliverlsanz.com/RampleManager/. Keep the
+manual in step with user-facing changes.
 
 ## Change, validate and install
 
@@ -100,8 +105,9 @@ Sample is reopened.
 
 ## Support folder
 
-macOS uses `~/Library/Application Support/Rample Preview/`, Windows
-`%APPDATA%/Rample Preview/`. The app reads only its `Library/` (plus
+macOS uses `~/Library/Application Support/Rample Manager/`, Windows
+`%APPDATA%/Rample Manager/`; an existing `Rample Preview/Library` keeps being used
+in place until a `Rample Manager` folder exists (`support_folder`). The app reads only its `Library/` (plus
 `Patch build backups/`). Files from the retired folder workflow (`session.json`,
 Swift session backups, `Demo SD`, `sample-reviews.json`, `Conversion backups`,
 `Sample edit backups`) are no longer read; never delete or rewrite them.

@@ -155,7 +155,7 @@ locale comparator is Squarp's implementation.
 [Comparator](https://github.com/canufeel/rample-kit-studio/blob/2efbb177ccbd2b11280b1e7ab7d2d825b80bc581/src/domain/cardImport.ts),
 [export naming](https://github.com/canufeel/rample-kit-studio/blob/2efbb177ccbd2b11280b1e7ab7d2d825b80bc581/src/domain/filename.ts).
 
-## Practical next steps for Rample Preview
+## Practical next steps for Rample Manager
 
 1. Continue the managed Library/Patch implementation under the accepted ADRs.
    Preserve stereo Originals byte for byte; derive current mono device audio.

@@ -1,13 +1,13 @@
 # Issue tracker: GitHub
 
-Issues and specs live in `OliverLSanz/rample-preview` on GitHub.
+Issues and specs live in `OliverLSanz/rample-manager` on GitHub.
 Use the `gh` CLI from this clone.
 
 ## Operations
 
 - Confirm the target before creating issues:
   `gh repo view --json nameWithOwner`.
-  File issues in `OliverLSanz/rample-preview`.
+  File issues in `OliverLSanz/rample-manager`.
 - Create: `gh issue create --title "..." --body-file <path>`.
   Write multiline bodies to a temporary file with actual newlines.
 - Read: `gh issue view <number> --json number,title,body,labels,comments`.
@@ -29,7 +29,7 @@ Use native sub-issues and dependencies:
 - Add a blocker:
   `gh issue edit <child> --add-blocked-by <blocker>`.
 - Count open blockers:
-  `gh api repos/OliverLSanz/rample-preview/issues/<number> --jq .issue_dependencies_summary.blocked_by`.
+  `gh api repos/OliverLSanz/rample-manager/issues/<number> --jq .issue_dependencies_summary.blocked_by`.
 
 If native relationships are unavailable, put `Part of #<parent>` and
 `Blocked by: #<number>` at the top of the child body, and link children
