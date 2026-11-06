@@ -581,9 +581,9 @@ export default function App() {
           <AudioLines size={31} />
           <div>
             <strong>RAMPLE</strong>
-            <span>P R E V I E W</span>
+            <span>M A N A G E R</span>
           </div>
-          <small>2.3</small>
+          <small>{__APP_VERSION__.split(".").slice(0, 2).join(".")}</small>
         </div>
         <KitList
           key={patch?.id ?? ""}
