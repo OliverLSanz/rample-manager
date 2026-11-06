@@ -7,7 +7,10 @@ Preview before 3.0). Windows NSIS and universal macOS installers are built by
 Release of `OliverLSanz/rample-manager` with `docs/releases/<tag>.md` as notes.
 The website and visual manual live in `site/` and deploy with
 `./scripts/deploy-site.sh` to https://oliverlsanz.com/RampleManager/. Keep the
-manual in step with user-facing changes.
+manual in step with user-facing changes. Release builds show one dismissible
+startup notice (`frontend/notices.ts`): a newer GitHub Release with the first
+bullets of its notes, or a message from `site/messages.json` (README, Startup
+notices). Every failure must stay silent; never add tracking.
 
 ## Change, validate and install
 

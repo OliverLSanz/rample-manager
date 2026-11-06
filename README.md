@@ -32,6 +32,27 @@ Updates on Oliver's Mac remain fully automated through the local install script.
 Hosted automatic updates are not enabled; the installers can upgrade an existing
 installation while keeping preferences and sample libraries.
 
+### Startup notices
+
+A few seconds after startup, release builds ask two public sources whether
+there is something to tell the user, and show at most one small card in the
+corner, which never takes focus:
+
+- **A new version.** The latest GitHub Release (`api.github.com`), when it is
+  newer than the running app. The card lists the first five bullet points of
+  `docs/releases/<tag>.md`, so put short user-facing bullets first. It appears
+  only once a Release is published, never for work on `main`.
+- **News.** `site/messages.json`, published with the website. Each message
+  needs an `id` and a `title`; `body`, an https `url` with `linkLabel`,
+  `minVersion`, `maxVersion` and `until` (`YYYY-MM-DD`) are optional. Edit the
+  file and run `./scripts/deploy-site.sh` to send one.
+
+The version notice comes first, then the messages in file order. Closing a
+card, **Skip this version** or following its link dismisses it for good on that
+computer. Any failure (offline, a timeout of five seconds, an error response
+or invalid data) shows nothing. Development builds never ask. The requests
+carry no identifier; the servers only see the computer's IP address.
+
 ## Website
 
 `site/` holds the landing page and the visual manual: static HTML, CSS and a

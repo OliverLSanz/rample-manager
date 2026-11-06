@@ -22,6 +22,7 @@ import { SampleEditor } from "./SampleEditor";
 import { SdImport } from "./SdImport";
 import { SamplesScreen } from "./SamplesScreen";
 import { LibrarySnapshots } from "./LibrarySnapshots";
+import { NoticeCard } from "./NoticeCard";
 import {
   BuildProgressNotice,
   BuildResult,
@@ -980,6 +981,8 @@ export default function App() {
           onClose={() => setAdding(null)}
         />
       )}
+      {/* Development builds never ask for release notices. */}
+      {!import.meta.env.DEV && <NoticeCard version={__APP_VERSION__} />}
       <div className="toasts">
         {undoOffer > 0 && view.undo && (
           <div className="toast undo-toast" role="status">

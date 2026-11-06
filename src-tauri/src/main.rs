@@ -131,6 +131,29 @@ fn open_backup_folder(state: &AppState, folder: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+/// Opens a web page in the system browser. Only https links, which is all the
+/// app's notices use, so a link can never start a local program or file.
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    if !is_web_link(&url) {
+        return Err("Only https links can be opened.".into());
+    }
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer.exe")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn is_web_link(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .is_some_and(|rest| !rest.is_empty() && !rest.chars().any(char::is_whitespace))
+}
 /// The support folder inside the platform data folder. The app was called
 /// Rample Preview before 3.0: a Library created under that name keeps being
 /// used, in place, until a `Rample Manager` folder exists.
@@ -193,6 +216,7 @@ fn main() {
             managed::stop_sample_audition,
             managed::open_sample_audition,
             get_transport,
+            open_link,
             managed::export_sample,
             managed::sample_waveform,
             sample_edits::sample_revisions,
@@ -232,6 +256,21 @@ mod tests {
                 },
             )
             .unwrap()
+    }
+    #[test]
+    fn only_https_links_open() {
+        assert!(is_web_link(
+            "https://oliverlsanz.com/RampleManager/#download"
+        ));
+        for url in [
+            "http://oliverlsanz.com",
+            "https://",
+            "file:///Applications",
+            "/Applications/Calculator.app",
+            "https://example.com/a b",
+        ] {
+            assert!(!is_web_link(url), "{url}");
+        }
     }
     #[test]
     fn a_library_from_rample_preview_stays_in_place_until_a_rample_manager_folder_exists() {

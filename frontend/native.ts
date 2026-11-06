@@ -141,6 +141,8 @@ export const restorePatchBuild = (id: string, destination: string) =>
     id,
     destination,
   });
+/** Opens an https link in the system browser. */
+export const openLink = (url: string) => invoke<void>("open_link", { url });
 export const showPatchBuildBackups = () =>
   invoke<void>("show_patch_build_backups");
 
