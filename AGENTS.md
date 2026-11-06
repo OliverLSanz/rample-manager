@@ -189,3 +189,8 @@ Use the five canonical triage labels. Before triaging issues, read
 
 Use a single-context layout. Before exploring the codebase, read
 `docs/agents/domain.md`.
+
+### Releases, website and messages to users
+
+Before publishing a version, changing `site/` or sending users a message, read
+`docs/agents/releases.md`. Only tag a release when Oliver asks for one.
