@@ -11,12 +11,12 @@
 </p>
 
 <p align="center">
-  <a href="https://oliverlsanz.com/RampleManager/"><img src="https://img.shields.io/badge/Visit_the_website-oliverlsanz.com%2FRampleManager-f68061?style=for-the-badge&labelColor=111316" alt="Visit the website: oliverlsanz.com/RampleManager" height="44"></a>
+  <a href="https://oliverlsanz.com/RampleManager/"><img src="https://img.shields.io/badge/Visit_the_website-oliverlsanz.com%2FRampleManager-f68061?style=for-the-badge&labelColor=111316" alt="Visit the website: oliverlsanz.com/RampleManager" width="560"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-macOS.dmg"><img src="https://img.shields.io/badge/Download-macOS-eeeff1?style=flat-square&logo=apple&logoColor=eeeff1&labelColor=252a31&color=252a31" alt="Download for macOS"></a>
-  <a href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-Windows-x64-setup.exe"><img src="https://img.shields.io/badge/Download-Windows-eeeff1?style=flat-square&logo=windows&logoColor=eeeff1&labelColor=252a31&color=252a31" alt="Download for Windows"></a>
+  <a href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-macOS.dmg"><img src="https://img.shields.io/badge/Download-macOS-eeeff1?style=flat-square&labelColor=252a31&color=252a31" alt="Download for macOS"></a>
+  <a href="https://github.com/OliverLSanz/rample-manager/releases/latest/download/Rample-Manager-Windows-x64-setup.exe"><img src="https://img.shields.io/badge/Download-Windows-eeeff1?style=flat-square&labelColor=252a31&color=252a31" alt="Download for Windows"></a>
   <a href="https://oliverlsanz.com/RampleManager/manual/"><img src="https://img.shields.io/badge/Read-the_manual-eeeff1?style=flat-square&labelColor=252a31&color=252a31" alt="Read the manual"></a>
 </p>
 
