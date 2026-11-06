@@ -8,7 +8,9 @@ REMOTE_DIR="${RAMPLE_SITE_DIR:-vps/html/RampleManager}"
 URL="${RAMPLE_SITE_URL:-https://oliverlsanz.com/RampleManager/}"
 
 ssh "$HOST" "mkdir -p '$REMOTE_DIR'"
-rsync -rlz --delete --chmod=D755,F644 --exclude .DS_Store "$PROJECT_DIR/site/" "$HOST:$REMOTE_DIR/"
+# macOS ships openrsync, without --chmod: set permissions remotely instead.
+rsync -rlz --delete --exclude .DS_Store "$PROJECT_DIR/site/" "$HOST:$REMOTE_DIR/"
+ssh "$HOST" "find '$REMOTE_DIR' -type d -exec chmod 755 {} + && find '$REMOTE_DIR' -type f -exec chmod 644 {} +"
 for page in "" manual/ assets/style.css assets/site.js assets/screens/main.webp; do
     curl --fail --silent --show-error --output /dev/null "$URL$page"
 done
