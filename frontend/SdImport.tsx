@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from "react";
+import { FolderOpen, HardDriveDownload, LoaderCircle } from "lucide-react";
 import { Modal } from "./Modal";
 import * as native from "./native";
 import {
@@ -110,167 +111,224 @@ export function SdImport({
         if (!busy) onClose();
       }}
     >
-      <h2>Import Rample SD</h2>
-      <p>
-        Copy Samples, Bank/Kit addresses, ordered Voice Layers and opaque native
-        files into the Library. Your SD is left unchanged.
-      </p>
-      {error && <p role="alert">{error}</p>}
-      {message && <p role="status">{message}</p>}
-      {busy && <p role="status">Copying and preparing managed audio…</p>}
-      <button disabled={busy} onClick={() => void choose()}>
-        Choose SD folder…
-      </button>
-      {review && (
-        <>
-          <p role="status">
-            {review.audio.imported} new Sample(s), {review.audio.recognized}{" "}
-            recognized, {review.audio.failed} failed.
-          </p>
-          {!imported?.copyComplete && (
-            <p role="status">
-              Partial Import: some source content could not be copied. Keep the
-              source to retry individual failures; usable copied Samples remain
-              available.
-            </p>
+      <div className="dialog sd-import">
+        <div className="modal-heading">
+          <HardDriveDownload size={20} />
+          <h2>Import Rample SD</h2>
+        </div>
+        <p>
+          Copy Samples, Bank/Kit addresses, ordered Voice Layers and opaque
+          native files into the Library. Your SD is left unchanged.
+        </p>
+        <div className="dialog-actions">
+          <button
+            className={review ? "secondary" : "primary"}
+            disabled={busy}
+            onClick={() => void choose()}
+          >
+            <FolderOpen size={14} />
+            Choose SD folder…
+          </button>
+          {busy && (
+            <span className="dialog-busy" role="status">
+              <LoaderCircle size={14} className="spin" />
+              Copying and preparing managed audio…
+            </span>
           )}
-          {retired.length > 0 && (
-            <div>
-              <strong>Recognized Samples in Trash</strong>
-              <p>
-                These identities are reused by the imported Layers. Restore to
-                make them available in Library searches.
+        </div>
+        {error && (
+          <p className="import-error" role="alert">
+            {error}
+          </p>
+        )}
+        {message && <p role="status">{message}</p>}
+        {review && (
+          <>
+            <section className="dialog-section" aria-label="Import summary">
+              <h3>Summary</h3>
+              <p role="status">
+                {review.audio.imported} new Sample(s), {review.audio.recognized}{" "}
+                recognized, {review.audio.failed} failed.
               </p>
-              <ul>
-                {retired.map((sample) => (
-                  <li key={sample.id}>
-                    {sample.name}{" "}
-                    <button
-                      disabled={busy}
-                      aria-label={`Restore Sample: ${sample.name}`}
-                      onClick={() => void restore(sample.id)}
-                    >
-                      Restore Sample
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <p>
-            {review.draft.kits.length} Kits reconstructed. All usable audio is
-            kept, including Samples with invalid assignments and excess Layers.
-          </p>
-          <NativeSummary
-            reading={imported?.native ?? null}
-            preserved={nativeFiles.length}
-          />
-          {nativeFiles.length > 0 && (
-            <details>
-              <summary>Preserved native files</summary>
-              <ul>
-                {nativeFiles.map((file) => (
-                  <li key={file.path}>{file.path}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {(imported?.issues.length ?? 0) > 0 && (
-            <div role="status">
-              <strong>Draft issues</strong>
-              <ul>
-                {imported?.issues.map((issue, i) => (
-                  <li key={i}>{issue}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {review.audio.failed > 0 && (
-            <div>
-              <strong>Individual failures</strong>
-              <ul>
-                {review.audio.results
-                  .filter((result) => result.error)
-                  .map((result, i) => (
-                    <li key={i}>
-                      {result.source}: {result.error}
+              <p>
+                {review.draft.kits.length} Kits reconstructed. All usable audio
+                is kept, including Samples with invalid assignments and excess
+                Layers.
+              </p>
+              {!imported?.copyComplete && (
+                <p role="status" className="dialog-warning">
+                  Partial Import: some source content could not be copied. Keep
+                  the source to retry individual failures; usable copied Samples
+                  remain available.
+                </p>
+              )}
+            </section>
+            {retired.length > 0 && (
+              <section
+                className="dialog-section"
+                aria-label="Recognized Samples in Trash"
+              >
+                <h3>Recognized Samples in Trash</h3>
+                <p>
+                  These identities are reused by the imported Layers. Restore to
+                  make them available in Library searches.
+                </p>
+                <ul className="dialog-rows">
+                  {retired.map((sample) => (
+                    <li key={sample.id}>
+                      <span>{sample.name}</span>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        aria-label={`Restore Sample: ${sample.name}`}
+                        onClick={() => void restore(sample.id)}
+                      >
+                        Restore Sample
+                      </button>
                     </li>
                   ))}
-              </ul>
-            </div>
-          )}
-          {review.status === "recognized" ? (
-            <>
-              <p>
-                This unchanged arrangement and native state already belong to{" "}
-                {review.candidates.find((p) => p.id === review.recognizedPatch)
-                  ?.name ?? "an existing Patch"}
-                .
-              </p>
-              <button
-                disabled={busy}
-                onClick={() => void finish({ type: "reuse" })}
-              >
-                Open existing Patch
-              </button>
-            </>
-          ) : (
-            <fieldset disabled={busy}>
-              <p>
-                {review.status === "changed"
-                  ? "This arrangement or native state differs from previous Imports. Choose where to keep this draft."
-                  : "Choose a new Patch or explicitly update an existing Patch."}
-              </p>
-              <label>
-                New Patch name
-                <input value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-              <button
-                disabled={!name.trim()}
-                onClick={() => void finish({ type: "new", name })}
-              >
-                Create new Patch
-              </button>
-              {review.candidates.length > 0 && (
-                <>
-                  <label>
-                    Patch to update
-                    <select
-                      value={existing}
-                      onChange={(e) => setExisting(e.target.value)}
-                    >
-                      {review.candidates.map((patch) => (
-                        <option key={patch.id} value={patch.id}>
-                          {patch.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <p>
-                    Update replaces its arrangement and imported native content.
-                    Its name, tempo, pattern and mixer memory are retained.
-                  </p>
-                  <button
-                    disabled={!existing}
-                    onClick={() =>
-                      void finish({ type: "update", patch: existing })
-                    }
-                  >
-                    Update existing Patch
-                  </button>
-                </>
+                </ul>
+              </section>
+            )}
+            <section className="dialog-section" aria-label="Native settings">
+              <h3>Native settings</h3>
+              <NativeSummary
+                reading={imported?.native ?? null}
+                preserved={nativeFiles.length}
+              />
+              {nativeFiles.length > 0 && (
+                <details>
+                  <summary>Preserved native files</summary>
+                  <ul>
+                    {nativeFiles.map((file) => (
+                      <li key={file.path}>{file.path}</li>
+                    ))}
+                  </ul>
+                </details>
               )}
-            </fieldset>
-          )}
-          <p>
-            Copied Samples remain in the Library if you close this review. Draft
-            issues must be resolved before a future Build Patch.
-          </p>
-        </>
-      )}
-      <button disabled={busy} onClick={onClose}>
-        Close
-      </button>
+            </section>
+            {(imported?.issues.length ?? 0) > 0 && (
+              <section className="dialog-section warn" role="status">
+                <h3>Draft issues</h3>
+                <ul>
+                  {imported?.issues.map((issue, i) => (
+                    <li key={i}>{issue}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {review.audio.failed > 0 && (
+              <section
+                className="dialog-section warn"
+                aria-label="Individual failures"
+              >
+                <h3>Individual failures</h3>
+                <ul>
+                  {review.audio.results
+                    .filter((result) => result.error)
+                    .map((result, i) => (
+                      <li key={i}>
+                        {result.source}: {result.error}
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            )}
+            {review.status === "recognized" ? (
+              <section className="dialog-section" aria-label="Patch">
+                <h3>Patch</h3>
+                <p>
+                  This unchanged arrangement and native state already belong to{" "}
+                  {review.candidates.find(
+                    (p) => p.id === review.recognizedPatch,
+                  )?.name ?? "an existing Patch"}
+                  .
+                </p>
+                <div className="dialog-actions">
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => void finish({ type: "reuse" })}
+                  >
+                    Open existing Patch
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <fieldset
+                className="dialog-section dialog-choice"
+                disabled={busy}
+              >
+                <h3>Patch</h3>
+                <p>
+                  {review.status === "changed"
+                    ? "This arrangement or native state differs from previous Imports. Choose where to keep this draft."
+                    : "Choose a new Patch or explicitly update an existing Patch."}
+                </p>
+                <div className="dialog-inline">
+                  <label className="dialog-field">
+                    New Patch name
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="primary"
+                    disabled={!name.trim()}
+                    onClick={() => void finish({ type: "new", name })}
+                  >
+                    Create new Patch
+                  </button>
+                </div>
+                {review.candidates.length > 0 && (
+                  <>
+                    <div className="dialog-or">or</div>
+                    <div className="dialog-inline">
+                      <label className="dialog-field">
+                        Patch to update
+                        <select
+                          value={existing}
+                          onChange={(e) => setExisting(e.target.value)}
+                        >
+                          {review.candidates.map((patch) => (
+                            <option key={patch.id} value={patch.id}>
+                              {patch.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className="secondary"
+                        disabled={!existing}
+                        onClick={() =>
+                          void finish({ type: "update", patch: existing })
+                        }
+                      >
+                        Update existing Patch
+                      </button>
+                    </div>
+                    <p className="small">
+                      Update replaces its arrangement and imported native
+                      content. Its name, tempo, pattern and mixer memory are
+                      retained.
+                    </p>
+                  </>
+                )}
+              </fieldset>
+            )}
+            <p className="small">
+              Copied Samples remain in the Library if you close this review.
+              Draft issues must be resolved before a future Build Patch.
+            </p>
+          </>
+        )}
+        <div className="modal-buttons">
+          <button className="secondary" disabled={busy} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -314,7 +372,7 @@ function NativeSummary({
         Rample and STORE to keep them there.
       </p>
       {issues.length > 0 && (
-        <div role="status">
+        <div role="status" className="dialog-warning">
           <strong>Native settings shown with your default Layer mode</strong>
           <ul>
             {issues.map((issue, i) => (

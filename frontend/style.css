@@ -1165,6 +1165,177 @@ footer > span {
   color: #f3a394;
 }
 
+/* Dialogs with sections: Import Rample SD and Library backup. */
+.modal:has(.dialog) {
+  width: min(560px, calc(100vw - 60px));
+}
+.dialog > p:first-of-type {
+  margin-top: 14px;
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.dialog-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.modal p.dialog-busy {
+  display: flex;
+  margin-top: 16px;
+}
+.dialog-busy svg {
+  color: var(--accent);
+}
+.dialog-section {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff04;
+  min-width: 0;
+}
+.dialog-section h3 {
+  margin: 0 0 8px;
+  font: 600 10px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.modal .dialog-section p {
+  margin-top: 6px;
+}
+.modal .dialog-section h3 + p {
+  margin-top: 0;
+}
+.dialog-section ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #939ca7;
+}
+.dialog-section details {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #939ca7;
+}
+.dialog-section summary {
+  cursor: pointer;
+  color: #b9bfc8;
+}
+.dialog-section.warn {
+  border-color: #e2b86b40;
+  background: #e2b86b0a;
+}
+.dialog-section.warn h3,
+.dialog-warning strong {
+  color: #e2b86b;
+}
+.modal .dialog-warning,
+.dialog-warning {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d9c08f;
+}
+.dialog-warning ul {
+  color: #939ca7;
+}
+.modal .dialog-path {
+  font: 11px/1.6 var(--mono);
+  color: #b9bfc8;
+  overflow-wrap: anywhere;
+}
+ul.dialog-rows {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.dialog-rows li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #eeeff1;
+}
+.modal .dialog-rows li p {
+  margin: 0;
+}
+fieldset.dialog-choice {
+  margin-inline: 0;
+}
+fieldset.dialog-choice:disabled {
+  opacity: 0.6;
+}
+.dialog-inline {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.dialog-inline .primary,
+.dialog-inline .secondary {
+  flex: none;
+  height: 35px;
+}
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.dialog-field input,
+.dialog-field select {
+  height: 35px;
+  padding: 0 11px;
+  border: 1px solid #ffffff14;
+  border-radius: 6px;
+  background-color: var(--raised);
+  color: #eeeff1;
+  font-size: 12px;
+}
+.dialog-field select {
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2389929e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.dialog-field input:focus-visible,
+.dialog-field select:focus-visible {
+  outline-offset: 1px;
+}
+.dialog-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  font: 600 10px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dialog-or::before,
+.dialog-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.modal .dialog-choice p.small {
+  margin-top: 8px;
+}
+
 .modal:has(.sample-editor) {
   width: min(880px, calc(100vw - 60px));
 }
