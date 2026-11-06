@@ -8,27 +8,45 @@ import "../../../frontend/style.css";
 import { SequencerRow, TransportBar } from "../../../frontend/Sequencer";
 import { idleTransport, type Voice } from "../../../frontend/types";
 import { LAYER_SWAP, SCENES, files, voices, writes } from "../score";
+import { useLayout, type Layout } from "../layout";
 import { theme } from "../theme";
 import { ramp, useLevels, useStep, waveforms } from "../timing";
 import { Caption, Path } from "../ui";
 import { Glow } from "./Title";
 
-const ZOOM = 1.4;
 const allWrites = writes();
 const noop = async () => {};
 const { from, to } = SCENES.sequencer;
 /** The pointer opens the snare in the sample editor here. */
 export const EDIT_CLICK = to - 2;
 
-const CHIPS = { left: 120, top: 266, width: 1680, gap: 22, height: 96 };
-const chipX = (i: number) => CHIPS.left + i * ((CHIPS.width - 3 * CHIPS.gap) / 4 + CHIPS.gap);
-const CHIP_WIDTH = (CHIPS.width - 3 * CHIPS.gap) / 4;
+/** Voice cards in a row (16:9) or a 2×2 grid (9:16), and the sequencer panel below them. */
+function geometry({ vertical, margin, content, top }: Layout) {
+  const cols = vertical ? 2 : 4;
+  const gap = vertical ? 18 : 22;
+  const height = 96;
+  const chipTop = vertical ? top : 266;
+  const chipWidth = (content - (cols - 1) * gap) / cols;
+  const rows = 4 / cols;
+  return {
+    cols,
+    gap,
+    height,
+    top: chipTop,
+    chipWidth,
+    x: (i: number) => margin + (i % cols) * (chipWidth + gap),
+    y: (i: number) => chipTop + Math.floor(i / cols) * (height + gap),
+    panel: { left: margin, top: chipTop + rows * height + (rows - 1) * gap + 34, width: content, zoom: vertical ? 1.12 : 1.4, tall: vertical },
+  };
+}
 
 export function SequencerScene() {
   const step = useStep();
   const local = step - from;
   const playhead = local >= 0 && step < to ? Math.floor(local) % 16 : -1;
   const levels = useLevels();
+  const layout = useLayout();
+  const g = geometry(layout);
 
   const enter = ramp(step, from - 2, from, Easing.out(Easing.cubic));
   const exit = ramp(step, to - 2, to, Easing.in(Easing.cubic));
@@ -50,10 +68,10 @@ export function SequencerScene() {
   });
 
   const chipStops = [
-    { at: LAYER_SWAP - 3, x: chipX(0) + 200, y: CHIPS.top + 150 },
-    { at: LAYER_SWAP, x: chipX(0) + 120, y: CHIPS.top + 62, click: true },
-    { at: EDIT_CLICK - 3, x: chipX(1) + 200, y: CHIPS.top + 120 },
-    { at: EDIT_CLICK, x: chipX(1) + CHIP_WIDTH - 32, y: CHIPS.top + 26, click: true },
+    { at: LAYER_SWAP - 3, x: g.x(0) + 200, y: g.y(0) + 150 },
+    { at: LAYER_SWAP, x: g.x(0) + 120, y: g.y(0) + 62, click: true },
+    { at: EDIT_CLICK - 3, x: g.x(1) + 200, y: g.y(1) + 120 },
+    { at: EDIT_CLICK, x: g.x(1) + g.chipWidth - 32, y: g.y(1) + 26, click: true },
   ];
 
   return (
@@ -64,7 +82,7 @@ export function SequencerScene() {
         background: theme.bg,
         opacity: enter,
         transform: `translateY(${(1 - enter) * 50}px) scale(${1 + exit * 0.04})`,
-        transformOrigin: `${chipX(1) + CHIP_WIDTH / 2}px ${CHIPS.top}px`,
+        transformOrigin: `${g.x(1) + g.chipWidth / 2}px ${g.y(1)}px`,
         filter: exit > 0 ? `blur(${exit * 10}px)` : undefined,
       }}
     >
@@ -81,12 +99,12 @@ export function SequencerScene() {
           { at: from + 80, text: "Then fine-tune any sound." },
         ]}
       />
-      <div style={{ position: "absolute", left: CHIPS.left, width: CHIPS.width, top: CHIPS.top, display: "flex", gap: CHIPS.gap }}>
+      <div style={{ position: "absolute", left: layout.margin, width: layout.content, top: g.top, display: "grid", gridTemplateColumns: `repeat(${g.cols}, 1fr)`, gap: g.gap }}>
         {voices.map((voice, i) => (
           <VoiceChip key={i} index={i} step={step} level={levels.voice(i)} name={voice.name} file={voice.file} />
         ))}
       </div>
-      <Panel voices={sessionVoices} playhead={playhead} peak={levels.master} step={step} />
+      <Panel voices={sessionVoices} playhead={playhead} peak={levels.master} step={step} box={g.panel} />
       <Path stops={chipStops} step={step} />
     </div>
   );
@@ -105,7 +123,7 @@ function VoiceChip({ index, step, level, name, file }: { index: number; step: nu
     <div
       style={{
         flex: 1,
-        height: CHIPS.height,
+        height: 96,
         background: theme.panel,
         border: `1px solid ${theme.line}`,
         borderTop: `3px solid ${color}`,
@@ -167,7 +185,19 @@ function VoiceChip({ index, step, level, name, file }: { index: number; step: nu
   );
 }
 
-function Panel({ voices: list, playhead, peak, step }: { voices: Voice[]; playhead: number; peak: number; step: number }) {
+function Panel({
+  voices: list,
+  playhead,
+  peak,
+  step,
+  box,
+}: {
+  voices: Voice[];
+  playhead: number;
+  peak: number;
+  step: number;
+  box: { left: number; top: number; width: number; zoom: number; tall: boolean };
+}) {
   const grid = useRef<HTMLDivElement>(null);
   const [cells, setCells] = useState<{ x: number; y: number }[][] | null>(null);
   const [handle] = useState(() => delayRender("Measure sequencer steps"));
@@ -192,8 +222,10 @@ function Panel({ voices: list, playhead, peak, step }: { voices: Voice[]; playhe
   const transport = { ...idleTransport, running: playhead >= 0, step: playhead, peak, sampleRate: 44100 };
   return (
     // `zoom` also scales the offsets, so the panel is placed by an unzoomed parent.
-    <div style={{ position: "absolute", left: 120, top: 396, width: 1680 }}>
-      <div ref={grid} style={{ position: "relative", zoom: ZOOM }}>
+    <div style={{ position: "absolute", left: box.left, top: box.top, width: box.width }}>
+      {/* 9:16 has height to spare and little width: taller steps fill it. */}
+      {box.tall && <style>{".tall-steps .step { height: 62px; }"}</style>}
+      <div ref={grid} className={box.tall ? "tall-steps" : undefined} style={{ position: "relative", zoom: box.zoom }}>
         <section className="sequencer" aria-label="16-step sequencer" style={{ boxShadow: "0 40px 90px -40px #000" }}>
           <div className="sequencer-heading">
             <Grid2X2 size={15} />

@@ -1,4 +1,5 @@
 import { AbsoluteFill, Audio, staticFile, useCurrentFrame } from "remotion";
+import { LayoutContext, landscape, portrait } from "./layout";
 import { SCENES, frameToStep } from "./score";
 import { Build } from "./scenes/Build";
 import { Chaos } from "./scenes/Chaos";
@@ -17,8 +18,9 @@ function Scene({ from, to, lead = 0, children }: { from: number; to: number; lea
   return step >= from - lead && step < to ? <>{children}</> : null;
 }
 
-export function Video() {
+export function Video({ vertical = false }: { vertical?: boolean }) {
   return (
+    <LayoutContext.Provider value={vertical ? portrait : landscape}>
     <AbsoluteFill style={{ background: "#111316" }}>
       <Audio src={staticFile("soundtrack.wav")} />
       <Scene {...SCENES.chaos}>
@@ -43,5 +45,6 @@ export function Video() {
         <Outro />
       </Scene>
     </AbsoluteFill>
+    </LayoutContext.Provider>
   );
 }

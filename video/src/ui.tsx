@@ -1,6 +1,7 @@
 // Pieces shared by the scenes: the caption block, the mouse pointer and the scene fade.
 import type { CSSProperties, ReactNode } from "react";
 import { Easing } from "remotion";
+import { useLayout } from "./layout";
 import { theme } from "./theme";
 import { ramp } from "./timing";
 
@@ -11,9 +12,10 @@ export interface Line {
 
 /** Eyebrow plus a headline that changes at each line's step. */
 export function Caption({ eyebrow, lines, step, color = theme.accent }: { eyebrow: string; lines: Line[]; step: number; color?: string }) {
+  const { vertical, margin } = useLayout();
   return (
-    <div style={{ position: "absolute", left: 120, top: 98, right: 120, height: 150 }}>
-      <div style={{ font: `600 17px ${theme.mono}`, letterSpacing: "0.14em", color }}>{eyebrow}</div>
+    <div style={{ position: "absolute", left: margin, top: vertical ? 210 : 98, right: margin, height: 150 }}>
+      <div style={{ font: `600 ${vertical ? 22 : 17}px ${theme.mono}`, letterSpacing: "0.14em", color }}>{eyebrow}</div>
       {lines.map((line, i) => {
         const next = lines[i + 1]?.at ?? 1e6;
         const t = ramp(step, line.at - 0.6, line.at + 1.2);
@@ -24,9 +26,9 @@ export function Caption({ eyebrow, lines, step, color = theme.accent }: { eyebro
             key={i}
             style={{
               position: "absolute",
-              top: 34,
-              whiteSpace: "nowrap",
-              font: `600 76px/1.1 ${theme.display}`,
+              top: vertical ? 44 : 34,
+              whiteSpace: vertical ? "normal" : "nowrap",
+              font: `600 ${vertical ? 86 : 76}px/1.08 ${theme.display}`,
               letterSpacing: "-0.03em",
               color: theme.text,
               opacity: t * (1 - out),

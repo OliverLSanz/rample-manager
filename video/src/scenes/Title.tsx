@@ -2,12 +2,14 @@
 import { AudioLines } from "lucide-react";
 import { Easing } from "remotion";
 import { SCENES } from "../score";
+import { useLayout } from "../layout";
 import { theme } from "../theme";
 import { ramp, useStep } from "../timing";
 import { Pads } from "./Pads";
 
 export function Title() {
   const step = useStep();
+  const { vertical } = useLayout();
   const { from, to } = SCENES.title;
   const local = step - from;
   const beat = Math.floor(local / 4);
@@ -29,15 +31,16 @@ export function Title() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          gap: 120,
+          flexDirection: vertical ? "column" : "row",
+          gap: vertical ? 90 : 120,
           opacity: 1 - exit,
           transform: `translateY(${-exit * 80}px)`,
         }}
       >
         <div style={{ transform: `scale(${0.6 + 0.4 * enter + hit * 0.015})` }}>
-          <Pads size={430} column={beat % 4} hit={hit} />
+          <Pads size={vertical ? 400 : 430} column={beat % 4} hit={hit} />
         </div>
-        <div style={{ width: 1000 }}>
+        <div style={{ width: vertical ? 900 : 1000 }}>
           <div
             style={{
               display: "flex",
@@ -75,7 +78,7 @@ export function Title() {
               <div
                 key={line}
                 style={{
-                  font: `600 92px/1.06 ${theme.display}`,
+                  font: `600 ${vertical ? 84 : 92}px/1.06 ${theme.display}`,
                   letterSpacing: "-0.03em",
                   opacity: t,
                   transform: `translateY(${(1 - t) * 30}px)`,

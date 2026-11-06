@@ -2,6 +2,7 @@
 // pulls it all back into one point, where the title lands.
 import { Easing } from "remotion";
 import { REWIND_STEPS, SCENES, chaosClicks, random } from "../score";
+import { useLayout } from "../layout";
 import { theme } from "../theme";
 import { ramp, useStep } from "../timing";
 
@@ -42,6 +43,7 @@ const ROW_HEIGHT = 44;
 
 export function Chaos() {
   const step = useStep();
+  const { vertical } = useLayout();
   const { from, to } = SCENES.chaos;
   const rewindStart = to - REWIND_STEPS;
   // Scroll forwards, then the rewind spins the wall backwards and faster.
@@ -121,12 +123,13 @@ export function Chaos() {
           filter: `blur(${textOut * 8}px)`,
         }}
       >
-        <h1 style={{ ...headline, opacity: line1, transform: `translateY(${(1 - line1) * 24}px)` }}>
+        <h1 style={{ ...headline, ...(vertical ? narrow : {}), opacity: line1, transform: `translateY(${(1 - line1) * 24}px)` }}>
           Thousands of samples.
         </h1>
         <h1
           style={{
             ...headline,
+            ...(vertical ? narrow : {}),
             opacity: line2,
             transform: `translateY(${(1 - line2) * 24}px)`,
             background: theme.gradient,
@@ -140,6 +143,8 @@ export function Chaos() {
     </div>
   );
 }
+
+const narrow: React.CSSProperties = { maxWidth: 900, textAlign: "center", fontSize: 112 };
 
 const headline: React.CSSProperties = {
   margin: 0,

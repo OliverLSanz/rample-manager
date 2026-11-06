@@ -3,15 +3,17 @@
 import { ArrowDown, FolderInput, Plus, Search, Volume2 } from "lucide-react";
 import { Easing } from "remotion";
 import { SCENES, auditionAt, auditions, type LibraryRow } from "../score";
+import { useLayout } from "../layout";
 import { theme } from "../theme";
 import { ramp, useLevels, useStep, waveforms } from "../timing";
 import { Caption, Path, fmt, panel, sceneStyle } from "../ui";
 import { Glow } from "./Title";
 
 const { from, to } = SCENES.library;
-const PANEL = { left: 120, top: 270, width: 1680, height: 750 };
 const HEADER = 84;
 const TAGS = 300;
+/** In 9:16 the tags column is hidden and the detail sits below a list this tall. */
+const LIST_HEIGHT = 560;
 const DETAIL = 470;
 const ROW = 60;
 const IMPORT_CLICK = from + 1;
@@ -62,15 +64,23 @@ export function Library() {
   const selected = auditions.findLastIndex((_, i) => step >= auditionAt(i) - 0.2);
   const current = auditions[Math.max(0, selected)];
   const level = levels.voice(4);
+  const { vertical: v, margin, content, top } = useLayout();
+  const PANEL = { left: margin, top, width: content, height: v ? 1000 : 750 };
+  const tagsWidth = v ? 0 : TAGS;
+  const detailBox = v
+    ? { left: 0, top: HEADER + LIST_HEIGHT, width: content, bottom: 0, borderTop: `1px solid ${theme.line}` }
+    : { right: 0, top: HEADER, width: DETAIL, bottom: 0, borderLeft: `1px solid ${theme.line}` };
 
-  const detailX = PANEL.left + PANEL.width - DETAIL;
+  const detailX = v ? PANEL.left : PANEL.left + PANEL.width - DETAIL;
+  const detailY = v ? PANEL.top + HEADER + LIST_HEIGHT : PANEL.top + HEADER;
+  const addY = v ? detailY + 264 : PANEL.top + 498;
   const stops = [
     { at: IMPORT_CLICK - 2, x: PANEL.left + PANEL.width - 300, y: PANEL.top + 160 },
     { at: IMPORT_CLICK, x: PANEL.left + PANEL.width - 110, y: PANEL.top + HEADER / 2, click: true },
-    { at: SEARCH_CLICK, x: PANEL.left + 760, y: PANEL.top + HEADER / 2, click: true },
-    { at: SEARCH_CLICK + 4, x: PANEL.left + 900, y: PANEL.top + 260 },
-    { at: ADD_CLICK - 3, x: detailX + 300, y: PANEL.top + 560 },
-    { at: ADD_CLICK, x: detailX + 250, y: PANEL.top + 498, click: true },
+    { at: SEARCH_CLICK, x: PANEL.left + (v ? 420 : 760), y: PANEL.top + HEADER / 2, click: true },
+    { at: SEARCH_CLICK + 4, x: PANEL.left + (v ? 600 : 900), y: PANEL.top + 260 },
+    { at: ADD_CLICK - 3, x: detailX + 300, y: addY + 62 },
+    { at: ADD_CLICK, x: detailX + 250, y: addY, click: true },
   ];
 
   return (
@@ -88,14 +98,14 @@ export function Library() {
       <div style={{ ...panel, position: "absolute", ...PANEL, overflow: "hidden" }}>
         {/* Header */}
         <div style={{ height: HEADER, display: "flex", alignItems: "center", gap: 22, padding: "0 26px", borderBottom: `1px solid ${theme.line}` }}>
-          <div style={{ width: TAGS - 48 }}>
+          <div style={{ width: v ? 190 : TAGS - 48 }}>
             <div style={{ font: `600 26px ${theme.display}`, color: theme.text }}>Samples</div>
             <div style={{ font: `500 14px ${theme.body}`, color: theme.muted }}>{imported} in the Library</div>
           </div>
           <div
             style={{
-              marginLeft: 120,
-              width: 420,
+              marginLeft: v ? 0 : 120,
+              width: v ? 380 : 420,
               height: 46,
               borderRadius: 10,
               background: theme.raised,
@@ -115,12 +125,12 @@ export function Library() {
             ) : null}
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 12 }}>
-            <Button label="Import audio files…" />
+            {!v && <Button label="Import audio files…" />}
             <Button label="Import folder…" pressed={Math.max(0, 1 - Math.abs(step - IMPORT_CLICK) / 0.6)} icon />
           </div>
         </div>
         {/* Tags */}
-        <div style={{ position: "absolute", left: 0, top: HEADER, width: TAGS, bottom: 0, padding: "18px 22px", borderRight: `1px solid ${theme.line}` }}>
+        <div style={{ display: v ? "none" : undefined, position: "absolute", left: 0, top: HEADER, width: TAGS, bottom: 0, padding: "18px 22px", borderRight: `1px solid ${theme.line}` }}>
           <TagRow label="All Samples" count={imported} active={filtered < 0.5} />
           <div style={{ font: `600 12px ${theme.mono}`, letterSpacing: "0.14em", color: theme.muted, margin: "22px 12px 10px" }}>TAGS</div>
           {tags.map(([label, count], i) => (
@@ -130,7 +140,7 @@ export function Library() {
           ))}
         </div>
         {/* List */}
-        <div style={{ position: "absolute", left: TAGS, top: HEADER, width: PANEL.width - TAGS - DETAIL, bottom: 0, padding: "14px 18px", overflow: "hidden" }}>
+        <div style={{ position: "absolute", left: tagsWidth, top: HEADER, width: PANEL.width - tagsWidth - (v ? 0 : DETAIL), height: v ? LIST_HEIGHT : undefined, bottom: v ? undefined : 0, padding: "14px 18px", overflow: "hidden" }}>
           {rows.map(({ row, before, after }, i) => {
             const appear = ramp(step, from + 1.5 + i * 0.55, from + 3.5 + i * 0.55);
             const y = after === null ? before * ROW : (before + (after - before) * filtered) * ROW;
@@ -170,15 +180,15 @@ export function Library() {
           })}
         </div>
         {/* Detail */}
-        <div style={{ position: "absolute", right: 0, top: HEADER, width: DETAIL, bottom: 0, padding: "26px 28px", borderLeft: `1px solid ${theme.line}`, opacity: ramp(step, FILTER.to - 1, FILTER.to + 1) }}>
+        <div style={{ position: "absolute", ...detailBox, padding: "26px 28px", opacity: ramp(step, FILTER.to - 1, FILTER.to + 1) }}>
           <div style={{ font: `600 28px ${theme.display}`, color: theme.text }}>{current.name}</div>
           <div style={{ font: `500 14px ${theme.mono}`, color: theme.muted, marginTop: 6 }}>WAV · {fmt(current.seconds, 2)} s · 44100 Hz · mono</div>
-          <Waveform peaks={waveforms[current.file!] ?? []} level={level} />
-          <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <Waveform peaks={waveforms[current.file!] ?? []} level={level} height={v ? 110 : 130} />
+          <div style={{ display: v ? "none" : "flex", gap: 10, marginTop: 18 }}>
             <Chip label="Rample mono" />
             <Chip label="Original" />
           </div>
-          <div style={{ marginTop: 26, padding: 18, borderRadius: 12, border: `1px solid ${theme.line}` }}>
+          <div style={{ display: v ? "none" : undefined, marginTop: 26, padding: 18, borderRadius: 12, border: `1px solid ${theme.line}` }}>
             <div style={{ font: `600 12px ${theme.mono}`, letterSpacing: "0.14em", color: theme.muted }}>ADD TO</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
               <div style={{ flex: 1, font: `500 17px ${theme.body}`, color: theme.text, background: theme.raised, borderRadius: 8, padding: "9px 14px" }}>Kit D0</div>
@@ -207,8 +217,7 @@ export function Library() {
         <div
           style={{
             position: "absolute",
-            left: TAGS + 18,
-            bottom: 22,
+            ...(v ? { right: 28, top: HEADER + LIST_HEIGHT + 26 } : { left: TAGS + 18, bottom: 22 }),
             display: "flex",
             alignItems: "center",
             gap: 12,

@@ -2,13 +2,13 @@
 import { Check, ShieldCheck } from "lucide-react";
 import { Easing } from "remotion";
 import { BUILD_APPLY, BUILD_DONE, SCENES } from "../score";
+import { useLayout } from "../layout";
 import { theme } from "../theme";
 import { ramp, useStep } from "../timing";
 import { Caption, Path, panel, sceneStyle } from "../ui";
 import { Glow } from "./Title";
 
 const { from, to } = SCENES.build;
-const PANEL = { left: 120, top: 270, width: 1060, height: 750 };
 const GREEN = theme.voices[1];
 const YELLOW = theme.voices[3];
 const BACKUP = { from: BUILD_APPLY + 1, to: BUILD_APPLY + 6 };
@@ -23,6 +23,12 @@ const folders = ["A0", "A1", "B0", "B1", "C0", "C1", "C2", "D0"];
 
 export function Build() {
   const step = useStep();
+  const { vertical, margin, content, top } = useLayout();
+  // 16:9: review on the left, card on the right. 9:16: review on top, a smaller card below.
+  const PANEL = { left: margin, top, width: vertical ? content : 1060, height: vertical ? 690 : 750 };
+  const card = vertical
+    ? { left: margin + 30, top: PANEL.top + PANEL.height + 36, zoom: 0.5, badgeBeside: true }
+    : { left: 1270, top: 300, zoom: 1, badgeBeside: false };
   const applyX = PANEL.left + 30 + 85;
   const applyY = PANEL.top + 556;
   const stops = [
@@ -109,7 +115,7 @@ export function Build() {
           )}
         </div>
       </div>
-      <SdCard step={step} write={write} done={done} doneIn={doneIn} backup={backup} />
+      <SdCard step={step} write={write} done={done} doneIn={doneIn} backup={backup} {...card} />
       <Path stops={stops} step={step} />
     </div>
   );
@@ -129,14 +135,35 @@ function ProgressRow({ label, progress, color, icon, dim }: { label: string; pro
   );
 }
 
-function SdCard({ step, write, done, doneIn, backup }: { step: number; write: number; done: boolean; doneIn: number; backup: number }) {
+function SdCard({
+  step,
+  write,
+  done,
+  doneIn,
+  backup,
+  left,
+  top,
+  zoom,
+  badgeBeside,
+}: {
+  step: number;
+  write: number;
+  done: boolean;
+  doneIn: number;
+  backup: number;
+  left: number;
+  top: number;
+  zoom: number;
+  badgeBeside: boolean;
+}) {
   const enter = ramp(step, from + 2, from + 6, Easing.out(Easing.back(1.4)));
   const writingNow = write > 0 && !done;
   const pulse = writingNow ? 0.5 + 0.5 * Math.sin(step * 3) : 0;
   return (
-    <div style={{ position: "absolute", left: 1270, top: 300, width: 470, opacity: enter, transform: `translateY(${(1 - enter) * 40}px) rotate(${(1 - enter) * 4}deg)` }}>
+    <div style={{ position: "absolute", left, top, width: 470 * zoom, opacity: enter, transform: `translateY(${(1 - enter) * 40}px) rotate(${(1 - enter) * 4}deg)` }}>
       <div
         style={{
+          zoom,
           position: "relative",
           height: 560,
           borderRadius: 26,
@@ -182,8 +209,7 @@ function SdCard({ step, write, done, doneIn, backup }: { step: number; write: nu
       <div
         style={{
           position: "absolute",
-          left: -40,
-          bottom: -26,
+          ...(badgeBeside ? { left: 470 * zoom + 36, top: 560 * zoom * 0.5 - 28, whiteSpace: "nowrap" as const } : { left: -40, bottom: -26 }),
           display: "flex",
           alignItems: "center",
           gap: 12,

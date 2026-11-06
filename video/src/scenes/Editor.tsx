@@ -3,13 +3,13 @@
 import { Check, SlidersHorizontal } from "lucide-react";
 import { Easing } from "remotion";
 import { SCENES, editAt, edits } from "../score";
+import { useLayout } from "../layout";
 import { theme } from "../theme";
 import { editorWaveforms, ramp, useLevels, useStep } from "../timing";
 import { Caption, Path, fmt, panel, sceneStyle } from "../ui";
 import { Glow } from "./Title";
 
 const { from, to } = SCENES.editor;
-const PANEL = { left: 120, top: 270, width: 1680, height: 750 };
 const GREEN = theme.voices[1];
 const SAVE_CLICK = to - 8;
 const WINDOW_SECONDS = 1.6;
@@ -34,6 +34,8 @@ export function Editor() {
   const levels = useLevels();
   const level = levels.voice(1);
   const enter = ramp(step, from - 2, from + 0.5, Easing.out(Easing.back(1.3)));
+  const { vertical, margin, content, top } = useLayout();
+  const PANEL = { left: margin, top, width: content, height: vertical ? 870 : 750 };
 
   const saveX = PANEL.left + PANEL.width - 377;
   const saveY = PANEL.top + PANEL.height - 44;
@@ -78,7 +80,7 @@ export function Editor() {
             <span style={{ font: `500 15px ${theme.mono}`, color: GREEN, marginLeft: 6 }}>Live preview</span>
           </div>
         </div>
-        <WaveformEditor step={step} level={level} />
+        <WaveformEditor step={step} level={level} height={vertical ? 310 : 190} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, padding: "0 30px" }}>
           {sections.map((title, i) => {
             const active = ramp(step, editAt(sectionEdit[i]) - 0.3, editAt(sectionEdit[i]) + 0.5) * (1 - ramp(step, editAt(sectionEdit[i]) + 3, editAt(sectionEdit[i]) + 4.5));
@@ -111,7 +113,7 @@ export function Editor() {
               Saved as a new Variant · Original kept
             </div>
           )}
-          <FooterButton label="Reset edits" />
+          {!vertical && <FooterButton label="Reset edits" />}
           <FooterButton label="Save as new" press={Math.max(0, 1 - Math.abs(step - SAVE_CLICK) / 0.6)} highlight={saved} />
           <div style={{ height: 50, padding: "0 22px", borderRadius: 10, display: "flex", alignItems: "center", background: theme.accent, color: "#121519", font: `700 17px ${theme.body}` }}>
             Overwrite shared Sample
@@ -148,7 +150,7 @@ function Words({ step }: { step: number }) {
   );
 }
 
-function WaveformEditor({ step, level }: { step: number; level: number }) {
+function WaveformEditor({ step, level, height }: { step: number; level: number; height: number }) {
   const stage = Math.min(edits.length, Math.max(0, Math.floor((step - from) / 4) + 1));
   const blend = stage === 0 ? 1 : ramp(step, editAt(stage - 1) - 0.2, editAt(stage - 1) + 1);
   const prev = editorWaveforms[Math.max(0, stage - 1)];
@@ -165,7 +167,7 @@ function WaveformEditor({ step, level }: { step: number; level: number }) {
       <div
         style={{
           position: "relative",
-          height: 190,
+          height,
           borderRadius: 12,
           background: "#141a1a",
           border: `1px solid ${trimActive > 0 ? GREEN : theme.line}`,
@@ -212,17 +214,18 @@ function outputSeconds(stage: number) {
 }
 
 function Slider({ step, label, unit, from: a, to: b, min, max, edit, digits }: (typeof sliders)[number] & { step: number }) {
+  const { vertical } = useLayout();
   const t = ramp(step, editAt(edit) - 0.3, editAt(edit) + 1.4, Easing.inOut(Easing.cubic));
   const value = a + (b - a) * t;
   const x = (value - min) / (max - min);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 18, height: 46 }}>
-      <div style={{ width: 170, font: `500 16px ${theme.body}`, color: theme.soft }}>{label}</div>
+      <div style={{ width: vertical ? 118 : 170, font: `500 ${vertical ? 14 : 16}px ${theme.body}`, color: theme.soft }}>{label}</div>
       <div style={{ flex: 1, position: "relative", height: 6, borderRadius: 3, background: "#2b3139" }}>
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${x * 100}%`, borderRadius: 3, background: t > 0 ? `${GREEN}aa` : "#3a414b" }} />
         <div style={{ position: "absolute", top: -7, left: `calc(${x * 100}% - 10px)`, width: 20, height: 20, borderRadius: 10, background: "#e8ebee", boxShadow: "0 2px 6px #0008" }} />
       </div>
-      <div style={{ width: 96, textAlign: "right", font: `500 17px ${theme.mono}`, color: t > 0 ? theme.text : theme.muted }}>
+      <div style={{ width: vertical ? 84 : 96, textAlign: "right", font: `500 17px ${theme.mono}`, color: t > 0 ? theme.text : theme.muted }}>
         {fmt(value, digits)} <span style={{ color: theme.muted, fontSize: 14 }}>{unit}</span>
       </div>
     </div>
