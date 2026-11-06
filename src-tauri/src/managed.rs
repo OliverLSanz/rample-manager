@@ -563,7 +563,10 @@ impl ManagedLibrary {
         }
         let sha256 = fingerprint(staged.path())?;
         Ok(StagedExport {
-            file: staged,
+            // Keep only the path: a Build stages every Layer before publishing,
+            // and one open handle per Layer exhausts the descriptor limit
+            // (256 on macOS) in large Patches.
+            file: staged.into_temp_path(),
             sha256,
             sample_id: id.to_owned(),
             revision_id: revision.id,
@@ -835,8 +838,9 @@ impl ManagedLibrary {
     }
 }
 /// Validated prepared audio awaiting publication, with its recognition provenance.
+/// The closed temporary file is removed when dropped unless persisted.
 pub(super) struct StagedExport {
-    pub(super) file: tempfile::NamedTempFile,
+    pub(super) file: tempfile::TempPath,
     pub(super) sha256: String,
     pub(super) sample_id: String,
     pub(super) revision_id: String,
@@ -1327,6 +1331,28 @@ mod tests {
         let reply = state.import_samples(vec![exported]).unwrap();
         assert_eq!((reply.imported, reply.recognized), (0, 1));
         assert_eq!(reply.results[0].sample.as_ref().unwrap().id, sample.id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_exports_hold_no_open_files_so_large_builds_stay_within_the_descriptor_limit() {
+        let (temp, state, _) = fixture();
+        let source = temp.path().join("source.wav");
+        wav::write_pcm16(&source, &[8192; 4410], 44100).unwrap();
+        let sample = state.import_samples(vec![source]).unwrap().samples[0].clone();
+        let staging = temp.path().join("staging");
+        std::fs::create_dir(&staging).unwrap();
+        let open = || std::fs::read_dir("/dev/fd").unwrap().count();
+        let library = state.managed.lock().unwrap();
+        let before = open();
+        let staged: Vec<_> = (0..64)
+            .map(|_| library.stage_export(&sample.id, &staging).unwrap())
+            .collect();
+        // Other tests run concurrently, so allow a few unrelated descriptors.
+        assert!(open() < before + 16, "staged exports keep files open");
+        assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 64);
+        drop(staged);
+        assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 0);
     }
 
     #[test]
