@@ -1,4 +1,4 @@
-# Rendered from the git-ignored Generated Samples by `npm run audio`.
+# Rendered from ../../sound-design (outside this repository) by `npm run audio`.
 public/soundtrack.wav
 src/generated/
 out/

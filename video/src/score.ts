@@ -24,8 +24,8 @@ export const stepToFrame = (step: number) => step * STEP_SECONDS * FPS;
 export const frameToStep = (frame: number) => frame / FPS / STEP_SECONDS;
 export const DURATION_IN_FRAMES = Math.ceil(stepToFrame(END_STEP));
 
-/** Sample paths are relative to this git-ignored folder at the repository root. */
-export const SAMPLES_FOLDER = "Generated Samples";
+/** Sample paths are relative to the sound-design folder next to this repository. */
+export const SAMPLES_FOLDER = "../sound-design";
 const D0 = "Breakdance/SD Kits/D0/";
 const C0 = "Industrial/SD Kits/C0/";
 
